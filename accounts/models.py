@@ -29,10 +29,12 @@ class User(AbstractUser):
     role = models.CharField(max_length=50, choices=Role.choices, default=Role.CUSTOMER)
     parent = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True, related_name='children')
     mobile_number = models.CharField(max_length=15, unique=True, null=True, blank=True)
+    alternate_mobile_number = models.CharField(max_length=15, null=True, blank=True)
     
     # Common Business & Address Fields
     business_name = models.CharField(max_length=255, null=True, blank=True)
     pan_number = models.CharField(max_length=10, null=True, blank=True)
+    aadhar_number = models.CharField(max_length=12, null=True, blank=True)
     gst_number = models.CharField(max_length=15, null=True, blank=True)
     state = models.CharField(max_length=100, null=True, blank=True)
     city = models.CharField(max_length=100, null=True, blank=True)

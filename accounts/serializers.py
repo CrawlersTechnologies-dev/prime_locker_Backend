@@ -183,6 +183,56 @@ class RetailerSerializer(SuperDistributorSerializer):
     """Retailer uses similar fields (Store Name -> business_name)"""
     pass
 
+class CustomerSerializer(serializers.ModelSerializer):
+    full_name = serializers.CharField(write_only=True, required=True)
+    password = serializers.CharField(write_only=True, required=True, style={'input_type': 'password'})
+
+    class Meta:
+        model = User
+        fields = [
+            'id', 'full_name', 'email', 'mobile_number', 'alternate_mobile_number',
+            'aadhar_number', 'address', 'city', 'state', 'pincode', 
+            'kyc_document', 'password', 'parent', 'role', 'is_active', 'date_joined'
+        ]
+        read_only_fields = ['id', 'date_joined', 'role', 'parent', 'is_active']
+        
+    def to_representation(self, instance):
+        representation = super().to_representation(instance)
+        
+        # Format parent to be nested
+        if instance.parent:
+            parent = instance.parent
+            parent_name = f"{parent.first_name} {parent.last_name}".strip()
+            if not parent_name:
+                parent_name = parent.username
+            
+            representation['parent'] = {
+                'id': parent.id,
+                'name': parent_name,
+                'role': parent.role,
+                'business_name': parent.business_name
+            }
+            
+        return representation
+
+    def create(self, validated_data):
+        password = validated_data.pop('password')
+        full_name = validated_data.pop('full_name')
+        
+        name_parts = full_name.split(' ', 1)
+        first_name = name_parts[0]
+        last_name = name_parts[1] if len(name_parts) > 1 else ''
+        
+        validated_data['username'] = validated_data.get('email')
+        
+        if 'is_active' not in self.initial_data:
+            validated_data['is_active'] = True
+
+        user = User(first_name=first_name, last_name=last_name, **validated_data)
+        user.set_password(password)
+        user.save()
+        return user
+
 class PasswordResetRequestSerializer(serializers.Serializer):
     # This can accept email, mobile number, or username
     username = serializers.CharField(required=True)

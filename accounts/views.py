@@ -10,6 +10,7 @@ from .serializers import (
     DistributorSerializer,
     SubDistributorSerializer,
     RetailerSerializer,
+    CustomerSerializer,
     PasswordResetRequestSerializer,
     PasswordResetConfirmSerializer
 )
@@ -140,6 +141,7 @@ class RetailerViewSet(BaseRoleViewSet):
 
 class CustomerViewSet(BaseRoleViewSet):
     target_role = 'CUSTOMER'
+    serializer_class = CustomerSerializer
 
 class PasswordResetRequestView(APIView):
     permission_classes = [permissions.AllowAny]
