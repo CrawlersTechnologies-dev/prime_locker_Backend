@@ -158,23 +158,73 @@ class CustomerEMIContractViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def lock(self, request, pk=None):
-        """Manual device lock button"""
+        """
+        Manual device lock button.
+        Accessible by all users EXCEPT Customers (Super Admin, Super Dist, Dist, Sub Dist, Retailer).
+        """
+        if request.user.role == 'CUSTOMER':
+            return Response(
+                {"detail": "Customers do not have permission to lock devices."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
         contract = self.get_object()
         contract.status = EMIContractStatus.LOCKED
         contract.save(update_fields=['status'])
+
+        from accounts.models import AuditLog
+        from accounts.views import get_client_ip
+        AuditLog.objects.create(
+            user=request.user,
+            action="MANUAL_LOCK_DEVICE",
+            ip_address=get_client_ip(request),
+            details={
+                "contract_id": contract.id,
+                "device_imei": contract.device_imei,
+                "locked_by": request.user.username,
+                "role": request.user.role
+            }
+        )
+
         return Response({
-            "message": f"Device {contract.device_imei} has been locked.",
+            "message": f"Device {contract.device_imei} has been locked manually by {request.user.role}.",
+            "device_imei": contract.device_imei,
             "status": contract.status
         })
 
     @action(detail=True, methods=['post'])
     def unlock(self, request, pk=None):
-        """Manual device unlock button"""
+        """
+        Manual device unlock button.
+        Accessible by all users EXCEPT Customers (Super Admin, Super Dist, Dist, Sub Dist, Retailer).
+        """
+        if request.user.role == 'CUSTOMER':
+            return Response(
+                {"detail": "Customers do not have permission to unlock devices."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
         contract = self.get_object()
         contract.status = EMIContractStatus.ACTIVE
         contract.save(update_fields=['status'])
+
+        from accounts.models import AuditLog
+        from accounts.views import get_client_ip
+        AuditLog.objects.create(
+            user=request.user,
+            action="MANUAL_UNLOCK_DEVICE",
+            ip_address=get_client_ip(request),
+            details={
+                "contract_id": contract.id,
+                "device_imei": contract.device_imei,
+                "unlocked_by": request.user.username,
+                "role": request.user.role
+            }
+        )
+
         return Response({
-            "message": f"Device {contract.device_imei} has been unlocked.",
+            "message": f"Device {contract.device_imei} has been unlocked manually by {request.user.role}.",
+            "device_imei": contract.device_imei,
             "status": contract.status
         })
 
