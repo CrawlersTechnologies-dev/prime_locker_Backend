@@ -49,6 +49,7 @@ class GenerateKeysSerializer(serializers.Serializer):
     quantity = serializers.IntegerField(min_value=1, max_value=10000, required=True)
 
 class TransferKeysSerializer(serializers.Serializer):
+    target_role = serializers.CharField(max_length=50, required=False, allow_blank=True)
     target_user_id = serializers.IntegerField(required=True)
     device_type = serializers.CharField(max_length=50, required=True)
     quantity = serializers.IntegerField(min_value=1, max_value=10000, required=True)

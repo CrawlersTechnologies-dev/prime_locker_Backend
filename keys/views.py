@@ -1,7 +1,7 @@
 import uuid
 import random
 import string
-from django.db import transaction
+from django.db import transaction, models
 from django.contrib.auth import get_user_model
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
@@ -17,8 +17,29 @@ from .serializers import (
 
 User = get_user_model()
 
+ROLE_RANK = {
+    'SUPER_ADMIN': 5,
+    'SUPER_DISTRIBUTOR': 4,
+    'DISTRIBUTOR': 3,
+    'SUB_DISTRIBUTOR': 2,
+    'RETAILER': 1,
+    'CUSTOMER': 0,
+}
+
 def generate_random_string(length=8):
     return ''.join(random.choices(string.ascii_uppercase + string.digits, k=length))
+
+def is_downstream_user(ancestor, target):
+    """Check if target user is in ancestor's hierarchy"""
+    curr = target.parent
+    visited = set()
+    while curr and curr.id not in visited:
+        if curr == ancestor:
+            return True
+        visited.add(curr.id)
+        curr = curr.parent
+    return False
+
 
 class KeyViewSet(viewsets.GenericViewSet, viewsets.mixins.ListModelMixin, viewsets.mixins.RetrieveModelMixin):
     permission_classes = [permissions.IsAuthenticated]
@@ -46,10 +67,8 @@ class KeyViewSet(viewsets.GenericViewSet, viewsets.mixins.ListModelMixin, viewse
             batch_id = uuid.uuid4()
             new_keys = []
             
-            # Use a transaction to ensure either all keys are generated or none
             with transaction.atomic():
                 for _ in range(quantity):
-                    # Ensure uniqueness
                     while True:
                         key_string = f"{prefix}{generate_random_string(8)}"
                         if not DeviceKey.objects.filter(key_string=key_string).exists():
@@ -66,7 +85,6 @@ class KeyViewSet(viewsets.GenericViewSet, viewsets.mixins.ListModelMixin, viewse
                     
                 DeviceKey.objects.bulk_create(new_keys)
                 
-                # Fetch created keys for transactions
                 created_keys = DeviceKey.objects.filter(batch_id=batch_id)
                 transactions = [
                     KeyTransaction(key=k, to_user=request.user, action=KeyAction.GENERATED)
@@ -93,11 +111,85 @@ class KeyViewSet(viewsets.GenericViewSet, viewsets.mixins.ListModelMixin, viewse
             
         return Response({"inventory": summary})
 
+    @action(detail=False, methods=['get'])
+    def recipients(self, request):
+        """
+        Step 1: Select Role -> GET /api/keys/recipients/ (returns allowed roles)
+        Step 2: Select User of that Role -> GET /api/keys/recipients/?role=RETAILER (returns users of that role)
+        """
+        user = request.user
+        sender_rank = ROLE_RANK.get(user.role, 0)
+
+        # Lower-tier roles that this user can allocate to
+        allowed_roles = [
+            role for role, rank in ROLE_RANK.items()
+            if rank < sender_rank and role != 'CUSTOMER'
+        ]
+
+        selected_role = request.query_params.get('role')
+        if not selected_role:
+            return Response({
+                "selectable_roles": allowed_roles
+            })
+
+        selected_role = selected_role.upper()
+        if selected_role not in allowed_roles:
+            return Response({
+                "detail": f"Invalid role '{selected_role}'. You can select from: {allowed_roles}"
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Get active users of this role
+        if user.role == 'SUPER_ADMIN':
+            users_qs = User.objects.filter(role=selected_role, is_active=True)
+        else:
+            # Users in their downstream network
+            def get_all_subordinates(parent_user):
+                subs = list(parent_user.children.all())
+                for s in subs:
+                    subs.extend(get_all_subordinates(s))
+                return subs
+
+            sub_ids = [u.id for u in get_all_subordinates(user)]
+            users_qs = User.objects.filter(id__in=sub_ids, role=selected_role, is_active=True)
+
+        device_type = request.query_params.get('device_type')
+
+        data = []
+        for u in users_qs:
+            keys_qs = DeviceKey.objects.filter(current_owner=u, status=KeyStatus.AVAILABLE)
+            if device_type:
+                keys_qs = keys_qs.filter(device_type=device_type)
+            keys_count = keys_qs.count()
+
+            name = f"{u.first_name} {u.last_name}".strip() or u.username
+            data.append({
+                "id": u.id,
+                "name": name,
+                "username": u.username,
+                "role": u.role,
+                "business_name": u.business_name,
+                "mobile_number": u.mobile_number,
+                "city": u.city,
+                "state": u.state,
+                "current_available_keys": keys_count
+            })
+
+        return Response({
+            "selected_role": selected_role,
+            "count": len(data),
+            "users": data
+        })
+
     @action(detail=False, methods=['post'])
     def allocate(self, request):
-        """Transfer keys down to a child node"""
+        """
+        Transfer keys down the hierarchy at any time.
+        Super-Admin can transfer directly to Super Distributors, Distributors, Sub-Distributors, or Retailers.
+        Super-Distributors can transfer directly to Sub-Distributors or Retailers in their network.
+        """
         serializer = TransferKeysSerializer(data=request.data)
         if serializer.is_valid():
+            target_role = serializer.validated_data.get('target_role')
             target_user_id = serializer.validated_data['target_user_id']
             device_type = serializer.validated_data['device_type']
             quantity = serializer.validated_data['quantity']
@@ -106,10 +198,28 @@ class KeyViewSet(viewsets.GenericViewSet, viewsets.mixins.ListModelMixin, viewse
             if not target_user:
                 return Response({"detail": "Target user not found."}, status=status.HTTP_404_NOT_FOUND)
                 
-            # Hierarchical check: Target must be a direct child (or we can allow any descendant)
-            # For strictness, let's allow allocating to direct children only.
-            if target_user.parent != request.user and request.user.role != 'SUPER_ADMIN':
-                return Response({"detail": "You can only allocate keys to your direct downstream users."}, status=status.HTTP_403_FORBIDDEN)
+            # If target_role was provided, validate matching role
+            if target_role and target_user.role != target_role.upper():
+                return Response({
+                    "detail": f"Target user {target_user.username} has role '{target_user.role}', but you selected '{target_role}'."
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Cannot transfer to self
+            if target_user == request.user:
+                return Response({"detail": "You cannot allocate keys to yourself. Please specify a recipient downstream user."}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Cannot transfer to Customers (they don't hold inventory)
+            if target_user.role == 'CUSTOMER':
+                return Response({"detail": "Keys cannot be allocated to Customers. Keys are activated when registering a device for a customer."}, status=status.HTTP_400_BAD_REQUEST)
+
+            sender_rank = ROLE_RANK.get(request.user.role, 0)
+            target_rank = ROLE_RANK.get(target_user.role, 0)
+
+            # Must transfer to a lower role tier
+            if sender_rank <= target_rank:
+                return Response({
+                    "detail": f"You can only allocate keys to lower-tier roles. Your role is {request.user.role}, but target is {target_user.role}."
+                }, status=status.HTTP_403_FORBIDDEN)
                 
             with transaction.atomic():
                 available_keys = DeviceKey.objects.filter(
@@ -119,14 +229,14 @@ class KeyViewSet(viewsets.GenericViewSet, viewsets.mixins.ListModelMixin, viewse
                 )[:quantity]
                 
                 if len(available_keys) < quantity:
-                    return Response({"detail": f"Insufficient {device_type} keys available."}, status=status.HTTP_400_BAD_REQUEST)
+                    return Response({
+                        "detail": f"Insufficient {device_type} keys available. You currently hold {len(available_keys)} available {device_type} keys."
+                    }, status=status.HTTP_400_BAD_REQUEST)
                 
                 key_ids = [k.id for k in available_keys]
                 
-                # Update ownership
                 DeviceKey.objects.filter(id__in=key_ids).update(current_owner=target_user)
                 
-                # Log transactions
                 transactions = [
                     KeyTransaction(
                         key_id=k_id, 
@@ -137,13 +247,33 @@ class KeyViewSet(viewsets.GenericViewSet, viewsets.mixins.ListModelMixin, viewse
                 ]
                 KeyTransaction.objects.bulk_create(transactions)
                 
-            return Response({"message": f"Successfully allocated {quantity} keys to {target_user.username}."})
+            target_name = f"{target_user.first_name} {target_user.last_name}".strip() or target_user.username
+            remaining_count = DeviceKey.objects.filter(
+                current_owner=request.user,
+                device_type=device_type,
+                status=KeyStatus.AVAILABLE
+            ).count()
+
+            return Response({
+                "message": f"Successfully allocated {quantity} {device_type} keys to {target_name} ({target_user.role}).",
+                "recipient": {
+                    "id": target_user.id,
+                    "name": target_name,
+                    "role": target_user.role,
+                    "business_name": target_user.business_name
+                },
+                "your_remaining_available_keys": remaining_count
+            })
             
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=False, methods=['post'])
     def reclaim(self, request):
-        """Reclaim unused keys from a child node"""
+        """
+        Reclaim unused keys from any lower-tier user in the network.
+        Super-Admin can reclaim from anyone.
+        Users with can_reclaim_keys=True can reclaim from lower-tier users.
+        """
         serializer = TransferKeysSerializer(data=request.data)
         if serializer.is_valid():
             target_user_id = serializer.validated_data['target_user_id']
@@ -154,11 +284,17 @@ class KeyViewSet(viewsets.GenericViewSet, viewsets.mixins.ListModelMixin, viewse
             if not target_user:
                 return Response({"detail": "Target user not found."}, status=status.HTTP_404_NOT_FOUND)
                 
-            # Hierarchical check
-            if target_user.parent != request.user and request.user.role != 'SUPER_ADMIN':
-                return Response({"detail": "You can only reclaim keys from your direct downstream users."}, status=status.HTTP_403_FORBIDDEN)
-                
-            # Check permissions
+            if target_user == request.user:
+                return Response({"detail": "You cannot reclaim keys from yourself."}, status=status.HTTP_400_BAD_REQUEST)
+
+            sender_rank = ROLE_RANK.get(request.user.role, 0)
+            target_rank = ROLE_RANK.get(target_user.role, 0)
+
+            if sender_rank <= target_rank:
+                return Response({
+                    "detail": f"You can only reclaim keys from lower-tier roles. Your role is {request.user.role}, target is {target_user.role}."
+                }, status=status.HTTP_403_FORBIDDEN)
+
             if not request.user.can_reclaim_keys and request.user.role != 'SUPER_ADMIN':
                 return Response({"detail": "You do not have permission to reclaim keys."}, status=status.HTTP_403_FORBIDDEN)
                 
@@ -170,14 +306,14 @@ class KeyViewSet(viewsets.GenericViewSet, viewsets.mixins.ListModelMixin, viewse
                 )[:quantity]
                 
                 if len(available_keys) < quantity:
-                    return Response({"detail": f"Target user does not have {quantity} available {device_type} keys to reclaim."}, status=status.HTTP_400_BAD_REQUEST)
+                    return Response({
+                        "detail": f"Target user {target_user.username} only has {len(available_keys)} available {device_type} keys to reclaim."
+                    }, status=status.HTTP_400_BAD_REQUEST)
                 
                 key_ids = [k.id for k in available_keys]
                 
-                # Reclaim ownership
                 DeviceKey.objects.filter(id__in=key_ids).update(current_owner=request.user)
                 
-                # Log transactions
                 transactions = [
                     KeyTransaction(
                         key_id=k_id, 
@@ -187,16 +323,29 @@ class KeyViewSet(viewsets.GenericViewSet, viewsets.mixins.ListModelMixin, viewse
                     ) for k_id in key_ids
                 ]
                 KeyTransaction.objects.bulk_create(transactions)
+
+            target_name = f"{target_user.first_name} {target_user.last_name}".strip() or target_user.username
+            your_total = DeviceKey.objects.filter(
+                current_owner=request.user,
+                device_type=device_type,
+                status=KeyStatus.AVAILABLE
+            ).count()
                 
-            return Response({"message": f"Successfully reclaimed {quantity} keys from {target_user.username}."})
+            return Response({
+                "message": f"Successfully reclaimed {quantity} {device_type} keys from {target_name} ({target_user.role}).",
+                "reclaimed_from": {
+                    "id": target_user.id,
+                    "name": target_name,
+                    "role": target_user.role
+                },
+                "your_total_available_keys": your_total
+            })
             
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=False, methods=['post'])
     def activate(self, request):
         """Retailer activates a key for a customer/device"""
-        # Only Retailers (and maybe SUPER_ADMIN) should activate?
-        # We can leave this available to whoever owns the key
         serializer = ActivateKeySerializer(data=request.data)
         if serializer.is_valid():
             key_string = serializer.validated_data['key_string']
@@ -208,7 +357,6 @@ class KeyViewSet(viewsets.GenericViewSet, viewsets.mixins.ListModelMixin, viewse
                 return Response({"detail": "Customer not found."}, status=status.HTTP_404_NOT_FOUND)
                 
             with transaction.atomic():
-                # Lock the key row
                 key = DeviceKey.objects.select_for_update().filter(key_string=key_string).first()
                 if not key:
                     return Response({"detail": "Invalid key."}, status=status.HTTP_404_NOT_FOUND)
@@ -244,14 +392,11 @@ class KeyRequestViewSet(viewsets.ModelViewSet):
     serializer_class = KeyRequestSerializer
 
     def get_queryset(self):
-        # A user sees requests they made OR requests made to them
-        from django.db import models
         return KeyRequest.objects.filter(
             models.Q(requester=self.request.user) | models.Q(parent=self.request.user)
         ).order_by('-created_at')
 
     def perform_create(self, serializer):
-        # The user making the request must have a parent
         if not self.request.user.parent:
             from rest_framework.exceptions import ValidationError
             raise ValidationError({"detail": "You do not have a parent assigned to request keys from."})
@@ -266,14 +411,12 @@ class KeyRequestViewSet(viewsets.ModelViewSet):
     def approve(self, request, pk=None):
         key_req = self.get_object()
         
-        # Only the parent can approve
         if key_req.parent != request.user:
             return Response({"detail": "You are not authorized to approve this request."}, status=status.HTTP_403_FORBIDDEN)
             
         if key_req.status != KeyRequestStatus.PENDING:
             return Response({"detail": f"Request is already {key_req.status}."}, status=status.HTTP_400_BAD_REQUEST)
             
-        # Check if parent has enough keys
         with transaction.atomic():
             available_keys = DeviceKey.objects.filter(
                 current_owner=request.user,
@@ -287,7 +430,6 @@ class KeyRequestViewSet(viewsets.ModelViewSet):
             key_ids = [k.id for k in available_keys]
             DeviceKey.objects.filter(id__in=key_ids).update(current_owner=key_req.requester)
             
-            # Log transactions
             transactions = [
                 KeyTransaction(
                     key_id=k_id, 
@@ -298,7 +440,6 @@ class KeyRequestViewSet(viewsets.ModelViewSet):
             ]
             KeyTransaction.objects.bulk_create(transactions)
             
-            # Update request status
             key_req.status = KeyRequestStatus.APPROVED
             key_req.save()
             
