@@ -41,6 +41,15 @@ A high-performance Django REST Framework (DRF) backend engineered for Mobile Dev
 *   Role-aware visibility: Retailers only see Retailer-targeted or `ALL` offers; Distributors only see Distributor offers.
 *   Automated validity windows (`valid_from`, `valid_to`) and instant pause/resume toggles.
 
+### 6. Analytics & Reports Suite (with CSV/Excel Export)
+*   **Collections Summary:** Amount due vs. collected, filterable by date range, retailer, and payment mode.
+*   **Overdue Ageing:** Overdue EMIs bucketed into `1–7 days`, `8–15 days`, `16–30 days`, and `30+ days`.
+*   **Retailer Performance:** Per-store ranking with devices sold, collection rate %, and overdue counts.
+*   **Payments by Mode:** Revenue breakdown across `UPI`, `CASH`, `CARD`, and `ONLINE_GATEWAY`.
+*   **Locks & Unlocks Audit:** Complete device lock and unlock status log with auto-lock and grace period tracking.
+*   **Customer KYC:** Identifies customers with missing Aadhar numbers, missing alternate phones, or unverified documents.
+*   **One-Click Spreadsheet Download:** Adding `?export=csv` to any report URL instantly streams an Excel-formatted `.csv` file!
+
 ---
 
 ## 🛠️ Tech Stack
@@ -157,3 +166,13 @@ python manage.py runserver
 | `PATCH`/`PUT`| `/api/offers/{id}/` | *(Super Admin)* Edit offer details |
 | `DELETE` | `/api/offers/{id}/` | *(Super Admin)* Remove offer |
 | `POST` | `/api/offers/{id}/toggle-status/` | *(Super Admin)* Quick pause / resume offer |
+
+### 📊 Reports & Analytics (Supports `?export=csv`)
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `GET` | `/api/reports/collections-summary/` | Total due vs collected, with breakdown by retailer & payment mode |
+| `GET` | `/api/reports/overdue-ageing/` | Overdue amounts bucketed into 1-7, 8-15, 16-30, and 30+ days |
+| `GET` | `/api/reports/retailer-performance/` | Per-store ranking: devices sold, collection rate %, overdue counts |
+| `GET` | `/api/reports/payments-by-mode/` | Revenue breakdown across UPI, Cash, Card, Gateway with percentage share |
+| `GET` | `/api/reports/locks-unlocks/` | Complete remote device lock/unlock audit log |
+| `GET` | `/api/reports/customer-kyc/` | Customer KYC compliance (missing Aadhar, alternate phone, or doc) |
