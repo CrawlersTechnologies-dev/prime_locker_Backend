@@ -47,6 +47,7 @@ INSTALLED_APPS = [
     'keys',
     'emi',
     'offers',
+    'reports',
 ]
 
 MIDDLEWARE = [
