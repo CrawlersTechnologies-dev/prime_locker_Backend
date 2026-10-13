@@ -37,7 +37,7 @@ class PaymentMode(models.TextChoices):
 
 class EMIPlanTemplate(models.Model):
     """
-    Master EMI Plans configured by Super-Admin (Screen A-19).
+    Master EMI Plans configured by Super-Admin .
     Retailers choose from these templates when setting up an EMI.
     """
     name = models.CharField(max_length=150, unique=True)
@@ -76,7 +76,7 @@ class EMIPlanTemplate(models.Model):
 
 class CustomerEMIContract(models.Model):
     """
-    Represents an active EMI financing agreement between Customer and Retailer (Screen A-20).
+    Represents an active EMI financing agreement between Customer and Retailer .
     """
     customer = models.ForeignKey(User, on_delete=models.CASCADE, related_name='emi_contracts')
     retailer = models.ForeignKey(User, on_delete=models.CASCADE, related_name='retailer_emi_contracts')
@@ -145,7 +145,7 @@ def add_months(sourcedate, months):
 
 class EMIInstallment(models.Model):
     """
-    Individual monthly installment row for the schedule (Screen A-21 & A-22).
+    Individual monthly installment row for the schedule.
     """
     contract = models.ForeignKey(CustomerEMIContract, on_delete=models.CASCADE, related_name='installments')
     installment_number = models.PositiveIntegerField()
