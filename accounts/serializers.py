@@ -248,3 +248,33 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
             raise serializers.ValidationError({"password": "Passwords must match."})
         return data
 
+from .models import AuditLog
+
+class AuditLogSerializer(serializers.ModelSerializer):
+    user_details = serializers.SerializerMethodField(read_only=True)
+
+    class Meta:
+        model = AuditLog
+        fields = [
+            'id',
+            'user',
+            'user_details',
+            'action',
+            'ip_address',
+            'timestamp',
+            'details'
+        ]
+
+    def get_user_details(self, obj):
+        if obj.user:
+            u = obj.user
+            name = f"{u.first_name} {u.last_name}".strip() or u.username
+            return {
+                'id': u.id,
+                'name': name,
+                'username': u.username,
+                'role': u.role,
+                'business_name': u.business_name
+            }
+        return None
+

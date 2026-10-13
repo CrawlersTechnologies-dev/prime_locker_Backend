@@ -12,7 +12,8 @@ from .serializers import (
     RetailerSerializer,
     CustomerSerializer,
     PasswordResetRequestSerializer,
-    PasswordResetConfirmSerializer
+    PasswordResetConfirmSerializer,
+    AuditLogSerializer
 )
 from .models import AuditLog, PasswordResetOTP
 import random
@@ -203,3 +204,245 @@ class PasswordResetConfirmView(APIView):
             
             return Response({"error": "Invalid or expired OTP"}, status=status.HTTP_400_BAD_REQUEST)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+def get_all_downstream_users(user):
+    """Returns a flat list of all users in this user's downstream hierarchy."""
+    if user.role == 'SUPER_ADMIN':
+        return list(User.objects.exclude(id=user.id))
+    subordinates = list(user.children.all())
+    for sub in subordinates:
+        subordinates.extend(get_all_downstream_users(sub))
+    return subordinates
+
+
+class DashboardView(APIView):
+    """
+    Phase 5B: Main Executive & Role-Aware Overview Dashboard.
+    Returns Network KPIs, Device/EMI KPIs, Financial Collections, Key Inventory, and Recent Activity.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        from django.db.models import Sum, Count, Q
+        from django.utils import timezone
+        from decimal import Decimal
+        from keys.models import DeviceKey, KeyStatus, KeyRequest, KeyRequestStatus
+        from emi.models import CustomerEMIContract, EMIInstallment, InstallmentStatus, EMIContractStatus
+
+        user = request.user
+        today = timezone.localdate()
+
+        # 1. Network / Hierarchy scoping
+        if user.role == 'SUPER_ADMIN':
+            downline_qs = User.objects.all()
+            retailer_ids = list(User.objects.filter(role='RETAILER').values_list('id', flat=True))
+        elif user.role == 'RETAILER':
+            downline_qs = User.objects.filter(parent=user)
+            retailer_ids = [user.id]
+        else:
+            downline_users = get_all_downstream_users(user)
+            downline_ids = [u.id for u in downline_users]
+            downline_qs = User.objects.filter(id__in=downline_ids)
+            retailer_ids = [u.id for u in downline_users if u.role == 'RETAILER']
+
+        network_kpis = {
+            "super_distributors": downline_qs.filter(role='SUPER_DISTRIBUTOR').count(),
+            "distributors": downline_qs.filter(role='DISTRIBUTOR').count(),
+            "sub_distributors": downline_qs.filter(role='SUB_DISTRIBUTOR').count(),
+            "retailers": downline_qs.filter(role='RETAILER').count(),
+            "customers": downline_qs.filter(role='CUSTOMER').count(),
+            "active_users": downline_qs.filter(is_active=True).count(),
+            "inactive_users": downline_qs.filter(is_active=False).count(),
+        }
+
+        # 2. Device & EMI Status KPIs
+        contracts_qs = CustomerEMIContract.objects.filter(retailer_id__in=retailer_ids)
+        total_devices = contracts_qs.count()
+        active_devices = contracts_qs.filter(status=EMIContractStatus.ACTIVE).count()
+        locked_devices = contracts_qs.filter(status=EMIContractStatus.LOCKED).count()
+        completed_contracts = contracts_qs.filter(status=EMIContractStatus.COMPLETED).count()
+
+        device_and_emi_kpis = {
+            "total_registered_devices": total_devices,
+            "active_unlocked_devices": active_devices,
+            "locked_devices": locked_devices,
+            "completed_emi_contracts": completed_contracts,
+        }
+
+        # 3. Financial & Collection KPIs
+        installments_qs = EMIInstallment.objects.filter(contract__retailer_id__in=retailer_ids)
+
+        # Auto-mark overdue installments where due_date < today
+        installments_qs.filter(
+            status__in=[InstallmentStatus.UPCOMING, InstallmentStatus.DUE],
+            due_date__lt=today
+        ).update(status=InstallmentStatus.OVERDUE)
+
+        total_financed = contracts_qs.aggregate(total=Sum('financed_amount'))['total'] or Decimal('0.00')
+        paid_qs = installments_qs.filter(status=InstallmentStatus.PAID)
+        total_collected = paid_qs.aggregate(total=Sum('paid_amount'))['total'] or Decimal('0.00')
+        today_collected = paid_qs.filter(collection_date__date=today).aggregate(total=Sum('paid_amount'))['total'] or Decimal('0.00')
+        month_collected = paid_qs.filter(
+            collection_date__year=today.year,
+            collection_date__month=today.month
+        ).aggregate(total=Sum('paid_amount'))['total'] or Decimal('0.00')
+
+        overdue_qs = installments_qs.filter(status=InstallmentStatus.OVERDUE)
+        total_overdue_amount = overdue_qs.aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+        overdue_count = overdue_qs.count()
+
+        financial_kpis = {
+            "total_financed_amount": total_financed,
+            "total_collected_amount": total_collected,
+            "total_pending_amount": max(total_financed - total_collected, Decimal('0.00')),
+            "today_collection_amount": today_collected,
+            "this_month_collection_amount": month_collected,
+            "total_overdue_amount": total_overdue_amount,
+            "overdue_installments_count": overdue_count,
+        }
+
+        # 4. Key Inventory KPIs (Owned by current user)
+        owned_keys = DeviceKey.objects.filter(current_owner=user)
+        available_keys = owned_keys.filter(status=KeyStatus.AVAILABLE).count()
+        activated_keys = owned_keys.filter(status=KeyStatus.ACTIVATED).count()
+        revoked_keys = owned_keys.filter(status=KeyStatus.REVOKED).count()
+
+        by_type = list(
+            owned_keys.values('device_type', 'status')
+            .annotate(count=Count('id'))
+            .order_by('device_type', 'status')
+        )
+        pending_requests = KeyRequest.objects.filter(parent=user, status=KeyRequestStatus.PENDING).count()
+
+        key_inventory_kpis = {
+            "available_keys": available_keys,
+            "activated_keys": activated_keys,
+            "revoked_keys": revoked_keys,
+            "pending_key_requests_received": pending_requests,
+            "by_device_type": by_type
+        }
+
+        # 5. Recent Payments (Latest 5)
+        recent_payments_qs = paid_qs.select_related('contract__customer', 'contract__retailer').order_by('-collection_date')[:5]
+        recent_payments = []
+        for p in recent_payments_qs:
+            c = p.contract.customer
+            r = p.contract.retailer
+            c_name = f"{c.first_name} {c.last_name}".strip() or c.username
+            r_store = r.business_name or f"{r.first_name} {r.last_name}".strip() or r.username
+            recent_payments.append({
+                "installment_id": p.id,
+                "contract_id": p.contract_id,
+                "customer_name": c_name,
+                "store_name": r_store,
+                "amount": p.paid_amount,
+                "payment_mode": p.payment_mode,
+                "collection_date": p.collection_date
+            })
+
+        # 6. Recent Audit Activity (Latest 10)
+        if user.role == 'SUPER_ADMIN':
+            recent_logs_qs = AuditLog.objects.select_related('user').order_by('-timestamp')[:10]
+        else:
+            allowed_user_ids = [user.id] + list(downline_qs.values_list('id', flat=True))
+            recent_logs_qs = AuditLog.objects.filter(user_id__in=allowed_user_ids).select_related('user').order_by('-timestamp')[:10]
+
+        recent_activity = AuditLogSerializer(recent_logs_qs, many=True).data
+
+        user_name = f"{user.first_name} {user.last_name}".strip() or user.username
+
+        return Response({
+            "user_profile": {
+                "id": user.id,
+                "name": user_name,
+                "username": user.username,
+                "role": user.role,
+                "business_name": user.business_name
+            },
+            "network_kpis": network_kpis,
+            "device_and_emi_kpis": device_and_emi_kpis,
+            "financial_kpis": financial_kpis,
+            "key_inventory_kpis": key_inventory_kpis,
+            "recent_payments": recent_payments,
+            "recent_activity": recent_activity
+        })
+
+
+class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    Phase 5B: Dedicated Audit Logs Viewer (Sidebar -> Audit Logs).
+    Supports pagination, filtering by action/role/user/date/search, and ?export=csv.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = AuditLogSerializer
+
+    def get_queryset(self):
+        from django.db.models import Q
+        user = self.request.user
+
+        if user.role == 'SUPER_ADMIN':
+            qs = AuditLog.objects.select_related('user').order_by('-timestamp')
+        else:
+            downline_users = get_all_downstream_users(user)
+            allowed_ids = [user.id] + [u.id for u in downline_users]
+            qs = AuditLog.objects.filter(user_id__in=allowed_ids).select_related('user').order_by('-timestamp')
+
+        # Filters
+        action_filter = self.request.query_params.get('action')
+        if action_filter:
+            qs = qs.filter(action__icontains=action_filter)
+
+        user_id = self.request.query_params.get('user_id')
+        if user_id:
+            qs = qs.filter(user_id=user_id)
+
+        role_filter = self.request.query_params.get('role')
+        if role_filter:
+            qs = qs.filter(user__role=role_filter.upper())
+
+        start_date = self.request.query_params.get('start_date')
+        if start_date:
+            qs = qs.filter(timestamp__date__gte=start_date)
+
+        end_date = self.request.query_params.get('end_date')
+        if end_date:
+            qs = qs.filter(timestamp__date__lte=end_date)
+
+        search = self.request.query_params.get('search')
+        if search:
+            qs = qs.filter(
+                Q(action__icontains=search) |
+                Q(user__username__icontains=search) |
+                Q(user__first_name__icontains=search) |
+                Q(user__business_name__icontains=search) |
+                Q(ip_address__icontains=search)
+            )
+
+        return qs
+
+    def list(self, request, *args, **kwargs):
+        if request.query_params.get('export') == 'csv':
+            from reports.utils import generate_csv_response
+            qs = self.filter_queryset(self.get_queryset())
+            headers = ["Log ID", "Timestamp", "User", "Role", "Business Name", "Action", "IP Address", "Details"]
+            rows = []
+            for log in qs[:5000]:
+                u = log.user
+                uname = (f"{u.first_name} {u.last_name}".strip() or u.username) if u else "System"
+                urole = u.role if u else "N/A"
+                ubiz = (u.business_name or "") if u else ""
+                rows.append([
+                    log.id,
+                    log.timestamp.strftime('%Y-%m-%d %H:%M:%S'),
+                    uname,
+                    urole,
+                    ubiz,
+                    log.action,
+                    log.ip_address or "",
+                    str(log.details or {})
+                ])
+            return generate_csv_response("audit_logs_report.csv", headers, rows)
+
+        return super().list(request, *args, **kwargs)
+
