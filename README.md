@@ -130,6 +130,8 @@ python manage.py runserver
 | `GET`/`POST` | `/api/sub-distributors/` | Manage Sub-Distributors |
 | `GET`/`POST` | `/api/retailers/` | Manage Retailers |
 | `GET`/`POST` | `/api/customers/` | Onboard and view Customers (with Aadhar, alt phone, KYC) |
+| `GET` | `/api/dashboard/` | Role-aware Main Overview Dashboard (Network, EMI, Collections, Keys, Recent Activity) |
+| `GET` | `/api/audit-logs/` | Paginated, filterable Security Audit Logs (`?action=`, `?role=`, `?search=`, `?export=csv`) |
 
 ### 🔑 Key Management
 | Method | Endpoint | Description |
