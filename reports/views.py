@@ -388,15 +388,15 @@ class CustomerKYCReportView(APIView):
         customer_rows = []
 
         for c in customers:
-            has_aadhar = bool(c.aadhar_number)
-            has_document = bool(c.kyc_document)
+            has_photo = bool(c.customer_photo)
+            has_signature = bool(c.customer_signature)
             has_alt_phone = bool(c.alternate_mobile_number)
 
-            is_complete = has_aadhar and has_document and has_alt_phone
+            is_complete = has_photo and has_signature and has_alt_phone
             if is_complete:
                 complete_kyc_count += 1
                 kyc_status = "COMPLETE"
-            elif not has_aadhar and not has_document:
+            elif not has_photo and not has_signature:
                 missing_kyc_count += 1
                 kyc_status = "MISSING"
             else:
@@ -411,8 +411,8 @@ class CustomerKYCReportView(APIView):
                 "customer_name": customer_name,
                 "primary_phone": c.mobile_number,
                 "alternate_phone": c.alternate_mobile_number or "Missing",
-                "aadhar_number": c.aadhar_number or "Missing",
-                "kyc_document_uploaded": has_document,
+                "customer_photo_uploaded": has_photo,
+                "customer_signature_uploaded": has_signature,
                 "registered_store": parent_store,
                 "kyc_status": kyc_status,
                 "date_joined": c.date_joined.strftime('%Y-%m-%d')
@@ -424,9 +424,18 @@ class CustomerKYCReportView(APIView):
             customer_rows = [r for r in customer_rows if r['kyc_status'] == status_filter.upper()]
 
         if request.query_params.get('export') == 'csv':
-            headers = ["Customer Name", "Primary Phone", "Alternate Phone", "Aadhar Number", "KYC Document Uploaded", "Store", "KYC Status", "Registered Date"]
+            headers = ["Customer Name", "Primary Phone", "Alternate Phone", "Photo Uploaded", "Signature Uploaded", "Store", "KYC Status", "Registered Date"]
             rows = [
-                [r['customer_name'], r['primary_phone'], r['alternate_phone'], r['aadhar_number'], "Yes" if r['kyc_document_uploaded'] else "No", r['registered_store'], r['kyc_status'], r['date_joined']]
+                [
+                    r['customer_name'], 
+                    r['primary_phone'], 
+                    r['alternate_phone'], 
+                    "Yes" if r['customer_photo_uploaded'] else "No",
+                    "Yes" if r['customer_signature_uploaded'] else "No",
+                    r['registered_store'], 
+                    r['kyc_status'], 
+                    r['date_joined']
+                ]
                 for r in customer_rows
             ]
             return generate_csv_response("customer_kyc_report.csv", headers, rows)
