@@ -48,6 +48,7 @@ INSTALLED_APPS = [
     'emi',
     'offers',
     'reports',
+    'devices',
 ]
 
 MIDDLEWARE = [
