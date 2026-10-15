@@ -90,6 +90,11 @@ class CustomerEMIContract(models.Model):
     device_brand = models.CharField(max_length=100, blank=True, null=True)
     device_model = models.CharField(max_length=100, blank=True, null=True)
     
+    # Loan Financier
+    loan_provider = models.CharField(max_length=50, default='NO_LOAN_CASH')
+    loan_provider_other = models.CharField(max_length=150, blank=True, null=True)
+    loan_account_number = models.CharField(max_length=100, blank=True, null=True)
+    
     # Financial breakdown
     total_amount = models.DecimalField(max_digits=12, decimal_places=2, help_text="Total device retail price")
     down_payment = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
