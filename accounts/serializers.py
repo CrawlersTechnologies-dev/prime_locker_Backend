@@ -191,8 +191,9 @@ class CustomerSerializer(serializers.ModelSerializer):
         model = User
         fields = [
             'id', 'full_name', 'email', 'mobile_number', 'alternate_mobile_number',
-            'aadhar_number', 'address', 'city', 'state', 'pincode', 
-            'kyc_document', 'password', 'parent', 'role', 'is_active', 'date_joined'
+            'address', 'city', 'state', 'pincode', 
+            'customer_photo', 'customer_signature',
+            'password', 'parent', 'role', 'is_active', 'date_joined'
         ]
         read_only_fields = ['id', 'date_joined', 'role', 'parent', 'is_active']
         

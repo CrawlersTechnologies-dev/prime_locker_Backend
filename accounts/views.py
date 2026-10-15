@@ -1,7 +1,9 @@
 from rest_framework import viewsets, permissions, status
+from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.views import TokenObtainPairView
+from django.db import transaction
 from django.contrib.auth import get_user_model
 from .serializers import (
     CustomTokenObtainPairSerializer, 
@@ -143,6 +145,255 @@ class RetailerViewSet(BaseRoleViewSet):
 class CustomerViewSet(BaseRoleViewSet):
     target_role = 'CUSTOMER'
     serializer_class = CustomerSerializer
+
+    @action(detail=False, methods=['get'], url_path='loan-providers')
+    def loan_providers(self, request):
+        """
+        Returns all Loan Providers / Financiers matching the mobile app dropdown.
+        """
+        from devices.models import LoanProvider
+        providers = [
+            {"code": code, "name": label}
+            for code, label in LoanProvider.choices
+        ]
+        return Response({"loan_providers": providers})
+
+    @action(detail=False, methods=['post'], url_path='enroll')
+    def enroll(self, request):
+        """
+        All-In-One Customer & Device Onboarding (Screen: Customer Device Details).
+        Saves Customer basic info, photo, signature, Device IMEI, Loan Provider, 
+        and optionally auto-activates key and generates EMI schedule.
+        """
+        data = request.data
+        user = request.user
+
+        # 1. Customer Details
+        full_name = data.get('full_name', '').strip()
+        mobile_number = data.get('mobile_number', '').strip()
+        if not full_name or not mobile_number:
+            return Response(
+                {"detail": "Fields 'full_name' and 'mobile_number' are required."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        name_parts = full_name.split(' ', 1)
+        first_name = name_parts[0]
+        last_name = name_parts[1] if len(name_parts) > 1 else ''
+
+        email = data.get('email', '').strip() or f"{mobile_number}@customer.primelocker.com"
+        password = data.get('password') or f"PL@{mobile_number[-4:]}"
+
+        # 2. Device & Loan Details
+        imei = data.get('imei', '').strip()
+        if not imei:
+            return Response(
+                {"detail": "Field 'imei' is required for device enrollment."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        loan_provider = data.get('loan_provider', 'NO_LOAN_CASH')
+        loan_provider_other = data.get('loan_provider_other', '')
+        loan_account_number = data.get('loan_account_number', '')
+
+        from devices.models import Device, DeviceCategory, OSType, DeviceScannerState, DeviceLockStatus
+        from devices.imei_lookup import lookup_imei
+        from keys.models import DeviceKey, KeyStatus, KeyAction, KeyTransaction
+
+        detected = lookup_imei(imei)
+        brand = data.get('brand') or detected.get('brand', 'Android Device')
+        model = data.get('model') or detected.get('model', f"Model {imei[:8]}")
+        device_category = data.get('device_category') or detected.get('device_category', DeviceCategory.MOBILE)
+        os_type = data.get('os_type') or detected.get('os_type', OSType.ANDROID)
+        device_state = data.get('device_state', DeviceScannerState.NEW)
+        device_name = data.get('device_name') or f"{brand} {model}".strip()
+
+        # Check existing IMEI
+        if Device.objects.filter(imei=imei).exists():
+            return Response(
+                {"detail": f"A device with IMEI {imei} is already registered in the system."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 3. Check Activation Key if provided
+        key_string = data.get('activation_key_string', '').strip()
+        key_obj = None
+        if key_string:
+            key_obj = DeviceKey.objects.filter(key_string=key_string).first()
+            if not key_obj:
+                return Response({"detail": f"Activation key '{key_string}' not found."}, status=status.HTTP_404_NOT_FOUND)
+            if key_obj.status != KeyStatus.AVAILABLE:
+                return Response({"detail": f"Activation key '{key_string}' is already {key_obj.status}."}, status=status.HTTP_400_BAD_REQUEST)
+            if user.role != 'SUPER_ADMIN' and key_obj.current_owner != user:
+                return Response({"detail": "You do not own this activation key."}, status=status.HTTP_403_FORBIDDEN)
+
+        with transaction.atomic():
+            # Check/Create Customer
+            customer = User.objects.filter(mobile_number=mobile_number).first()
+            if not customer:
+                customer = User.objects.create(
+                    username=email,
+                    email=email,
+                    first_name=first_name,
+                    last_name=last_name,
+                    mobile_number=mobile_number,
+                    alternate_mobile_number=data.get('alternate_mobile_number', ''),
+                    address=data.get('address', ''),
+                    city=data.get('city', ''),
+                    state=data.get('state', ''),
+                    pincode=data.get('pincode', ''),
+                    role='CUSTOMER',
+                    parent=user,
+                    is_active=True
+                )
+                customer.set_password(password)
+
+            # Handle files (photo, signature)
+            if 'customer_photo' in request.FILES:
+                customer.customer_photo = request.FILES['customer_photo']
+            if 'customer_signature' in request.FILES:
+                customer.customer_signature = request.FILES['customer_signature']
+            customer.save()
+
+            # Create Device
+            device = Device.objects.create(
+                customer=customer,
+                retailer=user,
+                device_category=device_category,
+                os_type=os_type,
+                device_state=device_state,
+                imei=imei,
+                secondary_imei=data.get('secondary_imei', ''),
+                brand=brand,
+                model=model,
+                device_name=device_name,
+                loan_provider=loan_provider,
+                loan_provider_other=loan_provider_other,
+                loan_account_number=loan_account_number,
+                activation_key=key_obj,
+                status=DeviceLockStatus.ACTIVE
+            )
+
+            # Activate Key if present
+            if key_obj:
+                from django.utils import timezone
+                key_obj.status = KeyStatus.ACTIVATED
+                key_obj.activated_on_device_id = imei
+                key_obj.activated_for_customer = customer
+                key_obj.activated_at = timezone.now()
+                key_obj.save()
+
+                KeyTransaction.objects.create(
+                    key=key_obj,
+                    from_user=user,
+                    to_user=customer,
+                    action=KeyAction.ACTIVATED
+                )
+
+            # Create EMI contract if financial details provided
+            emi_contract_data = None
+            total_amount = data.get('total_amount')
+            if total_amount:
+                from decimal import Decimal
+                from emi.models import CustomerEMIContract, EMIInstallment, EMIContractStatus, InstallmentStatus, add_months
+                from django.utils import timezone
+                tot = Decimal(str(total_amount))
+                down = Decimal(str(data.get('down_payment', 0.00)))
+                proc_fee = Decimal(str(data.get('processing_fee', 0.00)))
+                tenure = int(data.get('tenure_months', 12))
+                financed = tot - down + proc_fee
+                monthly_emi = round(financed / Decimal(tenure), 2)
+                first_date_str = data.get('first_emi_date')
+                first_date = timezone.datetime.strptime(first_date_str, '%Y-%m-%d').date() if first_date_str else timezone.localdate()
+
+                emi_contract = CustomerEMIContract.objects.create(
+                    customer=customer,
+                    retailer=user,
+                    device_imei=imei,
+                    device_name=device_name,
+                    device_type=device_category,
+                    device_state=device_state,
+                    device_brand=brand,
+                    device_model=model,
+                    loan_provider=loan_provider,
+                    loan_provider_other=loan_provider_other,
+                    loan_account_number=loan_account_number,
+                    total_amount=tot,
+                    down_payment=down,
+                    processing_fee=proc_fee,
+                    financed_amount=financed,
+                    tenure_months=tenure,
+                    monthly_emi_amount=monthly_emi,
+                    first_emi_date=first_date,
+                    status=EMIContractStatus.ACTIVE
+                )
+
+                installments = [
+                    EMIInstallment(
+                        contract=emi_contract,
+                        installment_number=i,
+                        due_date=add_months(first_date, i - 1),
+                        amount=monthly_emi,
+                        status=InstallmentStatus.UPCOMING
+                    ) for i in range(1, tenure + 1)
+                ]
+                EMIInstallment.objects.bulk_create(installments)
+                device.emi_contract = emi_contract
+                device.save(update_fields=['emi_contract'])
+
+                emi_contract_data = {
+                    "id": emi_contract.id,
+                    "total_amount": tot,
+                    "down_payment": down,
+                    "financed_amount": financed,
+                    "monthly_emi_amount": monthly_emi,
+                    "tenure_months": tenure,
+                    "installments_generated": tenure
+                }
+
+            AuditLog.objects.create(
+                user=user,
+                action="ENROLLED_CUSTOMER_DEVICE",
+                ip_address=get_client_ip(request),
+                details={
+                    "customer_id": customer.id,
+                    "device_id": device.id,
+                    "imei": device.imei,
+                    "loan_provider": loan_provider
+                }
+            )
+
+        photo_url = request.build_absolute_uri(customer.customer_photo.url) if customer.customer_photo else None
+        sig_url = request.build_absolute_uri(customer.customer_signature.url) if customer.customer_signature else None
+
+        return Response({
+            "message": "Customer and device successfully enrolled.",
+            "customer": {
+                "id": customer.id,
+                "name": f"{customer.first_name} {customer.last_name}".strip(),
+                "mobile_number": customer.mobile_number,
+                "alternate_mobile_number": customer.alternate_mobile_number,
+                "email": customer.email,
+                "customer_photo": photo_url,
+                "customer_signature": sig_url,
+            },
+            "device": {
+                "id": device.id,
+                "imei": device.imei,
+                "brand": device.brand,
+                "model": device.model,
+                "device_category": device.device_category,
+                "os_type": device.os_type,
+                "device_state": device.device_state,
+                "loan_provider": device.loan_provider,
+                "loan_provider_display": device.get_loan_provider_display(),
+                "loan_account_number": device.loan_account_number,
+                "status": device.status,
+                "offline_unlock_code": device.offline_unlock_code,
+                "activation_key": key_obj.key_string if key_obj else None
+            },
+            "emi_contract": emi_contract_data
+        }, status=status.HTTP_201_CREATED)
 
 class PasswordResetRequestView(APIView):
     permission_classes = [permissions.AllowAny]

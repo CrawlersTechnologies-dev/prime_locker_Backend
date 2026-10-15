@@ -34,7 +34,6 @@ class User(AbstractUser):
     # Common Business & Address Fields
     business_name = models.CharField(max_length=255, null=True, blank=True)
     pan_number = models.CharField(max_length=10, null=True, blank=True)
-    aadhar_number = models.CharField(max_length=12, null=True, blank=True)
     gst_number = models.CharField(max_length=15, null=True, blank=True)
     state = models.CharField(max_length=100, null=True, blank=True)
     city = models.CharField(max_length=100, null=True, blank=True)
@@ -43,6 +42,8 @@ class User(AbstractUser):
     
     # Documents and Settings
     kyc_document = models.FileField(upload_to='kyc_documents/', null=True, blank=True)
+    customer_photo = models.FileField(upload_to='customer_photos/', null=True, blank=True)
+    customer_signature = models.FileField(upload_to='customer_signatures/', null=True, blank=True)
     remarks = models.TextField(null=True, blank=True)
     can_reclaim_keys = models.BooleanField(default=False)
     
