@@ -50,6 +50,18 @@ A high-performance Django REST Framework (DRF) backend engineered for Mobile Dev
 *   **Customer KYC:** Identifies customers with missing Aadhar numbers, missing alternate phones, or unverified documents.
 *   **One-Click Spreadsheet Download:** Adding `?export=csv` to any report URL instantly streams an Excel-formatted `.csv` file!
 
+### 7. Mobile & TV Device Management & MDM Control Suite
+*   **Device Registry:** Complete device lifecycle management for **Mobile Phones** (Android & iOS) and **Smart TVs**.
+*   **Two Scanners Support:** Supports both `NEW` purchased devices and `RUNNING` devices (customer personal phone held as collateral).
+*   **Auto IMEI Lookup:** Auto-identifies brand, model, OS type, and category from the 15-digit IMEI.
+*   **Remote MDM Commands:** Instant Lock/Unlock, Remote Reboot, Camera block, Social media block, Wallpaper control, Screen reminders, and Emergency 8-digit offline unlock codes.
+*   **Silent Heartbeat API:** Pings server periodically from Android/TV APK to report GPS location, battery level, and sync lock policies.
+
+### 8. App Versions & APK Management
+*   **Centralized APK Repository:** Super Admin uploads and manages Android Locker APKs, TV APKs, and Retailer Apps.
+*   **QR Provisioning & Direct Download:** Automatically produces direct download links and dynamic QR code generation URLs for instant installation on customer devices.
+*   **Mandatory Update Flags:** Enforces mandatory app updates on remote devices.
+
 ---
 
 ## 🛠️ Tech Stack
@@ -129,7 +141,9 @@ python manage.py runserver
 | `GET`/`POST` | `/api/distributors/` | Manage Distributors |
 | `GET`/`POST` | `/api/sub-distributors/` | Manage Sub-Distributors |
 | `GET`/`POST` | `/api/retailers/` | Manage Retailers |
-| `GET`/`POST` | `/api/customers/` | Onboard and view Customers (with Aadhar, alt phone, KYC) |
+| `GET`/`POST` | `/api/customers/` | Onboard and view Customers (with photo, signature, alt phone) |
+| `GET` | `/api/customers/loan-providers/` | Get list of loan providers/financiers for mobile app dropdown |
+| `POST` | `/api/customers/enroll/` | All-In-One Customer & Device Onboarding (Screen: Customer Device Details) with photo, signature, IMEI, and loan provider |
 | `GET` | `/api/dashboard/` | Role-aware Main Overview Dashboard (Network, EMI, Collections, Keys, Recent Activity) |
 | `GET` | `/api/audit-logs/` | Paginated, filterable Security Audit Logs (`?action=`, `?role=`, `?search=`, `?export=csv`) |
 
@@ -177,4 +191,27 @@ python manage.py runserver
 | `GET` | `/api/reports/retailer-performance/` | Per-store ranking: devices sold, collection rate %, overdue counts |
 | `GET` | `/api/reports/payments-by-mode/` | Revenue breakdown across UPI, Cash, Card, Gateway with percentage share |
 | `GET` | `/api/reports/locks-unlocks/` | Complete remote device lock/unlock audit log |
-| `GET` | `/api/reports/customer-kyc/` | Customer KYC compliance (missing Aadhar, alternate phone, or doc) |
+| `GET` | `/api/reports/customer-kyc/` | Customer KYC compliance (missing Photo, Signature, or Alternate phone) |
+
+### 📱 Mobile & TV Device Management & MDM Suite
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `GET`/`POST` | `/api/devices/` | Register device (`NEW` vs `RUNNING` collateral, Android/iOS/Smart TV) & filter list |
+| `GET` | `/api/devices/imei-lookup/?imei=...` | Auto-detect brand, model, OS & category from 15-digit IMEI |
+| `POST` | `/api/devices/{id}/lock/` | Remote lock device instantly |
+| `POST` | `/api/devices/{id}/unlock/` | Remote unlock device instantly |
+| `POST` | `/api/devices/{id}/reboot/` | Queue remote reboot command |
+| `POST` | `/api/devices/{id}/toggle-camera/` | Remotely enable/disable camera |
+| `POST` | `/api/devices/{id}/toggle-social-media/` | Remotely enable/disable WhatsApp, Instagram, Facebook |
+| `POST` | `/api/devices/{id}/push-reminder/` | Send custom reminder message to device screen |
+| `POST` | `/api/devices/{id}/generate-offline-code/` | Generate emergency 8-digit offline unlock code |
+| `GET` | `/api/devices/{id}/location-history/` | Live & historical GPS breadcrumbs |
+| `POST` | `/api/devices/{id}/attach-emi/` | Link EMI contract to device (now or later) |
+| `POST` | `/api/devices/ping/` | Silent Heartbeat API for Android Locker APK / TV app (syncs policies, battery, GPS) |
+
+### 📦 App Versions & APK Management
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `GET`/`POST` | `/api/app-versions/` | Upload and manage Android Locker / Smart TV APK releases |
+| `GET` | `/api/app-versions/latest/?app_type=ANDROID_LOCKER` | Get latest active APK release with download link & QR code |
+
