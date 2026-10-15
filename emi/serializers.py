@@ -220,6 +220,13 @@ class CustomerEMIContractSerializer(serializers.ModelSerializer):
                 )
             )
         EMIInstallment.objects.bulk_create(installments)
+
+        from devices.models import Device
+        device = Device.objects.filter(imei=contract.device_imei).first()
+        if device:
+            device.emi_contract = contract
+            device.save(update_fields=['emi_contract'])
+
         return contract
 
 

@@ -29,9 +29,9 @@ from .serializers import (
 )
 from .imei_lookup import lookup_imei
 from accounts.models import User, AuditLog
-from accounts.views import get_client_ip
-from accounts.views import get_all_downstream_users
-from emi.models import CustomerEMIContract, EMIContractStatus
+from accounts.views import get_client_ip, get_all_downstream_users
+from decimal import Decimal
+from emi.models import CustomerEMIContract, EMIContractStatus, EMIPlanTemplate, EMIInstallment, InstallmentStatus, add_months
 
 
 class IsSuperAdminOrReadOnly(permissions.BasePermission):
@@ -277,26 +277,153 @@ class DeviceViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'], url_path='attach-emi')
     def attach_emi(self, request, pk=None):
-        """Allows Retailer to link an EMI contract now or later"""
+        """
+        Step 2: Attach or Configure an EMI Plan for an enrolled Device.
+        Supports:
+        A) Creating a new EMI contract directly from a Master Plan Template:
+           - plan_template_id, total_amount, down_payment (optional), first_emi_date (optional)
+        B) Creating a new EMI contract with Custom Financial Terms:
+           - total_amount, down_payment, tenure_months, processing_fee (optional), first_emi_date (optional)
+        C) Linking an existing contract via emi_contract_id.
+        """
         denied = self._block_customer(request)
         if denied:
             return denied
-        contract_id = request.data.get('emi_contract_id')
-        if not contract_id:
-            return Response({"detail": "Field 'emi_contract_id' is required."}, status=status.HTTP_400_BAD_REQUEST)
-
-        contract = CustomerEMIContract.objects.filter(id=contract_id).first()
-        if not contract:
-            return Response({"detail": "EMI contract not found."}, status=status.HTTP_404_NOT_FOUND)
 
         device = self.get_object()
-        device.emi_contract = contract
-        device.save(update_fields=['emi_contract'])
+        user = request.user
+        data = request.data
+
+        # Option C: Linking existing contract
+        contract_id = data.get('emi_contract_id')
+        if contract_id:
+            contract = CustomerEMIContract.objects.filter(id=contract_id).first()
+            if not contract:
+                return Response({"detail": "EMI contract not found."}, status=status.HTTP_404_NOT_FOUND)
+            device.emi_contract = contract
+            device.save(update_fields=['emi_contract'])
+            return Response({
+                "message": f"EMI contract #{contract.id} successfully attached to device {device.imei}.",
+                "device_id": device.id,
+                "contract_id": contract.id,
+                "contract": {
+                    "id": contract.id,
+                    "device_imei": contract.device_imei,
+                    "total_amount": contract.total_amount,
+                    "financed_amount": contract.financed_amount,
+                    "monthly_emi_amount": contract.monthly_emi_amount,
+                    "tenure_months": contract.tenure_months,
+                    "status": contract.status
+                }
+            })
+
+        # Options A & B: Configure and create new EMI contract directly on this device
+        total_amount = data.get('total_amount')
+        if not total_amount:
+            return Response(
+                {"detail": "Either 'emi_contract_id' or 'total_amount' is required to attach an EMI plan."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            tot = Decimal(str(total_amount))
+            down = Decimal(str(data.get('down_payment', 0.00)))
+        except Exception:
+            return Response({"detail": "Invalid total_amount or down_payment format."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if down > tot:
+            return Response({"detail": "Down payment cannot exceed total device price."}, status=status.HTTP_400_BAD_REQUEST)
+
+        plan_template_id = data.get('plan_template_id')
+        plan_template = None
+        interest_pct = Decimal('0.00')
+        proc_fee = Decimal(str(data.get('processing_fee', 0.00)))
+        tenure = int(data.get('tenure_months', 12)) if data.get('tenure_months') else 12
+
+        if plan_template_id:
+            plan_template = EMIPlanTemplate.objects.filter(id=plan_template_id, is_active=True).first()
+            if not plan_template:
+                return Response({"detail": f"EMI Plan Template #{plan_template_id} not found or inactive."}, status=status.HTTP_404_NOT_FOUND)
+            tenure = int(data.get('tenure_months') or plan_template.tenure_months)
+            proc_fee = Decimal(str(data.get('processing_fee') or plan_template.processing_fee))
+            interest_pct = plan_template.interest_rate_percentage
+
+        principal = tot - down + proc_fee
+        interest_amount = (principal * interest_pct) / Decimal('100.00')
+        financed = round(principal + interest_amount, 2)
+        monthly_emi = round(financed / Decimal(tenure), 2)
+
+        first_date_str = data.get('first_emi_date')
+        first_date = timezone.datetime.strptime(first_date_str, '%Y-%m-%d').date() if first_date_str else timezone.localdate()
+
+        with transaction.atomic():
+            contract = CustomerEMIContract.objects.create(
+                customer=device.customer,
+                retailer=device.retailer or user,
+                plan_template=plan_template,
+                device_imei=device.imei,
+                device_name=device.device_name,
+                device_type=device.device_category,
+                device_state=device.device_state,
+                device_brand=device.brand,
+                device_model=device.model,
+                loan_provider=device.loan_provider,
+                loan_provider_other=device.loan_provider_other,
+                loan_account_number=device.loan_account_number,
+                total_amount=tot,
+                down_payment=down,
+                processing_fee=proc_fee,
+                financed_amount=financed,
+                tenure_months=tenure,
+                monthly_emi_amount=monthly_emi,
+                first_emi_date=first_date,
+                status=EMIContractStatus.ACTIVE
+            )
+
+            installments = [
+                EMIInstallment(
+                    contract=contract,
+                    installment_number=i,
+                    due_date=add_months(first_date, i - 1),
+                    amount=monthly_emi,
+                    status=InstallmentStatus.UPCOMING
+                ) for i in range(1, tenure + 1)
+            ]
+            EMIInstallment.objects.bulk_create(installments)
+            device.emi_contract = contract
+            device.save(update_fields=['emi_contract'])
+
+            AuditLog.objects.create(
+                user=user,
+                action="ATTACHED_EMI_PLAN",
+                ip_address=get_client_ip(request),
+                details={
+                    "device_id": device.id,
+                    "contract_id": contract.id,
+                    "plan_template_id": plan_template.id if plan_template else None,
+                    "financed_amount": str(financed)
+                }
+            )
+
         return Response({
-            "message": f"EMI contract #{contract.id} successfully attached to device {device.imei}.",
+            "message": f"EMI plan successfully configured and attached to device {device.imei}.",
             "device_id": device.id,
-            "contract_id": contract.id
-        })
+            "device_imei": device.imei,
+            "contract": {
+                "id": contract.id,
+                "plan_template_id": plan_template.id if plan_template else None,
+                "plan_template_name": plan_template.name if plan_template else "Custom Plan",
+                "total_amount": tot,
+                "down_payment": down,
+                "processing_fee": proc_fee,
+                "financed_amount": financed,
+                "tenure_months": tenure,
+                "monthly_emi_amount": monthly_emi,
+                "first_emi_date": first_date,
+                "installments_count": tenure,
+                "status": contract.status
+            }
+        }, status=status.HTTP_201_CREATED)
 
 
 class DeviceHeartbeatView(APIView):

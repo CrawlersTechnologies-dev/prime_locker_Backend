@@ -161,9 +161,9 @@ class CustomerViewSet(BaseRoleViewSet):
     @action(detail=False, methods=['post'], url_path='enroll')
     def enroll(self, request):
         """
-        All-In-One Customer & Device Onboarding (Screen: Customer Device Details).
+        Step 1: Customer & Device Onboarding (Screen: Customer Device Details).
         Saves Customer basic info, photo, signature, Device IMEI, Loan Provider, 
-        and optionally auto-activates key and generates EMI schedule.
+        and activates Token Key. (EMI is attached in Step 2 via /api/devices/{id}/attach-emi/).
         """
         data = request.data
         user = request.user
@@ -290,67 +290,6 @@ class CustomerViewSet(BaseRoleViewSet):
                     action=KeyAction.ACTIVATED
                 )
 
-            # Create EMI contract if financial details provided
-            emi_contract_data = None
-            total_amount = data.get('total_amount')
-            if total_amount:
-                from decimal import Decimal
-                from emi.models import CustomerEMIContract, EMIInstallment, EMIContractStatus, InstallmentStatus, add_months
-                from django.utils import timezone
-                tot = Decimal(str(total_amount))
-                down = Decimal(str(data.get('down_payment', 0.00)))
-                proc_fee = Decimal(str(data.get('processing_fee', 0.00)))
-                tenure = int(data.get('tenure_months', 12))
-                financed = tot - down + proc_fee
-                monthly_emi = round(financed / Decimal(tenure), 2)
-                first_date_str = data.get('first_emi_date')
-                first_date = timezone.datetime.strptime(first_date_str, '%Y-%m-%d').date() if first_date_str else timezone.localdate()
-
-                emi_contract = CustomerEMIContract.objects.create(
-                    customer=customer,
-                    retailer=user,
-                    device_imei=imei,
-                    device_name=device_name,
-                    device_type=device_category,
-                    device_state=device_state,
-                    device_brand=brand,
-                    device_model=model,
-                    loan_provider=loan_provider,
-                    loan_provider_other=loan_provider_other,
-                    loan_account_number=loan_account_number,
-                    total_amount=tot,
-                    down_payment=down,
-                    processing_fee=proc_fee,
-                    financed_amount=financed,
-                    tenure_months=tenure,
-                    monthly_emi_amount=monthly_emi,
-                    first_emi_date=first_date,
-                    status=EMIContractStatus.ACTIVE
-                )
-
-                installments = [
-                    EMIInstallment(
-                        contract=emi_contract,
-                        installment_number=i,
-                        due_date=add_months(first_date, i - 1),
-                        amount=monthly_emi,
-                        status=InstallmentStatus.UPCOMING
-                    ) for i in range(1, tenure + 1)
-                ]
-                EMIInstallment.objects.bulk_create(installments)
-                device.emi_contract = emi_contract
-                device.save(update_fields=['emi_contract'])
-
-                emi_contract_data = {
-                    "id": emi_contract.id,
-                    "total_amount": tot,
-                    "down_payment": down,
-                    "financed_amount": financed,
-                    "monthly_emi_amount": monthly_emi,
-                    "tenure_months": tenure,
-                    "installments_generated": tenure
-                }
-
             AuditLog.objects.create(
                 user=user,
                 action="ENROLLED_CUSTOMER_DEVICE",
@@ -367,7 +306,7 @@ class CustomerViewSet(BaseRoleViewSet):
         sig_url = request.build_absolute_uri(customer.customer_signature.url) if customer.customer_signature else None
 
         return Response({
-            "message": "Customer and device successfully enrolled.",
+            "message": "Customer and device successfully enrolled. You can now attach an EMI plan in the next step.",
             "customer": {
                 "id": customer.id,
                 "name": f"{customer.first_name} {customer.last_name}".strip(),
@@ -392,7 +331,11 @@ class CustomerViewSet(BaseRoleViewSet):
                 "offline_unlock_code": device.offline_unlock_code,
                 "activation_key": key_obj.key_string if key_obj else None
             },
-            "emi_contract": emi_contract_data
+            "next_step": {
+                "action": "ATTACH_EMI_PLAN",
+                "endpoint": f"/api/devices/{device.id}/attach-emi/",
+                "method": "POST"
+            }
         }, status=status.HTTP_201_CREATED)
 
 class PasswordResetRequestView(APIView):

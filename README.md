@@ -143,7 +143,7 @@ python manage.py runserver
 | `GET`/`POST` | `/api/retailers/` | Manage Retailers |
 | `GET`/`POST` | `/api/customers/` | Onboard and view Customers (with photo, signature, alt phone) |
 | `GET` | `/api/customers/loan-providers/` | Get list of loan providers/financiers for mobile app dropdown |
-| `POST` | `/api/customers/enroll/` | All-In-One Customer & Device Onboarding (Screen: Customer Device Details) with photo, signature, IMEI, and loan provider |
+| `POST` | `/api/customers/enroll/` | Step 1: Customer & Device Onboarding (Screen: Customer Device Details) with Photo, Signature, IMEI & Token Key |
 | `GET` | `/api/dashboard/` | Role-aware Main Overview Dashboard (Network, EMI, Collections, Keys, Recent Activity) |
 | `GET` | `/api/audit-logs/` | Paginated, filterable Security Audit Logs (`?action=`, `?role=`, `?search=`, `?export=csv`) |
 
@@ -206,7 +206,7 @@ python manage.py runserver
 | `POST` | `/api/devices/{id}/push-reminder/` | Send custom reminder message to device screen |
 | `POST` | `/api/devices/{id}/generate-offline-code/` | Generate emergency 8-digit offline unlock code |
 | `GET` | `/api/devices/{id}/location-history/` | Live & historical GPS breadcrumbs |
-| `POST` | `/api/devices/{id}/attach-emi/` | Link EMI contract to device (now or later) |
+| `POST` | `/api/devices/{id}/attach-emi/` | Step 2: Attach EMI Plan to device (via Master Plan Template, Custom Terms, or Existing Contract) |
 | `POST` | `/api/devices/ping/` | Silent Heartbeat API for Android Locker APK / TV app (syncs policies, battery, GPS) |
 
 ### 📦 App Versions & APK Management
