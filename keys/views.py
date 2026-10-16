@@ -270,9 +270,10 @@ class KeyViewSet(viewsets.GenericViewSet, viewsets.mixins.ListModelMixin, viewse
     @action(detail=False, methods=['post'])
     def reclaim(self, request):
         """
-        Reclaim unused keys from any lower-tier user in the network.
-        Super-Admin can reclaim from anyone.
-        Users with can_reclaim_keys=True can reclaim from lower-tier users.
+        Unilateral Reclaim: Higher authorities have full access to retrieve unactivated keys
+        from lower-tier users irrespective of reasons, and without requiring permission from the lower user.
+        - Super-Admin can reclaim keys from any user in the network.
+        - Super Distributors, Distributors, and Sub-Distributors can reclaim from their downline users.
         """
         serializer = TransferKeysSerializer(data=request.data)
         if serializer.is_valid():
@@ -295,8 +296,11 @@ class KeyViewSet(viewsets.GenericViewSet, viewsets.mixins.ListModelMixin, viewse
                     "detail": f"You can only reclaim keys from lower-tier roles. Your role is {request.user.role}, target is {target_user.role}."
                 }, status=status.HTTP_403_FORBIDDEN)
 
-            if not request.user.can_reclaim_keys and request.user.role != 'SUPER_ADMIN':
-                return Response({"detail": "You do not have permission to reclaim keys."}, status=status.HTTP_403_FORBIDDEN)
+            # Higher authorities can reclaim from their own downline; Super-Admin can reclaim from anyone
+            if request.user.role != 'SUPER_ADMIN' and not is_ancestor_of(request.user, target_user):
+                return Response({
+                    "detail": "You can only reclaim keys from downline users within your own hierarchy."
+                }, status=status.HTTP_403_FORBIDDEN)
                 
             with transaction.atomic():
                 available_keys = DeviceKey.objects.filter(
