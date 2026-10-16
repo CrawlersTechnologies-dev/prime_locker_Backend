@@ -156,7 +156,7 @@ python manage.py runserver
 | `GET` | `/api/keys/recipients/` | Step 1: Get selectable recipient roles |
 | `GET` | `/api/keys/recipients/?role=RETAILER` | Step 2: Get active users of selected role with key balances |
 | `POST` | `/api/keys/allocate/` | Transfer keys directly down the hierarchy (by `target_user_id` and `target_role`) |
-| `POST` | `/api/keys/reclaim/` | Reclaim unactivated keys from lower-tier nodes |
+| `POST` | `/api/keys/reclaim/` | Unilateral Key Recall: Higher authorities reclaim unactivated keys from downline nodes (irrespective of reason, no lower-user permission required) |
 | `POST` | `/api/keys/activate/` | Activate key against customer device IMEI |
 | `GET`/`POST` | `/api/key-requests/` | Bottom-up key requests (Retailer ➔ Parent) |
 | `POST` | `/api/key-requests/{id}/approve/` | Parent approves request & auto-transfers keys |
