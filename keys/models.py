@@ -53,7 +53,9 @@ class KeyRequestStatus(models.TextChoices):
 class KeyRequest(models.Model):
     requester = models.ForeignKey(User, on_delete=models.CASCADE, related_name='key_requests_made')
     parent = models.ForeignKey(User, on_delete=models.CASCADE, related_name='key_requests_received')
-    device_type = models.CharField(max_length=50)
+    device_type = models.CharField(max_length=50) # e.g., 'ANDROID', 'IOS', 'TV', 'MOBILE'
+    os_type = models.CharField(max_length=20, null=True, blank=True) # e.g., 'ANDROID', 'IOS'
+    notes = models.TextField(null=True, blank=True)
     quantity = models.PositiveIntegerField()
     status = models.CharField(max_length=20, choices=KeyRequestStatus.choices, default=KeyRequestStatus.PENDING)
     
@@ -61,4 +63,5 @@ class KeyRequest(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return f"{self.quantity} {self.device_type} keys requested by {self.requester.username}"
+        target = f"{self.device_type} ({self.os_type})" if self.os_type else self.device_type
+        return f"{self.quantity} {target} keys requested by {self.requester.username}"

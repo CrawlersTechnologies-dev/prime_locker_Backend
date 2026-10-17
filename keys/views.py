@@ -404,10 +404,21 @@ class KeyRequestViewSet(viewsets.ModelViewSet):
         if not self.request.user.parent:
             from rest_framework.exceptions import ValidationError
             raise ValidationError({"detail": "You do not have a parent assigned to request keys from."})
+        
+        device_type = serializer.validated_data.get('device_type', '').upper()
+        os_type = serializer.validated_data.get('os_type')
+        if not os_type:
+            if device_type in ['ANDROID', 'MOBILE_ANDROID']:
+                os_type = 'ANDROID'
+            elif device_type in ['IOS', 'IPHONE', 'MOBILE_IOS']:
+                os_type = 'IOS'
+            elif device_type in ['TV', 'SMART_TV']:
+                os_type = 'SMART_TV'
             
         serializer.save(
             requester=self.request.user,
             parent=self.request.user.parent,
+            os_type=os_type,
             status=KeyRequestStatus.PENDING
         )
 
@@ -422,14 +433,25 @@ class KeyRequestViewSet(viewsets.ModelViewSet):
             return Response({"detail": f"Request is already {key_req.status}."}, status=status.HTTP_400_BAD_REQUEST)
             
         with transaction.atomic():
-            available_keys = DeviceKey.objects.filter(
-                current_owner=request.user,
-                device_type=key_req.device_type,
-                status=KeyStatus.AVAILABLE
-            )[:key_req.quantity]
+            requested_target = (key_req.os_type or key_req.device_type or '').upper()
+
+            # Match based on requested platform and key prefix/device_type
+            keys_filter = models.Q(current_owner=request.user, status=KeyStatus.AVAILABLE)
+            if requested_target in ['IOS', 'IPHONE', 'MOBILE_IOS']:
+                keys_filter &= (models.Q(device_type__iexact='IOS') | models.Q(key_string__istartswith='IOS-'))
+            elif requested_target in ['ANDROID', 'MOBILE_ANDROID']:
+                keys_filter &= (models.Q(device_type__iexact='ANDROID') | models.Q(key_string__istartswith='AND-') | models.Q(device_type='MOBILE'))
+            elif requested_target in ['TV', 'SMART_TV']:
+                keys_filter &= (models.Q(device_type__iexact='TV') | models.Q(key_string__istartswith='TV-'))
+            else:
+                keys_filter &= models.Q(device_type__iexact=key_req.device_type)
+
+            available_keys = DeviceKey.objects.filter(keys_filter)[:key_req.quantity]
             
             if len(available_keys) < key_req.quantity:
-                return Response({"detail": f"You do not have enough {key_req.device_type} keys available to fulfill this request."}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({
+                    "detail": f"You do not have enough {requested_target} keys available to fulfill this request. Available: {len(available_keys)}, Requested: {key_req.quantity}."
+                }, status=status.HTTP_400_BAD_REQUEST)
                 
             key_ids = [k.id for k in available_keys]
             DeviceKey.objects.filter(id__in=key_ids).update(current_owner=key_req.requester)
@@ -447,7 +469,12 @@ class KeyRequestViewSet(viewsets.ModelViewSet):
             key_req.status = KeyRequestStatus.APPROVED
             key_req.save()
             
-        return Response({"message": f"Successfully approved {key_req.quantity} keys."})
+            transferred_key_strings = list(DeviceKey.objects.filter(id__in=key_ids).values_list('key_string', flat=True))
+
+        return Response({
+            "message": f"Successfully approved {key_req.quantity} {requested_target} keys.",
+            "transferred_keys": transferred_key_strings
+        })
 
     @action(detail=True, methods=['post'])
     def reject(self, request, pk=None):

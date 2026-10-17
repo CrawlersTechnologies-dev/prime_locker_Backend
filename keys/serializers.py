@@ -61,6 +61,7 @@ class ActivateKeySerializer(serializers.Serializer):
 
 class KeyRequestSerializer(serializers.ModelSerializer):
     requester_details = serializers.SerializerMethodField(read_only=True)
+    platform_display = serializers.SerializerMethodField(read_only=True)
     
     class Meta:
         model = KeyRequest
@@ -74,4 +75,17 @@ class KeyRequestSerializer(serializers.ModelSerializer):
             "role": obj.requester.role,
             "business_name": obj.requester.business_name
         }
+
+    def get_platform_display(self, obj):
+        target = (obj.os_type or obj.device_type or '').upper()
+        if target in ['IOS', 'IPHONE', 'MOBILE_IOS']:
+            return "Apple iOS (iPhone)"
+        elif target in ['ANDROID', 'MOBILE_ANDROID']:
+            return "Android Smartphone"
+        elif target in ['TV', 'SMART_TV']:
+            return "Smart TV"
+        elif target == 'MOBILE':
+            return "Mobile Phone (Universal)"
+        return target
+
 
