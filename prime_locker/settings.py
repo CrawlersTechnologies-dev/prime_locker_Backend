@@ -165,3 +165,13 @@ SIMPLE_JWT = {
     'AUTH_HEADER_TYPES': ('Bearer',),
 }
 
+# -------------------------------------------------------------
+# Third-Party Device MDM Integration (Apple DEP / Supervised)
+# -------------------------------------------------------------
+APPLE_MDM_CONFIG = {
+    'BASE_URL': os.getenv('APPLE_MDM_BASE_URL', ''),
+    'API_KEY': os.getenv('APPLE_MDM_API_KEY', ''),
+    'TENANT_ID': os.getenv('APPLE_MDM_TENANT_ID', ''),
+}
+
+
