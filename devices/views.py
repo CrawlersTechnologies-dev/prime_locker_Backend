@@ -132,12 +132,16 @@ class DeviceViewSet(viewsets.ModelViewSet):
     # Remote MDM Commands
     # -----------------------------
     def _create_command(self, device, command_type, params=None):
-        return DeviceCommand.objects.create(
+        cmd = DeviceCommand.objects.create(
             device=device,
             command_type=command_type,
             parameters=params or {},
             issued_by=self.request.user
         )
+        if device.os_type == OSType.IOS:
+            from .services.apple_mdm import AppleMDMService
+            AppleMDMService.send_command(device, command_type, params)
+        return cmd
 
     def _block_customer(self, request):
         if request.user.role == 'CUSTOMER':
@@ -273,6 +277,107 @@ class DeviceViewSet(viewsets.ModelViewSet):
                 "last_location_at": device.last_location_at
             },
             "history": serializer.data
+        })
+
+    @action(detail=True, methods=['post'], url_path='toggle-reset-block')
+    def toggle_reset_block(self, request, pk=None):
+        """
+        Reset Option Block & FRP Protection:
+        Remotely blocks/unblocks factory data reset and enables/disables FRP lock resistance.
+        """
+        denied = self._block_customer(request)
+        if denied:
+            return denied
+        device = self.get_object()
+        device.block_factory_reset = not device.block_factory_reset
+        device.frp_protection_enabled = device.block_factory_reset
+        device.save(update_fields=['block_factory_reset', 'frp_protection_enabled'])
+        self._create_command(device, CommandType.UPDATE_POLICY, {
+            "block_factory_reset": device.block_factory_reset,
+            "frp_protection_enabled": device.frp_protection_enabled
+        })
+        AuditLog.objects.create(
+            user=request.user,
+            action="TOGGLE_RESET_BLOCK",
+            ip_address=get_client_ip(request),
+            details={
+                "device_id": device.id,
+                "block_factory_reset": device.block_factory_reset,
+                "frp_protection_enabled": device.frp_protection_enabled
+            }
+        )
+        return Response({
+            "message": f"Factory reset & FRP protection is now {'ENABLED (BLOCKED)' if device.block_factory_reset else 'DISABLED (ALLOWED)'}.",
+            "block_factory_reset": device.block_factory_reset,
+            "frp_protection_enabled": device.frp_protection_enabled
+        })
+
+    @action(detail=True, methods=['post'], url_path='set-wallpaper')
+    def set_wallpaper(self, request, pk=None):
+        """
+        Wallpaper Control:
+        Changes, locks, or customizes the lock wallpaper shown on the locked device.
+        """
+        denied = self._block_customer(request)
+        if denied:
+            return denied
+        device = self.get_object()
+        wallpaper_url = request.data.get('wallpaper_url')
+        lock_wallpaper = request.data.get('lock_wallpaper', True)
+
+        if 'wallpaper_file' in request.FILES:
+            device.custom_wallpaper = request.FILES['wallpaper_file']
+            device.save(update_fields=['custom_wallpaper'])
+            wallpaper_url = request.build_absolute_uri(device.custom_wallpaper.url)
+
+        if wallpaper_url:
+            device.custom_wallpaper_url = wallpaper_url
+
+        device.wallpaper_locked = bool(lock_wallpaper)
+        device.save(update_fields=['custom_wallpaper_url', 'wallpaper_locked'])
+        self._create_command(device, CommandType.SET_WALLPAPER, {
+            "wallpaper_url": device.custom_wallpaper_url or wallpaper_url,
+            "wallpaper_locked": device.wallpaper_locked
+        })
+        AuditLog.objects.create(
+            user=request.user,
+            action="SET_DEVICE_WALLPAPER",
+            ip_address=get_client_ip(request),
+            details={"device_id": device.id, "wallpaper_url": device.custom_wallpaper_url}
+        )
+        return Response({
+            "message": "Custom lock wallpaper updated and queued for device.",
+            "wallpaper_url": device.custom_wallpaper_url,
+            "wallpaper_locked": device.wallpaper_locked
+        })
+
+    @action(detail=True, methods=['get'], url_path='contacts')
+    def get_contacts(self, request, pk=None):
+        """
+        Get Contact Details:
+        Securely retrieves the registered device owner's contact details and synced address book.
+        """
+        denied = self._block_customer(request)
+        if denied:
+            return denied
+        device = self.get_object()
+        customer = device.customer
+        name = f"{customer.first_name} {customer.last_name}".strip() or customer.username
+
+        return Response({
+            "device_id": device.id,
+            "device_imei": device.imei,
+            "registered_owner": {
+                "name": name,
+                "primary_phone": customer.mobile_number,
+                "alternate_phone": customer.alternate_mobile_number or "N/A",
+                "email": customer.email,
+                "address": customer.address,
+                "city": customer.city,
+                "state": customer.state,
+                "pincode": customer.pincode
+            },
+            "synced_device_contacts": device.synced_contacts or []
         })
 
     @action(detail=True, methods=['post'], url_path='attach-emi')
