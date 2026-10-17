@@ -1,10 +1,13 @@
-from rest_framework import viewsets, permissions, status
-from rest_framework.decorators import action
-from rest_framework.response import Response
+import json
+import logging
+from decimal import Decimal
+from datetime import timedelta
 from django.db import transaction, models
 from django.utils import timezone
-from datetime import timedelta
-from decimal import Decimal
+from rest_framework import viewsets, permissions, status
+from rest_framework.views import APIView
+from rest_framework.decorators import action
+from rest_framework.response import Response
 
 from .models import (
     EMIPlanTemplate,
@@ -19,8 +22,12 @@ from .serializers import (
     CustomerEMIContractSerializer,
     EMIInstallmentSerializer,
     RecordPaymentSerializer,
+    VerifyOnlinePaymentSerializer,
     OverdueCustomerItemSerializer
 )
+from .services.razorpay_service import RazorpayService
+
+logger = logging.getLogger(__name__)
 
 
 class IsSuperAdminOrReadOnly(permissions.BasePermission):
@@ -285,6 +292,73 @@ class EMIInstallmentViewSet(viewsets.GenericViewSet):
             })
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+    @action(detail=True, methods=['post'], url_path='create-payment-order')
+    def create_payment_order(self, request, pk=None):
+        """
+        Creates a Razorpay Order for online customer payment (Mobile app / Web checkout).
+        Returns order_id, amount in paise, currency, and public key_id.
+        Operates in Simulation Mode if live gateway credentials are not yet configured.
+        """
+        installment = self.get_object()
+        contract = installment.contract
+
+        # Permission check: Customer of this contract, Retailer, Super Admin, or upline
+        if request.user.role == 'CUSTOMER' and contract.customer != request.user:
+            return Response({"detail": "You do not have permission to pay for this contract."}, status=status.HTTP_403_FORBIDDEN)
+
+        if installment.status == InstallmentStatus.PAID:
+            return Response({"detail": "This installment has already been paid."}, status=status.HTTP_400_BAD_REQUEST)
+
+        order_data = RazorpayService.create_order(installment)
+        if "error" in order_data:
+            return Response(order_data, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(order_data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'], url_path='verify-online-payment')
+    def verify_online_payment(self, request, pk=None):
+        """
+        Verifies the Razorpay checkout response signature and marks the installment as PAID.
+        """
+        installment = self.get_object()
+        contract = installment.contract
+
+        if request.user.role == 'CUSTOMER' and contract.customer != request.user:
+            return Response({"detail": "You do not have permission to pay for this contract."}, status=status.HTTP_403_FORBIDDEN)
+
+        if installment.status == InstallmentStatus.PAID:
+            return Response({"detail": "This installment has already been paid."}, status=status.HTTP_400_BAD_REQUEST)
+
+        serializer = VerifyOnlinePaymentSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        order_id = serializer.validated_data['razorpay_order_id']
+        payment_id = serializer.validated_data['razorpay_payment_id']
+        signature = serializer.validated_data['razorpay_signature']
+
+        is_valid = RazorpayService.verify_signature(order_id, payment_id, signature)
+        if not is_valid:
+            return Response({"detail": "Invalid payment signature verification failed."}, status=status.HTTP_400_BAD_REQUEST)
+
+        RazorpayService.mark_installment_paid(
+            installment=installment,
+            amount=installment.amount,
+            payment_id=payment_id,
+            notes=f"Online Payment Verified via Checkout ({payment_id})",
+            user=request.user
+        )
+
+        contract.refresh_from_db()
+        installment.refresh_from_db()
+
+        return Response({
+            "message": f"Payment of ₹{installment.paid_amount} successfully verified and recorded for Installment #{installment.installment_number}.",
+            "payment_id": payment_id,
+            "contract_status": contract.status,
+            "installment_status": installment.status
+        }, status=status.HTTP_200_OK)
+
 
 class OverdueEMIsViewSet(viewsets.ViewSet):
     """
@@ -379,3 +453,60 @@ class OverdueEMIsViewSet(viewsets.ViewSet):
             },
             "overdue_customers": table_rows
         })
+
+
+class RazorpayWebhookView(APIView):
+    """
+    Webhook handler for asynchronous Razorpay events (e.g. payment.captured, order.paid).
+    Allows external Razorpay servers to notify our backend when an online payment is captured.
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request, *args, **kwargs):
+        signature = request.headers.get('X-Razorpay-Signature', '')
+        raw_body = request.body
+
+        # Verify signature
+        if not RazorpayService.verify_webhook_signature(raw_body, signature):
+            logger.warning("Razorpay Webhook: Invalid Signature rejected.")
+            return Response({"detail": "Invalid webhook signature"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            payload = json.loads(raw_body.decode('utf-8'))
+        except (ValueError, UnicodeDecodeError) as e:
+            logger.error(f"Razorpay Webhook JSON decode error: {e}")
+            return Response({"detail": "Invalid JSON body"}, status=status.HTTP_400_BAD_REQUEST)
+
+        event = payload.get('event')
+        logger.info(f"Razorpay Webhook received event: {event}")
+
+        if event in ['payment.captured', 'order.paid']:
+            entity = {}
+            if event == 'payment.captured':
+                entity = payload.get('payload', {}).get('payment', {}).get('entity', {})
+                payment_id = entity.get('id')
+                amount_paise = entity.get('amount', 0)
+            else:
+                entity = payload.get('payload', {}).get('order', {}).get('entity', {})
+                payment_id = entity.get('id')
+                amount_paise = entity.get('amount_paid', 0)
+
+            notes = entity.get('notes', {})
+            installment_id = notes.get('installment_id')
+
+            if installment_id:
+                try:
+                    installment = EMIInstallment.objects.get(id=installment_id)
+                    if installment.status != InstallmentStatus.PAID:
+                        amount = Decimal(str(amount_paise)) / Decimal('100')
+                        RazorpayService.mark_installment_paid(
+                            installment=installment,
+                            amount=amount,
+                            payment_id=payment_id or f"wh_{timezone.now().timestamp()}",
+                            notes=f"Razorpay Webhook Event: {event} ({payment_id})"
+                        )
+                        logger.info(f"Razorpay Webhook: Installment #{installment_id} marked as PAID.")
+                except EMIInstallment.DoesNotExist:
+                    logger.warning(f"Razorpay Webhook: Installment #{installment_id} not found.")
+
+        return Response({"status": "ok"}, status=status.HTTP_200_OK)

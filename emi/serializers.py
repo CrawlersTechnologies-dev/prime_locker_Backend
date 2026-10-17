@@ -240,6 +240,15 @@ class RecordPaymentSerializer(serializers.Serializer):
     notes = serializers.CharField(required=False, allow_blank=True)
 
 
+class VerifyOnlinePaymentSerializer(serializers.Serializer):
+    """
+    Serializer for verifying Razorpay checkout response from mobile or web app.
+    """
+    razorpay_order_id = serializers.CharField(max_length=150, required=True)
+    razorpay_payment_id = serializers.CharField(max_length=150, required=True)
+    razorpay_signature = serializers.CharField(max_length=255, required=True)
+
+
 class OverdueCustomerItemSerializer(serializers.ModelSerializer):
     """
     Serializer for Overdue Customers list (Screen A-22).

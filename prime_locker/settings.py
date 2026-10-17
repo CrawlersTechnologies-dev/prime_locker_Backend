@@ -174,4 +174,14 @@ APPLE_MDM_CONFIG = {
     'TENANT_ID': os.getenv('APPLE_MDM_TENANT_ID', ''),
 }
 
+# -------------------------------------------------------------
+# Third-Party Online Payment Gateway (Razorpay)
+# -------------------------------------------------------------
+RAZORPAY_CONFIG = {
+    'KEY_ID': os.getenv('RAZORPAY_KEY_ID', ''),
+    'KEY_SECRET': os.getenv('RAZORPAY_KEY_SECRET', ''),
+    'WEBHOOK_SECRET': os.getenv('RAZORPAY_WEBHOOK_SECRET', ''),
+}
+
+
 
