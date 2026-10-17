@@ -203,11 +203,14 @@ python manage.py runserver
 | `POST` | `/api/devices/{id}/reboot/` | Queue remote reboot command |
 | `POST` | `/api/devices/{id}/toggle-camera/` | Remotely enable/disable camera |
 | `POST` | `/api/devices/{id}/toggle-social-media/` | Remotely enable/disable WhatsApp, Instagram, Facebook |
-| `POST` | `/api/devices/{id}/push-reminder/` | Send custom reminder message to device screen |
+| `POST` | `/api/devices/{id}/toggle-reset-block/` | Reset Option Block & FRP Protection (block unauthorized factory reset) |
+| `POST` | `/api/devices/{id}/set-wallpaper/` | Wallpaper Control (change, lock or customize wallpaper on device) |
+| `POST` | `/api/devices/{id}/push-reminder/` | Device Reminders (push custom reminder message to device screen) |
+| `GET` | `/api/devices/{id}/contacts/` | Get Contact Details (owner contact info & synced address book) |
 | `POST` | `/api/devices/{id}/generate-offline-code/` | Generate emergency 8-digit offline unlock code |
-| `GET` | `/api/devices/{id}/location-history/` | Live & historical GPS breadcrumbs |
+| `GET` | `/api/devices/{id}/location-history/` | Live Location Tracking & historical GPS breadcrumbs |
 | `POST` | `/api/devices/{id}/attach-emi/` | Step 2: Attach EMI Plan to device (via Master Plan Template, Custom Terms, or Existing Contract) |
-| `POST` | `/api/devices/ping/` | Silent Heartbeat API for Android Locker APK / TV app (syncs policies, battery, GPS) |
+| `POST` | `/api/devices/ping/` | Silent Heartbeat API for Android Locker APK / TV app / iOS agent |
 
 ### 📦 App Versions & APK Management
 | Method | Endpoint | Description |
