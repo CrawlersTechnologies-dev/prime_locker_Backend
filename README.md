@@ -158,8 +158,8 @@ python manage.py runserver
 | `POST` | `/api/keys/allocate/` | Transfer keys directly down the hierarchy (by `target_user_id` and `target_role`) |
 | `POST` | `/api/keys/reclaim/` | Unilateral Key Recall: Higher authorities reclaim unactivated keys from downline nodes (irrespective of reason, no lower-user permission required) |
 | `POST` | `/api/keys/activate/` | Activate key against customer device IMEI |
-| `GET`/`POST` | `/api/key-requests/` | Bottom-up key requests (Retailer ➔ Parent) |
-| `POST` | `/api/key-requests/{id}/approve/` | Parent approves request & auto-transfers keys |
+| `GET`/`POST` | `/api/key-requests/` | Bottom-up key requests (Retailer ➔ Parent). Supports explicit `os_type` (`ANDROID`, `IOS`) and `notes` so parent knows the exact target OS |
+| `POST` | `/api/key-requests/{id}/approve/` | Parent approves request & auto-transfers platform-matching keys (`IOS-` for iOS, `AND-` for Android) |
 | `POST` | `/api/key-requests/{id}/reject/` | Parent rejects key request |
 
 ### 💳 EMI & Payments Management
@@ -172,7 +172,10 @@ python manage.py runserver
 | `GET` | `/api/emi-contracts/{id}/schedule/` | View financial summary bar + all installment rows |
 | `POST` | `/api/emi-contracts/{id}/lock/` | Manual device lock override |
 | `POST` | `/api/emi-contracts/{id}/unlock/` | Manual device unlock override |
-| `POST` | `/api/emi-installments/{id}/record-payment/` | Record payment (Cash/UPI) & auto-unlock device if overdue |
+| `POST` | `/api/emi-installments/{id}/record-payment/` | Record in-store offline payment (Cash/UPI/Card) & auto-unlock device if overdue |
+| `POST` | `/api/emi-installments/{id}/create-payment-order/` | Create Razorpay order for online customer payment (returns `order_id`, key, paise amount; includes simulation mode) |
+| `POST` | `/api/emi-installments/{id}/verify-online-payment/` | Verify Razorpay checkout signature & mark installment as `PAID` via `ONLINE_GATEWAY` |
+| `POST` | `/api/emi/webhook/razorpay/` | External webhook for asynchronous gateway notifications (`payment.captured`, `order.paid`) |
 | `GET` | `/api/emi-overdue/` | Overdue dashboard with Ageing KPIs (`?bucket=1-7`, `8-15`, `16-30`, `30+`) |
 
 ### 🎁 Offers & Promotions
