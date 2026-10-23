@@ -39,20 +39,53 @@ class DeviceKeySerializer(serializers.ModelSerializer):
         return representation
 
 class KeyTransactionSerializer(serializers.ModelSerializer):
+    key_string = serializers.CharField(source='key.key_string', read_only=True)
+    device_type = serializers.CharField(source='key.device_type', read_only=True)
+    from_user_details = serializers.SerializerMethodField(read_only=True)
+    to_user_details = serializers.SerializerMethodField(read_only=True)
+
     class Meta:
         model = KeyTransaction
-        fields = '__all__'
+        fields = [
+            'id',
+            'key',
+            'key_string',
+            'device_type',
+            'action',
+            'notes',
+            'from_user',
+            'from_user_details',
+            'to_user',
+            'to_user_details',
+            'timestamp'
+        ]
+
+    def get_from_user_details(self, obj):
+        if obj.from_user:
+            u = obj.from_user
+            name = f"{u.first_name} {u.last_name}".strip() or u.username
+            return {"id": u.id, "name": name, "role": u.role, "business_name": u.business_name}
+        return None
+
+    def get_to_user_details(self, obj):
+        if obj.to_user:
+            u = obj.to_user
+            name = f"{u.first_name} {u.last_name}".strip() or u.username
+            return {"id": u.id, "name": name, "role": u.role, "business_name": u.business_name}
+        return None
 
 class GenerateKeysSerializer(serializers.Serializer):
     prefix = serializers.CharField(max_length=10, required=True)
     device_type = serializers.CharField(max_length=50, required=True)
     quantity = serializers.IntegerField(min_value=1, max_value=10000, required=True)
+    reference_note = serializers.CharField(required=False, allow_blank=True, default='')
 
 class TransferKeysSerializer(serializers.Serializer):
     target_role = serializers.CharField(max_length=50, required=False, allow_blank=True)
     target_user_id = serializers.IntegerField(required=True)
     device_type = serializers.CharField(max_length=50, required=True)
     quantity = serializers.IntegerField(min_value=1, max_value=10000, required=True)
+    reference_note = serializers.CharField(required=False, allow_blank=True, default='')
 
 class ActivateKeySerializer(serializers.Serializer):
     key_string = serializers.CharField(required=True)
@@ -62,6 +95,8 @@ class ActivateKeySerializer(serializers.Serializer):
 class KeyRequestSerializer(serializers.ModelSerializer):
     requester_details = serializers.SerializerMethodField(read_only=True)
     platform_display = serializers.SerializerMethodField(read_only=True)
+    requester_key_balance = serializers.SerializerMethodField(read_only=True)
+    requester_keys_used_this_month = serializers.SerializerMethodField(read_only=True)
     
     class Meta:
         model = KeyRequest
@@ -87,5 +122,21 @@ class KeyRequestSerializer(serializers.ModelSerializer):
         elif target == 'MOBILE':
             return "Mobile Phone (Universal)"
         return target
+
+    def get_requester_key_balance(self, obj):
+        from keys.models import DeviceKey, KeyStatus
+        return DeviceKey.objects.filter(current_owner=obj.requester, status=KeyStatus.AVAILABLE).count()
+
+    def get_requester_keys_used_this_month(self, obj):
+        from keys.models import KeyTransaction, KeyAction
+        from django.utils import timezone
+        now = timezone.now()
+        return KeyTransaction.objects.filter(
+            from_user=obj.requester,
+            action=KeyAction.ACTIVATED,
+            timestamp__year=now.year,
+            timestamp__month=now.month
+        ).count()
+
 
 

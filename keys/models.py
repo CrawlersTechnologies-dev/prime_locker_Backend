@@ -40,6 +40,7 @@ class KeyTransaction(models.Model):
     from_user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='transfers_out')
     to_user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='transfers_in')
     action = models.CharField(max_length=20, choices=KeyAction.choices)
+    notes = models.TextField(null=True, blank=True)
     timestamp = models.DateTimeField(auto_now_add=True)
     
     def __str__(self):
