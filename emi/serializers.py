@@ -289,3 +289,126 @@ class OverdueCustomerItemSerializer(serializers.ModelSerializer):
         r = obj.retailer
         name = f"{r.first_name} {r.last_name}".strip()
         return name or r.username
+
+
+class PaymentItemSerializer(serializers.ModelSerializer):
+    """
+    Serializer for Payments Screen (Screen A-23).
+    Displays all collected installments with full context.
+    """
+    receipt_number = serializers.SerializerMethodField()
+    customer = serializers.SerializerMethodField()
+    retailer = serializers.SerializerMethodField()
+    device = serializers.SerializerMethodField()
+    collected_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = EMIInstallment
+        fields = [
+            'id',
+            'receipt_number',
+            'installment_number',
+            'paid_amount',
+            'amount',
+            'payment_mode',
+            'collection_date',
+            'transaction_ref',
+            'notes',
+            'collected_by',
+            'collected_by_name',
+            'customer',
+            'retailer',
+            'device'
+        ]
+
+    def get_receipt_number(self, obj):
+        return f"REC-{obj.id:06d}"
+
+    def get_customer(self, obj):
+        c = obj.contract.customer
+        name = f"{c.first_name} {c.last_name}".strip() or c.username
+        return {
+            "id": c.id,
+            "name": name,
+            "mobile_number": c.mobile_number,
+            "email": c.email
+        }
+
+    def get_retailer(self, obj):
+        r = obj.contract.retailer
+        name = f"{r.first_name} {r.last_name}".strip() or r.username
+        return {
+            "id": r.id,
+            "name": name,
+            "store_name": r.business_name or name,
+            "mobile_number": r.mobile_number
+        }
+
+    def get_device(self, obj):
+        return {
+            "imei": obj.contract.device_imei,
+            "device_name": obj.contract.device_name,
+            "brand": obj.contract.device_brand,
+            "model": obj.contract.device_model
+        }
+
+    def get_collected_by_name(self, obj):
+        if obj.collected_by:
+            name = f"{obj.collected_by.first_name} {obj.collected_by.last_name}".strip()
+            return name or obj.collected_by.username
+        return "System"
+
+
+class PaymentReceiptSerializer(PaymentItemSerializer):
+    """
+    Serializer for Payment Receipt (Screen A-25).
+    Includes complete financial contract breakdown and customer/store addresses.
+    """
+    contract_summary = serializers.SerializerMethodField()
+    customer_address = serializers.SerializerMethodField()
+    retailer_address = serializers.SerializerMethodField()
+
+    class Meta(PaymentItemSerializer.Meta):
+        fields = PaymentItemSerializer.Meta.fields + [
+            'contract_summary',
+            'customer_address',
+            'retailer_address'
+        ]
+
+    def get_contract_summary(self, obj):
+        con = obj.contract
+        return {
+            "contract_id": con.id,
+            "device_imei": con.device_imei,
+            "device_name": con.device_name,
+            "total_device_price": con.total_amount,
+            "down_payment": con.down_payment,
+            "financed_amount": con.financed_amount,
+            "tenure_months": con.tenure_months,
+            "monthly_emi_amount": con.monthly_emi_amount,
+            "total_paid": con.total_paid,
+            "total_remaining": con.total_remaining,
+            "paid_installments_count": con.paid_installments_count,
+            "remaining_installments_count": con.remaining_installments_count,
+            "status": con.status
+        }
+
+    def get_customer_address(self, obj):
+        c = obj.contract.customer
+        return {
+            "address": c.address or "",
+            "city": c.city or "",
+            "state": c.state or "",
+            "pincode": c.pincode or ""
+        }
+
+    def get_retailer_address(self, obj):
+        r = obj.contract.retailer
+        return {
+            "business_name": r.business_name or "",
+            "address": r.address or "",
+            "city": r.city or "",
+            "state": r.state or "",
+            "pincode": r.pincode or ""
+        }
+

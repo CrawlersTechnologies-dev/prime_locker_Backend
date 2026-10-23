@@ -23,7 +23,9 @@ from .serializers import (
     EMIInstallmentSerializer,
     RecordPaymentSerializer,
     VerifyOnlinePaymentSerializer,
-    OverdueCustomerItemSerializer
+    OverdueCustomerItemSerializer,
+    PaymentItemSerializer,
+    PaymentReceiptSerializer
 )
 from .services.razorpay_service import RazorpayService
 
@@ -97,27 +99,70 @@ class CustomerEMIContractViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = CustomerEMIContractSerializer
 
+    ordering = ['-created_at']
+
     def get_queryset(self):
         user = self.request.user
         if user.role == 'SUPER_ADMIN':
-            return CustomerEMIContract.objects.all()
+            qs = CustomerEMIContract.objects.all()
         elif user.role == 'RETAILER':
-            return CustomerEMIContract.objects.filter(retailer=user)
+            qs = CustomerEMIContract.objects.filter(retailer=user)
         elif user.role == 'CUSTOMER':
-            return CustomerEMIContract.objects.filter(customer=user)
+            qs = CustomerEMIContract.objects.filter(customer=user)
         else:
-            # Super Distributor, Distributor, Sub-Distributor:
-            # See contracts originated by retailers under their downline
-            from accounts.models import User
-            # Find all retailers who have this user in their parent hierarchy
-            def get_all_subordinates(parent_user):
-                subordinates = list(parent_user.children.all())
-                for sub in subordinates:
-                    subordinates.extend(get_all_subordinates(sub))
-                return subordinates
+            subordinates = user.get_all_subordinates()
+            retailer_ids = [u.id for u in subordinates if u.role == 'RETAILER']
+            qs = CustomerEMIContract.objects.filter(retailer_id__in=retailer_ids)
 
-            retailer_ids = [u.id for u in get_all_subordinates(user) if u.role == 'RETAILER']
-            return CustomerEMIContract.objects.filter(retailer_id__in=retailer_ids)
+        # Filters from query params (Item 4 from audit doc)
+        customer_param = self.request.query_params.get('customer')
+        if customer_param:
+            if customer_param.isdigit():
+                qs = qs.filter(customer_id=customer_param)
+            else:
+                qs = qs.filter(
+                    models.Q(customer__username__icontains=customer_param) |
+                    models.Q(customer__first_name__icontains=customer_param) |
+                    models.Q(customer__mobile_number__icontains=customer_param)
+                )
+
+        retailer_param = self.request.query_params.get('retailer')
+        if retailer_param:
+            if retailer_param.isdigit():
+                qs = qs.filter(retailer_id=retailer_param)
+            else:
+                qs = qs.filter(
+                    models.Q(retailer__username__icontains=retailer_param) |
+                    models.Q(retailer__business_name__icontains=retailer_param)
+                )
+
+        status_param = self.request.query_params.get('status')
+        if status_param:
+            qs = qs.filter(status=status_param.upper())
+
+        search = self.request.query_params.get('search')
+        if search:
+            qs = qs.filter(
+                models.Q(device_imei__icontains=search) |
+                models.Q(device_name__icontains=search) |
+                models.Q(customer__username__icontains=search) |
+                models.Q(customer__first_name__icontains=search) |
+                models.Q(customer__mobile_number__icontains=search) |
+                models.Q(retailer__business_name__icontains=search)
+            )
+
+        ordering_param = self.request.query_params.get('ordering')
+        if ordering_param:
+            clean_field = ordering_param.lstrip('-')
+            valid_fields = {f.name for f in CustomerEMIContract._meta.get_fields()}
+            if clean_field in valid_fields:
+                qs = qs.order_by(ordering_param)
+            else:
+                qs = qs.order_by('-created_at', '-id')
+        else:
+            qs = qs.order_by('-created_at', '-id')
+
+        return qs
 
     def perform_create(self, serializer):
         # Default retailer to logged in user if user is Retailer
@@ -179,6 +224,7 @@ class CustomerEMIContractViewSet(viewsets.ModelViewSet):
         contract.status = EMIContractStatus.LOCKED
         contract.save(update_fields=['status'])
 
+        reason = request.data.get('reason', '').strip()
         from accounts.models import AuditLog
         from accounts.views import get_client_ip
         AuditLog.objects.create(
@@ -189,7 +235,8 @@ class CustomerEMIContractViewSet(viewsets.ModelViewSet):
                 "contract_id": contract.id,
                 "device_imei": contract.device_imei,
                 "locked_by": request.user.username,
-                "role": request.user.role
+                "role": request.user.role,
+                "reason": reason
             }
         )
 
@@ -215,6 +262,7 @@ class CustomerEMIContractViewSet(viewsets.ModelViewSet):
         contract.status = EMIContractStatus.ACTIVE
         contract.save(update_fields=['status'])
 
+        reason = request.data.get('reason', '').strip()
         from accounts.models import AuditLog
         from accounts.views import get_client_ip
         AuditLog.objects.create(
@@ -225,7 +273,8 @@ class CustomerEMIContractViewSet(viewsets.ModelViewSet):
                 "contract_id": contract.id,
                 "device_imei": contract.device_imei,
                 "unlocked_by": request.user.username,
-                "role": request.user.role
+                "role": request.user.role,
+                "reason": reason
             }
         )
 
@@ -284,6 +333,21 @@ class EMIInstallmentViewSet(viewsets.GenericViewSet):
                     if overdue_count == 0:
                         contract.status = EMIContractStatus.ACTIVE
                         contract.save(update_fields=['status'])
+
+                from accounts.models import AuditLog
+                from accounts.views import get_client_ip
+                AuditLog.objects.create(
+                    user=request.user,
+                    action="RECORDED_OFFLINE_PAYMENT",
+                    ip_address=get_client_ip(request),
+                    details={
+                        "installment_id": installment.id,
+                        "contract_id": contract.id,
+                        "amount": str(amount),
+                        "payment_mode": payment_mode,
+                        "transaction_ref": transaction_ref
+                    }
+                )
 
             return Response({
                 "message": f"Payment of ₹{amount} successfully recorded for Installment #{installment.installment_number}.",
@@ -510,3 +574,138 @@ class RazorpayWebhookView(APIView):
                     logger.warning(f"Razorpay Webhook: Installment #{installment_id} not found.")
 
         return Response({"status": "ok"}, status=status.HTTP_200_OK)
+
+
+class PaymentViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    P1 Endpoint: Screen A-23 Payments Screen & Screen A-25 Payment Receipt.
+    Supports list with filters (date, mode, retailer, search) and ?export=csv.
+    Supports retrieve for formatted receipt.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = PaymentItemSerializer
+
+    def get_serializer_class(self):
+        if self.action == 'retrieve':
+            return PaymentReceiptSerializer
+        return PaymentItemSerializer
+
+    def get_queryset(self):
+        user = self.request.user
+        qs = EMIInstallment.objects.filter(status=InstallmentStatus.PAID).select_related(
+            'contract', 'contract__customer', 'contract__retailer', 'collected_by'
+        )
+
+        # Hierarchy scoping
+        if user.role == 'SUPER_ADMIN':
+            pass
+        elif user.role == 'RETAILER':
+            qs = qs.filter(contract__retailer=user)
+        elif user.role == 'CUSTOMER':
+            qs = qs.filter(contract__customer=user)
+        else:
+            subordinates = user.get_all_subordinates()
+            retailer_ids = [u.id for u in subordinates if u.role == 'RETAILER']
+            qs = qs.filter(contract__retailer_id__in=retailer_ids)
+
+        # Filters
+        date_param = self.request.query_params.get('date')
+        if date_param:
+            qs = qs.filter(collection_date__date=date_param)
+
+        start_date = self.request.query_params.get('start_date')
+        if start_date:
+            qs = qs.filter(collection_date__date__gte=start_date)
+
+        end_date = self.request.query_params.get('end_date')
+        if end_date:
+            qs = qs.filter(collection_date__date__lte=end_date)
+
+        mode_param = self.request.query_params.get('mode')
+        if mode_param:
+            qs = qs.filter(payment_mode__iexact=mode_param)
+
+        retailer_param = self.request.query_params.get('retailer')
+        if retailer_param:
+            if retailer_param.isdigit():
+                qs = qs.filter(contract__retailer_id=retailer_param)
+            else:
+                qs = qs.filter(
+                    models.Q(contract__retailer__username__icontains=retailer_param) |
+                    models.Q(contract__retailer__business_name__icontains=retailer_param)
+                )
+
+        search = self.request.query_params.get('search')
+        if search:
+            rec_id = None
+            if search.upper().startswith('REC-'):
+                digits = search.upper().replace('REC-', '').lstrip('0')
+                if digits.isdigit():
+                    rec_id = int(digits)
+
+            search_filter = (
+                models.Q(transaction_ref__icontains=search) |
+                models.Q(contract__device_imei__icontains=search) |
+                models.Q(contract__customer__username__icontains=search) |
+                models.Q(contract__customer__first_name__icontains=search) |
+                models.Q(contract__customer__mobile_number__icontains=search) |
+                models.Q(contract__retailer__business_name__icontains=search)
+            )
+            if rec_id:
+                search_filter |= models.Q(id=rec_id)
+            qs = qs.filter(search_filter)
+
+        ordering_param = self.request.query_params.get('ordering')
+        if ordering_param:
+            alias_map = {
+                'created_at': 'collection_date',
+                '-created_at': '-collection_date',
+                'date': 'collection_date',
+                '-date': '-collection_date',
+            }
+            target_field = alias_map.get(ordering_param, ordering_param)
+            clean_field = target_field.lstrip('-')
+            valid_fields = {f.name for f in EMIInstallment._meta.get_fields()}
+            if clean_field in valid_fields:
+                qs = qs.order_by(target_field)
+            else:
+                qs = qs.order_by('-collection_date', '-id')
+        else:
+            qs = qs.order_by('-collection_date', '-id')
+
+        return qs
+
+    def list(self, request, *args, **kwargs):
+        if request.query_params.get('export') == 'csv':
+            from reports.utils import generate_csv_response
+            qs = self.filter_queryset(self.get_queryset())
+            headers = [
+                "Receipt No", "Date", "Customer Name", "Customer Phone",
+                "Device IMEI", "Device Name", "Retailer Store", "Amount Paid",
+                "Payment Mode", "Transaction Ref", "Collected By"
+            ]
+            rows = []
+            for item in qs[:5000]:
+                c = item.contract.customer
+                r = item.contract.retailer
+                c_name = f"{c.first_name} {c.last_name}".strip() or c.username
+                r_name = r.business_name or f"{r.first_name} {r.last_name}".strip() or r.username
+                col_name = f"{item.collected_by.first_name} {item.collected_by.last_name}".strip() if item.collected_by else "System"
+                date_str = item.collection_date.strftime('%Y-%m-%d %H:%M') if item.collection_date else "N/A"
+                rows.append([
+                    f"REC-{item.id:06d}",
+                    date_str,
+                    c_name,
+                    c.mobile_number or "N/A",
+                    item.contract.device_imei,
+                    item.contract.device_name or "Phone",
+                    r_name,
+                    str(item.paid_amount),
+                    item.payment_mode or "CASH",
+                    item.transaction_ref or "N/A",
+                    col_name
+                ])
+            return generate_csv_response("payments_report.csv", headers, rows)
+
+        return super().list(request, *args, **kwargs)
+
