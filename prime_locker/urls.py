@@ -16,9 +16,11 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, include
+from accounts.views import ProtectedMediaView
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+    path('media/<path:file_path>', ProtectedMediaView.as_view(), name='protected-media'),
     path('api/', include('accounts.urls')),
     path('api/', include('keys.urls')),
     path('api/', include('emi.urls')),
