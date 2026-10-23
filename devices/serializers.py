@@ -99,7 +99,6 @@ class DeviceSerializer(serializers.ModelSerializer):
                 'username': c.username,
                 'mobile_number': c.mobile_number,
                 'alternate_mobile_number': c.alternate_mobile_number,
-                'aadhar_number': c.aadhar_number,
                 'customer_photo': photo_url,
                 'customer_signature': sig_url
             }
