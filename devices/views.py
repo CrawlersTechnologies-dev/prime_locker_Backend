@@ -163,11 +163,12 @@ class DeviceViewSet(viewsets.ModelViewSet):
             device.emi_contract.status = EMIContractStatus.LOCKED
             device.emi_contract.save(update_fields=['status'])
 
+        reason = request.data.get('reason', '').strip()
         AuditLog.objects.create(
             user=request.user,
             action="REMOTE_LOCK_DEVICE",
             ip_address=get_client_ip(request),
-            details={"device_id": device.id, "imei": device.imei}
+            details={"device_id": device.id, "imei": device.imei, "reason": reason}
         )
         return Response({"message": f"Device {device.imei} locked.", "status": device.status})
 
@@ -185,12 +186,14 @@ class DeviceViewSet(viewsets.ModelViewSet):
             device.emi_contract.status = EMIContractStatus.ACTIVE
             device.emi_contract.save(update_fields=['status'])
 
+        reason = request.data.get('reason', '').strip()
         AuditLog.objects.create(
             user=request.user,
             action="REMOTE_UNLOCK_DEVICE",
             ip_address=get_client_ip(request),
-            details={"device_id": device.id, "imei": device.imei}
+            details={"device_id": device.id, "imei": device.imei, "reason": reason}
         )
+        return Response({"message": f"Device {device.imei} unlocked.", "status": device.status})
         return Response({"message": f"Device {device.imei} unlocked.", "status": device.status})
 
     @action(detail=True, methods=['post'])
