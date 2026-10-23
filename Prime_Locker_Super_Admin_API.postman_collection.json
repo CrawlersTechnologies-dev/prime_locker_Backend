@@ -1,0 +1,620 @@
+{
+  "info": {
+    "_postman_id": "f9d5216b-7d13-4c9d-8b43-00768e7430cf",
+    "name": "Prime Locker - Super Admin & Backend API",
+    "description": "Collection for testing Super Admin backend gaps, priority endpoints, and bug fixes.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://127.0.0.1:8000"
+    },
+    {
+      "key": "access_token",
+      "value": ""
+    },
+    {
+      "key": "refresh_token",
+      "value": ""
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{access_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "1. Auth & Session",
+      "item": [
+        {
+          "name": "Login (Auto-saves {{access_token}})",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    var data = pm.response.json();",
+                  "    pm.collectionVariables.set('access_token', data.access);",
+                  "    pm.collectionVariables.set('refresh_token', data.refresh);",
+                  "    console.log('Access token saved to collection!');",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"admin\",\n  \"password\": \"admin123\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/auth/login/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login",
+                ""
+              ]
+            }
+          }
+        },
+        {
+          "name": "Session Restore (GET /api/auth/me/)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/auth/me/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "me",
+                ""
+              ]
+            }
+          }
+        },
+        {
+          "name": "Change Password (Screen A-42)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"old_password\": \"admin123\",\n  \"new_password\": \"admin123\",\n  \"confirm_password\": \"admin123\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/auth/change-password/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "change-password",
+                ""
+              ]
+            }
+          }
+        },
+        {
+          "name": "Logout & Token Blacklist",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh\": \"{{refresh_token}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/auth/logout/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "logout",
+                ""
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Payments & Receipts (P1 Endpoints)",
+      "item": [
+        {
+          "name": "Payments List (Screen A-23)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/payments/?ordering=-collection_date",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "payments",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "ordering",
+                  "value": "-collection_date"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Export Payments to CSV",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/payments/?export=csv",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "payments",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "export",
+                  "value": "csv"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Payment Receipt (Screen A-25)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/payments/1/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "payments",
+                "1",
+                ""
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Key Management & History",
+      "item": [
+        {
+          "name": "Key History Ledger (Screen N-07)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/keys/transactions/?ordering=-timestamp",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "keys",
+                "transactions",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "ordering",
+                  "value": "-timestamp"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Export Key Transactions to CSV",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/keys/transactions/?export=csv",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "keys",
+                "transactions",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "export",
+                  "value": "csv"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Generate Keys (with Reference Note)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"prefix\": \"MOB\",\n  \"device_type\": \"MOBILE\",\n  \"quantity\": 5,\n  \"reference_note\": \"PO-88772 Hardware Invoice\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/keys/generate/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "keys",
+                "generate",
+                ""
+              ]
+            }
+          }
+        },
+        {
+          "name": "Key Requests List (with Balance & Used This Month)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/key-requests/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "key-requests",
+                ""
+              ]
+            }
+          }
+        },
+        {
+          "name": "Partial Approve Key Request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quantity\": 2\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/key-requests/1/approve/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "key-requests",
+                "1",
+                "approve",
+                ""
+              ]
+            }
+          }
+        },
+        {
+          "name": "Reject Key Request (with Reason)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Insufficient quota this week\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/key-requests/1/reject/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "key-requests",
+                "1",
+                "reject",
+                ""
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Partners & Retailers",
+      "item": [
+        {
+          "name": "Super Distributors List (Key balances & child counts)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/super-distributors/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "super-distributors",
+                ""
+              ]
+            }
+          }
+        },
+        {
+          "name": "Retailers List",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/retailers/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "retailers",
+                ""
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Retailer (with District, Device Configs, Opening Keys)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"full_name\": \"Postman Retailer\",\n  \"email\": \"postman_ret_sample@example.com\",\n  \"password\": \"Password123!\",\n  \"confirm_password\": \"Password123!\",\n  \"mobile_number\": \"9898000111\",\n  \"business_name\": \"Prime Telecom Store\",\n  \"state\": \"Karnataka\",\n  \"city\": \"Bengaluru\",\n  \"district\": \"Bengaluru Urban\",\n  \"pincode\": \"560001\",\n  \"address\": \"MG Road 101\",\n  \"store_phone\": \"080-44556677\",\n  \"allowed_devices\": [\n    \"ANDROID\",\n    \"IOS\"\n  ],\n  \"grace_period\": 5,\n  \"max_devices\": 100,\n  \"opening_keys\": 1\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/retailers/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "retailers",
+                ""
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Customers & KYC",
+      "item": [
+        {
+          "name": "Customers List (with Masked ID)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/customers/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "customers",
+                ""
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Customer with Aadhaar (Masked to XXXXXXXX1234)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"full_name\": \"Ramesh Kumar\",\n  \"email\": \"ramesh_sample@example.com\",\n  \"password\": \"Password123!\",\n  \"mobile_number\": \"9898000112\",\n  \"id_type\": \"AADHAAR\",\n  \"id_number\": \"123456789012\",\n  \"signed_emi_agreement_flag\": true,\n  \"draft_status\": \"COMPLETED\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/customers/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "customers",
+                ""
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Dashboard & Filtering",
+      "item": [
+        {
+          "name": "Dashboard (7 Days Filter)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/dashboard/?range=7d",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "range",
+                  "value": "7d"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Dashboard (Custom Date Range)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/dashboard/?start_date=2026-10-01&end_date=2026-10-23",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "dashboard",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "start_date",
+                  "value": "2026-10-01"
+                },
+                {
+                  "key": "end_date",
+                  "value": "2026-10-23"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Bug Checks",
+      "item": [
+        {
+          "name": "Bug 2 Check: Duplicate Email (Expects 400 Bad Request)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"full_name\": \"Duplicate User\",\n  \"email\": \"admin@example.com\",\n  \"password\": \"Password123!\",\n  \"confirm_password\": \"Password123!\",\n  \"mobile_number\": \"9111111111\",\n  \"business_name\": \"Duplicate Test\",\n  \"state\": \"Karnataka\",\n  \"city\": \"Bengaluru\",\n  \"pincode\": \"560001\",\n  \"address\": \"Test Road\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/super-distributors/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "super-distributors",
+                ""
+              ]
+            }
+          }
+        },
+        {
+          "name": "Bug 3 Check: Protected Media Anonymous (Expects 401 Unauthorized)",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/media/kyc_documents/test.pdf",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "media",
+                "kyc_documents",
+                "test.pdf"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
