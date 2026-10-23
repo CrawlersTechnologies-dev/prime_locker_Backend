@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
+from django.db import models
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 User = get_user_model()
@@ -57,6 +58,16 @@ class UserSerializer(serializers.ModelSerializer):
         fields = ['id', 'username', 'email', 'mobile_number', 'password', 'role', 'parent', 'first_name', 'last_name', 'is_active', 'date_joined']
         read_only_fields = ['id', 'date_joined']
 
+    def validate_email(self, value):
+        if value:
+            value = value.strip().lower()
+            qs = User.objects.filter(models.Q(email__iexact=value) | models.Q(username__iexact=value))
+            if self.instance:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError("A user with this email is already registered.")
+        return value
+
     def create(self, validated_data):
         password = validated_data.pop('password')
         
@@ -89,6 +100,7 @@ class SuperDistributorSerializer(serializers.ModelSerializer):
     full_name = serializers.CharField(write_only=True, required=True)
     password = serializers.CharField(write_only=True, required=True, style={'input_type': 'password'})
     confirm_password = serializers.CharField(write_only=True, required=True, style={'input_type': 'password'})
+    opening_keys = serializers.IntegerField(write_only=True, required=False, default=0, min_value=0)
     
     # We don't require 'username' in the request, we will generate it from email
     username = serializers.CharField(read_only=True)
@@ -99,6 +111,8 @@ class SuperDistributorSerializer(serializers.ModelSerializer):
             'id', 'username', 'email', 'mobile_number', 'full_name', 'business_name',
             'pan_number', 'gst_number', 'state', 'city', 'pincode', 'address',
             'kyc_document', 'remarks', 'can_reclaim_keys', 'password', 'confirm_password',
+            'approval_step', 'suspend_reason', 'can_add_partners', 'can_see_devices', 'can_see_customer_phones',
+            'opening_keys',
             'role', 'parent', 'is_active', 'date_joined'
         ]
         read_only_fields = ['id', 'date_joined', 'role', 'parent']
@@ -118,10 +132,21 @@ class SuperDistributorSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"password": "Passwords must match."})
         return data
 
+    def validate_email(self, value):
+        if value:
+            value = value.strip().lower()
+            qs = User.objects.filter(models.Q(email__iexact=value) | models.Q(username__iexact=value))
+            if self.instance:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError("A user with this email is already registered.")
+        return value
+
     def create(self, validated_data):
         validated_data.pop('confirm_password')
         password = validated_data.pop('password')
         full_name = validated_data.pop('full_name')
+        opening_keys = validated_data.pop('opening_keys', 0)
         
         # Parse full name
         name_parts = full_name.split(' ', 1)
@@ -139,6 +164,41 @@ class SuperDistributorSerializer(serializers.ModelSerializer):
         user = User(first_name=first_name, last_name=last_name, **validated_data)
         user.set_password(password)
         user.save()
+
+        # Handle opening keys if requested
+        if opening_keys and opening_keys > 0:
+            request = self.context.get('request')
+            if request and request.user and request.user.is_authenticated:
+                creator = request.user
+                from keys.models import DeviceKey, KeyStatus, KeyTransaction, KeyAction
+                from keys.views import generate_random_string
+
+                creator_keys = list(DeviceKey.objects.filter(current_owner=creator, status=KeyStatus.AVAILABLE)[:opening_keys])
+                if len(creator_keys) < opening_keys and creator.role == 'SUPER_ADMIN':
+                    needed = opening_keys - len(creator_keys)
+                    new_keys = [
+                        DeviceKey(
+                            key_string=f"MOB-{generate_random_string(8)}",
+                            device_type="MOBILE",
+                            status=KeyStatus.AVAILABLE,
+                            current_owner=creator
+                        ) for _ in range(needed)
+                    ]
+                    DeviceKey.objects.bulk_create(new_keys)
+                    creator_keys = list(DeviceKey.objects.filter(current_owner=creator, status=KeyStatus.AVAILABLE)[:opening_keys])
+
+                keys_to_transfer = creator_keys[:opening_keys]
+                for k in keys_to_transfer:
+                    k.current_owner = user
+                    k.save(update_fields=['current_owner'])
+                    KeyTransaction.objects.create(
+                        key=k,
+                        from_user=creator,
+                        to_user=user,
+                        action=KeyAction.ALLOCATED,
+                        notes=f"Initial opening keys allocation ({len(keys_to_transfer)} keys)"
+                    )
+
         return user
 
     def update(self, instance, validated_data):
@@ -158,6 +218,13 @@ class SuperDistributorSerializer(serializers.ModelSerializer):
 
     def to_representation(self, instance):
         representation = super().to_representation(instance)
+        
+        # Name fields
+        representation['first_name'] = instance.first_name or ''
+        representation['last_name'] = instance.last_name or ''
+        full_name = f"{instance.first_name} {instance.last_name}".strip()
+        representation['name'] = full_name or instance.business_name or instance.username
+
         if instance.parent:
             parent_name = f"{instance.parent.first_name} {instance.parent.last_name}".strip()
             if not parent_name:
@@ -169,6 +236,35 @@ class SuperDistributorSerializer(serializers.ModelSerializer):
                 'role': instance.parent.role,
                 'business_name': instance.parent.business_name
             }
+
+        # Available keys per device type & total
+        from keys.models import DeviceKey, KeyStatus, KeyTransaction, KeyAction
+        from django.db.models import Count
+
+        owned_keys = DeviceKey.objects.filter(current_owner=instance, status=KeyStatus.AVAILABLE)
+        type_counts = dict(owned_keys.values('device_type').annotate(c=Count('id')).values_list('device_type', 'c'))
+        total_available = sum(type_counts.values())
+        type_counts['total'] = total_available
+        representation['available_keys'] = type_counts
+
+        # Key transaction totals
+        keys_rec = KeyTransaction.objects.filter(to_user=instance).exclude(from_user=instance).count()
+        keys_sent = KeyTransaction.objects.filter(from_user=instance, action=KeyAction.ALLOCATED).count()
+        keys_used = DeviceKey.objects.filter(current_owner=instance, status=KeyStatus.ACTIVATED).count() + KeyTransaction.objects.filter(from_user=instance, action=KeyAction.ACTIVATED).count()
+        representation['keys_received'] = keys_rec
+        representation['keys_sent'] = keys_sent
+        representation['keys_used'] = keys_used
+
+        # Counts of downstream children
+        downstream = instance.get_all_subordinates()
+        representation['counts_of_children'] = {
+            'distributors': sum(1 for u in downstream if u.role == 'DISTRIBUTOR'),
+            'sub_distributors': sum(1 for u in downstream if u.role == 'SUB_DISTRIBUTOR'),
+            'retailers': sum(1 for u in downstream if u.role == 'RETAILER'),
+            'customers': sum(1 for u in downstream if u.role == 'CUSTOMER'),
+            'total': len(downstream)
+        }
+
         return representation
 
 class DistributorSerializer(SuperDistributorSerializer):
@@ -180,25 +276,59 @@ class SubDistributorSerializer(SuperDistributorSerializer):
     pass
 
 class RetailerSerializer(SuperDistributorSerializer):
-    """Retailer uses similar fields (Store Name -> business_name)"""
-    pass
+    """Retailer uses similar fields plus store/device configurations"""
+    class Meta(SuperDistributorSerializer.Meta):
+        fields = SuperDistributorSerializer.Meta.fields + [
+            'store_phone', 'district', 'allowed_devices', 'grace_period', 'max_devices'
+        ]
 
 class CustomerSerializer(serializers.ModelSerializer):
-    full_name = serializers.CharField(write_only=True, required=True)
+    full_name = serializers.CharField(write_only=True, required=False)
+    first_name = serializers.CharField(required=False, allow_blank=True)
+    last_name = serializers.CharField(required=False, allow_blank=True)
+    name = serializers.SerializerMethodField(read_only=True)
+    masked_id_number = serializers.SerializerMethodField(read_only=True)
     password = serializers.CharField(write_only=True, required=True, style={'input_type': 'password'})
 
     class Meta:
         model = User
         fields = [
-            'id', 'full_name', 'email', 'mobile_number', 'alternate_mobile_number',
+            'id', 'first_name', 'last_name', 'name', 'full_name', 'email', 'mobile_number', 'alternate_mobile_number',
             'address', 'city', 'state', 'pincode', 
             'customer_photo', 'customer_signature',
+            'id_type', 'id_number', 'masked_id_number', 'id_front_image', 'id_back_image',
+            'signed_emi_agreement_flag', 'draft_status',
             'password', 'parent', 'role', 'is_active', 'date_joined'
         ]
-        read_only_fields = ['id', 'date_joined', 'role', 'parent', 'is_active']
-        
+        read_only_fields = ['id', 'date_joined', 'role', 'parent', 'is_active', 'masked_id_number']
+
+    def get_name(self, obj):
+        name = f"{obj.first_name} {obj.last_name}".strip()
+        return name or obj.username
+
+    def get_masked_id_number(self, obj):
+        if obj.id_number:
+            raw = str(obj.id_number).strip()
+            if len(raw) > 4:
+                return ('X' * (len(raw) - 4)) + raw[-4:]
+            return raw
+        return None
+
+    def validate_email(self, value):
+        if value:
+            value = value.strip().lower()
+            qs = User.objects.filter(models.Q(email__iexact=value) | models.Q(username__iexact=value))
+            if self.instance:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError("A user with this email is already registered.")
+        return value
+
     def to_representation(self, instance):
         representation = super().to_representation(instance)
+        representation['first_name'] = instance.first_name or ''
+        representation['last_name'] = instance.last_name or ''
+        representation['name'] = f"{instance.first_name} {instance.last_name}".strip() or instance.username
         
         # Format parent to be nested
         if instance.parent:
@@ -218,18 +348,21 @@ class CustomerSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         password = validated_data.pop('password')
-        full_name = validated_data.pop('full_name')
+        full_name = validated_data.pop('full_name', None)
         
-        name_parts = full_name.split(' ', 1)
-        first_name = name_parts[0]
-        last_name = name_parts[1] if len(name_parts) > 1 else ''
+        if full_name:
+            name_parts = full_name.split(' ', 1)
+            first_name = name_parts[0]
+            last_name = name_parts[1] if len(name_parts) > 1 else ''
+            validated_data['first_name'] = first_name
+            validated_data['last_name'] = last_name
         
         validated_data['username'] = validated_data.get('email')
         
         if 'is_active' not in self.initial_data:
             validated_data['is_active'] = True
 
-        user = User(first_name=first_name, last_name=last_name, **validated_data)
+        user = User(**validated_data)
         user.set_password(password)
         user.save()
         return user
@@ -247,6 +380,24 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
     def validate(self, data):
         if data['new_password'] != data['confirm_password']:
             raise serializers.ValidationError({"password": "Passwords must match."})
+        return data
+
+class ChangePasswordSerializer(serializers.Serializer):
+    old_password = serializers.CharField(required=True, write_only=True)
+    new_password = serializers.CharField(required=True, write_only=True)
+    confirm_password = serializers.CharField(required=True, write_only=True)
+
+    def validate_old_password(self, value):
+        user = self.context['request'].user
+        if not user.check_password(value):
+            raise serializers.ValidationError("Incorrect current password.")
+        return value
+
+    def validate(self, data):
+        if data['new_password'] != data['confirm_password']:
+            raise serializers.ValidationError({"confirm_password": "New passwords do not match."})
+        if len(data['new_password']) < 6:
+            raise serializers.ValidationError({"new_password": "Password must be at least 6 characters long."})
         return data
 
 from .models import AuditLog

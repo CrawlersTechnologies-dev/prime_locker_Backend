@@ -1,9 +1,13 @@
+import os
+import mimetypes
+from django.http import FileResponse, Http404
+from django.conf import settings
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.views import TokenObtainPairView
-from django.db import transaction
+from django.db import transaction, models
 from django.contrib.auth import get_user_model
 from .serializers import (
     CustomTokenObtainPairSerializer, 
@@ -56,15 +60,34 @@ class BaseRoleViewSet(viewsets.ModelViewSet):
     serializer_class = UserSerializer
     permission_classes = [permissions.IsAuthenticated, RoleHierarchyPermission]
     target_role = None  # To be overridden by subclasses
+    ordering = ['-date_joined']
 
     def get_queryset(self):
         user = self.request.user
         queryset = User.objects.filter(role=self.target_role)
         
-        if user.role == 'SUPER_ADMIN':
-            return queryset
-            
-        return queryset.filter(parent=user)
+        if user.role != 'SUPER_ADMIN':
+            queryset = queryset.filter(parent=user)
+
+        search = self.request.query_params.get('search')
+        if search:
+            from django.db.models import Q
+            queryset = queryset.filter(
+                Q(username__icontains=search) |
+                Q(first_name__icontains=search) |
+                Q(last_name__icontains=search) |
+                Q(email__icontains=search) |
+                Q(mobile_number__icontains=search) |
+                Q(business_name__icontains=search)
+            )
+
+        ordering_param = self.request.query_params.get('ordering')
+        if ordering_param:
+            queryset = queryset.order_by(ordering_param)
+        else:
+            queryset = queryset.order_by('-date_joined')
+
+        return queryset
 
     def perform_create(self, serializer):
         user = self.request.user
@@ -465,6 +488,37 @@ class DashboardView(APIView):
         }
 
         # 3. Financial & Collection KPIs
+        from datetime import timedelta
+        range_param = request.query_params.get('range', '').lower()
+        start_date_str = request.query_params.get('start_date')
+        end_date_str = request.query_params.get('end_date')
+
+        start_date = None
+        end_date = today
+
+        if range_param == 'today':
+            start_date = today
+            end_date = today
+        elif range_param == '7d':
+            start_date = today - timedelta(days=7)
+            end_date = today
+        elif range_param == '30d':
+            start_date = today - timedelta(days=30)
+            end_date = today
+        elif range_param == 'this_month':
+            start_date = today.replace(day=1)
+            end_date = today
+        elif start_date_str:
+            try:
+                start_date = timezone.datetime.strptime(start_date_str, '%Y-%m-%d').date()
+            except ValueError:
+                start_date = None
+            if end_date_str:
+                try:
+                    end_date = timezone.datetime.strptime(end_date_str, '%Y-%m-%d').date()
+                except ValueError:
+                    end_date = today
+
         installments_qs = EMIInstallment.objects.filter(contract__retailer_id__in=retailer_ids)
 
         # Auto-mark overdue installments where due_date < today
@@ -482,6 +536,14 @@ class DashboardView(APIView):
             collection_date__month=today.month
         ).aggregate(total=Sum('paid_amount'))['total'] or Decimal('0.00')
 
+        if start_date:
+            range_collected = paid_qs.filter(
+                collection_date__date__gte=start_date,
+                collection_date__date__lte=end_date
+            ).aggregate(total=Sum('paid_amount'))['total'] or Decimal('0.00')
+        else:
+            range_collected = total_collected
+
         overdue_qs = installments_qs.filter(status=InstallmentStatus.OVERDUE)
         total_overdue_amount = overdue_qs.aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
         overdue_count = overdue_qs.count()
@@ -489,11 +551,17 @@ class DashboardView(APIView):
         financial_kpis = {
             "total_financed_amount": total_financed,
             "total_collected_amount": total_collected,
+            "range_collected_amount": range_collected,
             "total_pending_amount": max(total_financed - total_collected, Decimal('0.00')),
             "today_collection_amount": today_collected,
             "this_month_collection_amount": month_collected,
             "total_overdue_amount": total_overdue_amount,
             "overdue_installments_count": overdue_count,
+            "date_filter": {
+                "start_date": str(start_date) if start_date else None,
+                "end_date": str(end_date) if start_date else None,
+                "range": range_param or None
+            }
         }
 
         # 4. Key Inventory KPIs (Owned by current user)
@@ -639,4 +707,172 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
             return generate_csv_response("audit_logs_report.csv", headers, rows)
 
         return super().list(request, *args, **kwargs)
+
+
+class CurrentUserView(APIView):
+    """
+    P1 Endpoint: GET /api/auth/me/
+    Returns the authenticated user's profile, role, parent, key counts,
+    and permissions. Used by the web panel to restore session on page reload.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        full_name = f"{user.first_name} {user.last_name}".strip()
+        
+        parent_data = None
+        if user.parent:
+            p_name = f"{user.parent.first_name} {user.parent.last_name}".strip() or user.parent.username
+            parent_data = {
+                "id": user.parent.id,
+                "name": p_name,
+                "role": user.parent.role,
+                "business_name": user.parent.business_name
+            }
+
+        # Available keys breakdown
+        from keys.models import DeviceKey, KeyStatus
+        from django.db.models import Count
+        owned_keys = DeviceKey.objects.filter(current_owner=user, status=KeyStatus.AVAILABLE)
+        by_type = dict(owned_keys.values('device_type').annotate(c=Count('id')).values_list('device_type', 'c'))
+        by_type['total'] = sum(by_type.values())
+
+        # Children counts
+        subordinates = user.get_all_subordinates()
+        children_counts = {
+            'distributors': sum(1 for u in subordinates if u.role == 'DISTRIBUTOR'),
+            'sub_distributors': sum(1 for u in subordinates if u.role == 'SUB_DISTRIBUTOR'),
+            'retailers': sum(1 for u in subordinates if u.role == 'RETAILER'),
+            'customers': sum(1 for u in subordinates if u.role == 'CUSTOMER'),
+            'total': len(subordinates)
+        }
+
+        return Response({
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "first_name": user.first_name or "",
+            "last_name": user.last_name or "",
+            "name": full_name or user.business_name or user.username,
+            "role": user.role,
+            "mobile_number": user.mobile_number,
+            "alternate_mobile_number": user.alternate_mobile_number,
+            "business_name": user.business_name,
+            "state": user.state,
+            "city": user.city,
+            "pincode": user.pincode,
+            "address": user.address,
+            "pan_number": user.pan_number,
+            "gst_number": user.gst_number,
+            "can_reclaim_keys": user.can_reclaim_keys,
+            "is_active": user.is_active,
+            "date_joined": user.date_joined,
+            "parent": parent_data,
+            "available_keys": by_type,
+            "children_counts": children_counts,
+            "permissions": {
+                "is_super_admin": user.role == 'SUPER_ADMIN',
+                "can_lock_devices": user.role != 'CUSTOMER',
+                "can_generate_keys": user.role == 'SUPER_ADMIN',
+                "can_reclaim_keys": user.role == 'SUPER_ADMIN' or user.can_reclaim_keys,
+                "can_add_partners": user.can_add_partners,
+                "can_see_devices": user.can_see_devices,
+                "can_see_customer_phones": user.can_see_customer_phones,
+            },
+            "approval_step": user.approval_step,
+            "suspend_reason": user.suspend_reason,
+        })
+
+
+class LogoutView(APIView):
+    """
+    POST /api/auth/logout/
+    Blacklists the supplied JWT refresh token and logs the user logout.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        refresh_token = request.data.get('refresh')
+        if not refresh_token:
+            return Response({"detail": "Refresh token is required in 'refresh' field."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            from rest_framework_simplejwt.tokens import RefreshToken, TokenError
+            token = RefreshToken(refresh_token)
+            token.blacklist()
+            AuditLog.objects.create(
+                user=request.user,
+                action="USER_LOGOUT",
+                ip_address=get_client_ip(request),
+                details={"method": "jwt_blacklist"}
+            )
+            return Response({"detail": "Successfully logged out."}, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({"detail": str(e) if str(e) else "Invalid token or token already blacklisted."}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class ChangePasswordView(APIView):
+    """
+    Screen A-42: POST /api/auth/change-password/
+    Allows the logged-in user to change their password securely.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        from .serializers import ChangePasswordSerializer
+        serializer = ChangePasswordSerializer(data=request.data, context={'request': request})
+        if serializer.is_valid():
+            user = request.user
+            user.set_password(serializer.validated_data['new_password'])
+            user.save()
+            AuditLog.objects.create(
+                user=user,
+                action="PASSWORD_CHANGED",
+                ip_address=get_client_ip(request),
+                details={"method": "profile_self_service"}
+            )
+            return Response({"detail": "Password updated successfully."}, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class ProtectedMediaView(APIView):
+    """
+    Bug 3 Fix: Authenticated & Hierarchy-Scoped Media File Server.
+    Protects /media/kyc_documents/, /media/customer_photos/, /media/customer_signatures/
+    so unauthenticated or unauthorized users cannot access sensitive customer KYC data.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, file_path):
+        clean_path = os.path.normpath(file_path).lstrip('/\\')
+        full_path = os.path.abspath(os.path.join(settings.MEDIA_ROOT, clean_path))
+        media_root_abs = os.path.abspath(str(settings.MEDIA_ROOT))
+
+        if not full_path.startswith(media_root_abs):
+            return Response({"detail": "Access denied."}, status=status.HTTP_403_FORBIDDEN)
+
+        if not os.path.exists(full_path):
+            raise Http404("File not found.")
+
+        # Super Admin has global access to all files
+        user = request.user
+        if user.role != 'SUPER_ADMIN':
+            target_user = User.objects.filter(
+                models.Q(kyc_document__endswith=clean_path) |
+                models.Q(customer_photo__endswith=clean_path) |
+                models.Q(customer_signature__endswith=clean_path) |
+                models.Q(id_front_image__endswith=clean_path) |
+                models.Q(id_back_image__endswith=clean_path)
+            ).first()
+
+            if target_user:
+                if target_user != user and target_user not in user.get_all_subordinates():
+                    return Response(
+                        {"detail": "You do not have permission to access this document."},
+                        status=status.HTTP_403_FORBIDDEN
+                    )
+
+        content_type, _ = mimetypes.guess_type(full_path)
+        return FileResponse(open(full_path, 'rb'), content_type=content_type or 'application/octet-stream')
+
 

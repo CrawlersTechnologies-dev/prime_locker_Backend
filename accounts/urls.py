@@ -11,7 +11,10 @@ from .views import (
     PasswordResetRequestView,
     PasswordResetConfirmView,
     DashboardView,
-    AuditLogViewSet
+    AuditLogViewSet,
+    CurrentUserView,
+    LogoutView,
+    ChangePasswordView
 )
 
 router = DefaultRouter()
@@ -25,6 +28,9 @@ router.register(r'audit-logs', AuditLogViewSet, basename='audit-logs')
 urlpatterns = [
     path('auth/login/', CustomTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('auth/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+    path('auth/me/', CurrentUserView.as_view(), name='current_user'),
+    path('auth/logout/', LogoutView.as_view(), name='auth_logout'),
+    path('auth/change-password/', ChangePasswordView.as_view(), name='auth_change_password'),
     path('auth/password-reset-request/', PasswordResetRequestView.as_view(), name='password_reset_request'),
     path('auth/password-reset-confirm/', PasswordResetConfirmView.as_view(), name='password_reset_confirm'),
     path('dashboard/', DashboardView.as_view(), name='main-dashboard'),

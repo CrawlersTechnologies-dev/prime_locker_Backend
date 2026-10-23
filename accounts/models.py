@@ -46,8 +46,52 @@ class User(AbstractUser):
     customer_signature = models.FileField(upload_to='customer_signatures/', null=True, blank=True)
     remarks = models.TextField(null=True, blank=True)
     can_reclaim_keys = models.BooleanField(default=False)
+
+    # Partner Management Fields
+    approval_step = models.CharField(
+        max_length=20,
+        default='ACTIVE',
+        choices=[
+            ('PENDING', 'Pending'),
+            ('ACTIVE', 'Active'),
+            ('REJECTED', 'Rejected'),
+            ('SUSPENDED', 'Suspended')
+        ]
+    )
+    suspend_reason = models.TextField(null=True, blank=True)
+    can_add_partners = models.BooleanField(default=True)
+    can_see_devices = models.BooleanField(default=True)
+    can_see_customer_phones = models.BooleanField(default=True)
+
+    # Retailer Specific Fields
+    store_phone = models.CharField(max_length=20, null=True, blank=True)
+    district = models.CharField(max_length=100, null=True, blank=True)
+    allowed_devices = models.JSONField(default=list, blank=True)
+    grace_period = models.PositiveIntegerField(default=3)
+    max_devices = models.PositiveIntegerField(default=100)
+
+    # Customer Specific Fields
+    id_type = models.CharField(max_length=50, null=True, blank=True)
+    id_number = models.CharField(max_length=50, null=True, blank=True)
+    id_front_image = models.FileField(upload_to='kyc_documents/', null=True, blank=True)
+    id_back_image = models.FileField(upload_to='kyc_documents/', null=True, blank=True)
+    signed_emi_agreement_flag = models.BooleanField(default=False)
+    draft_status = models.CharField(
+        max_length=20,
+        default='COMPLETED',
+        choices=[('DRAFT', 'Draft'), ('COMPLETED', 'Completed')]
+    )
     
     objects = UserManager()
+
+    def get_all_subordinates(self):
+        """Returns a flat list of all downstream subordinate users under this user."""
+        if self.role == 'SUPER_ADMIN':
+            return list(User.objects.exclude(id=self.id))
+        subordinates = list(self.children.all())
+        for sub in subordinates:
+            subordinates.extend(sub.get_all_subordinates())
+        return subordinates
 
     def __str__(self):
         return f"{self.username} ({self.get_role_display()})"
