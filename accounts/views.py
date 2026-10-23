@@ -876,3 +876,211 @@ class ProtectedMediaView(APIView):
         return FileResponse(open(full_path, 'rb'), content_type=content_type or 'application/octet-stream')
 
 
+def send_system_notification(recipient, title, message, notification_type='SYSTEM', reference_id=None, sender=None):
+    from .models import Notification
+    return Notification.objects.create(
+        recipient=recipient,
+        sender=sender,
+        title=title,
+        message=message,
+        notification_type=notification_type,
+        reference_id=str(reference_id) if reference_id else None
+    )
+
+
+class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    Screen A-41 Bell Icon Notifications.
+    Lists alerts, supports unread count, and mark-read actions.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_serializer_class(self):
+        from .serializers import NotificationSerializer
+        return NotificationSerializer
+
+    def get_queryset(self):
+        from .models import Notification
+        qs = Notification.objects.filter(recipient=self.request.user)
+        if self.request.query_params.get('unread') == 'true':
+            qs = qs.filter(is_read=False)
+        notif_type = self.request.query_params.get('type')
+        if notif_type:
+            qs = qs.filter(notification_type__iexact=notif_type)
+        return qs
+
+    @action(detail=False, methods=['get'], url_path='unread-count')
+    def unread_count(self, request):
+        from .models import Notification
+        count = Notification.objects.filter(recipient=request.user, is_read=False).count()
+        return Response({"unread_count": count})
+
+    @action(detail=True, methods=['post'], url_path='mark-read')
+    def mark_read(self, request, pk=None):
+        notif = self.get_object()
+        notif.is_read = True
+        notif.save(update_fields=['is_read'])
+        return Response({"status": "marked_as_read", "id": notif.id})
+
+    @action(detail=False, methods=['post'], url_path='mark-all-read')
+    def mark_all_read(self, request):
+        from .models import Notification
+        updated = Notification.objects.filter(recipient=request.user, is_read=False).update(is_read=True)
+        return Response({"status": "all_marked_as_read", "updated_count": updated})
+
+
+class PlatformSettingsView(APIView):
+    """
+    Screen A-39 / A-40: Company & System Settings.
+    GET: View company profile, support contacts, and grace period settings.
+    PATCH / PUT: Super Admin updates system configurations.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        from .models import PlatformSettings
+        from .serializers import PlatformSettingsSerializer
+        settings_obj = PlatformSettings.get_settings()
+        serializer = PlatformSettingsSerializer(settings_obj, context={'request': request})
+        return Response(serializer.data)
+
+    def patch(self, request):
+        if request.user.role != 'SUPER_ADMIN':
+            return Response({"detail": "Only Super Admin can update system settings."}, status=status.HTTP_403_FORBIDDEN)
+        from .models import PlatformSettings
+        from .serializers import PlatformSettingsSerializer
+        settings_obj = PlatformSettings.get_settings()
+        serializer = PlatformSettingsSerializer(settings_obj, data=request.data, partial=True, context={'request': request})
+        if serializer.is_valid():
+            serializer.save()
+            AuditLog.objects.create(
+                user=request.user,
+                action="UPDATED_SYSTEM_SETTINGS",
+                ip_address=get_client_ip(request),
+                details=request.data
+            )
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def put(self, request):
+        return self.patch(request)
+
+
+class StaffViewSet(viewsets.ModelViewSet):
+    """
+    Super Admin only: Manage internal company staff roles (Operations, Collections, Support, Viewer).
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_serializer_class(self):
+        from .serializers import StaffUserSerializer
+        return StaffUserSerializer
+
+    def get_queryset(self):
+        if self.request.user.role != 'SUPER_ADMIN':
+            return User.objects.none()
+        return User.objects.filter(role__in=[
+            'STAFF_OPERATIONS', 'STAFF_COLLECTIONS', 'STAFF_SUPPORT', 'STAFF_VIEWER'
+        ]).order_by('-date_joined')
+
+    def perform_create(self, serializer):
+        from rest_framework import exceptions
+        if self.request.user.role != 'SUPER_ADMIN':
+            raise exceptions.PermissionDenied("Only Super Admin can create staff accounts.")
+        instance = serializer.save()
+        AuditLog.objects.create(
+            user=self.request.user,
+            action="CREATED_STAFF_MEMBER",
+            ip_address=get_client_ip(self.request),
+            details={"staff_id": instance.id, "email": instance.email, "role": instance.role}
+        )
+
+    def perform_destroy(self, instance):
+        from rest_framework import exceptions
+        if self.request.user.role != 'SUPER_ADMIN':
+            raise exceptions.PermissionDenied("Only Super Admin can remove staff.")
+        instance.is_active = False
+        instance.save(update_fields=['is_active'])
+        AuditLog.objects.create(
+            user=self.request.user,
+            action="DEACTIVATED_STAFF_MEMBER",
+            ip_address=get_client_ip(self.request),
+            details={"staff_id": instance.id, "email": instance.email}
+        )
+
+
+class WhatsAppCampaignView(APIView):
+    """
+    WhatsApp Automated Messaging & Broadcast Campaigns.
+    GET: View available message templates and recent delivery logs.
+    POST: Super Admin / Collections Staff triggers batch WhatsApp messages.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        from .models import WhatsAppMessageLog
+        from .serializers import WhatsAppMessageLogSerializer
+        from .whatsapp import WhatsAppService
+        recent_logs = WhatsAppMessageLog.objects.all()[:50]
+        serializer = WhatsAppMessageLogSerializer(recent_logs, many=True)
+        return Response({
+            "templates": WhatsAppService.TEMPLATES,
+            "recent_deliveries": serializer.data
+        })
+
+    def post(self, request):
+        user = request.user
+        if user.role not in ['SUPER_ADMIN', 'STAFF_OPERATIONS', 'STAFF_COLLECTIONS']:
+            return Response({"detail": "You do not have permission to launch WhatsApp campaigns."}, status=status.HTTP_403_FORBIDDEN)
+
+        from .whatsapp import WhatsAppService
+        template_name = request.data.get('template_name')
+        if not template_name or template_name not in WhatsAppService.TEMPLATES:
+            return Response({
+                "detail": f"Valid 'template_name' is required. Choices: {list(WhatsAppService.TEMPLATES.keys())}"
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        segment = request.data.get('segment', 'CUSTOM')
+        phone_numbers = request.data.get('phone_numbers', [])
+        params = request.data.get('parameters', {})
+
+        from emi.models import CustomerEMIContract, EMIContractStatus
+        recipients = []
+        if segment == 'OVERDUE_ALL':
+            overdue_contracts = CustomerEMIContract.objects.filter(status=EMIContractStatus.OVERDUE).select_related('customer')
+            for c in overdue_contracts:
+                if c.customer and c.customer.mobile_number:
+                    recipients.append((c.customer.mobile_number, c.customer.get_full_name() or c.customer.username))
+        elif segment == 'LOCKED_DEVICES':
+            locked_contracts = CustomerEMIContract.objects.filter(status=EMIContractStatus.LOCKED).select_related('customer')
+            for c in locked_contracts:
+                if c.customer and c.customer.mobile_number:
+                    recipients.append((c.customer.mobile_number, c.customer.get_full_name() or c.customer.username))
+        elif phone_numbers:
+            for p in phone_numbers:
+                recipients.append((p, 'Customer'))
+
+        if not recipients:
+            return Response({"detail": "No recipients found for the selected segment."}, status=status.HTTP_400_BAD_REQUEST)
+
+        results = []
+        for phone, name in recipients:
+            p_copy = params.copy()
+            p_copy.setdefault('customer_name', name)
+            res = WhatsAppService.send_template(phone, template_name, p_copy, recipient_name=name)
+            results.append({'phone': phone, 'status': res.get('status')})
+
+        AuditLog.objects.create(
+            user=user,
+            action="LAUNCHED_WHATSAPP_CAMPAIGN",
+            ip_address=get_client_ip(request),
+            details={"template": template_name, "segment": segment, "recipient_count": len(recipients)}
+        )
+
+        return Response({
+            "message": f"WhatsApp campaign '{template_name}' dispatched successfully to {len(recipients)} recipients.",
+            "total_recipients": len(recipients),
+            "results": results[:20]
+        })
+
+

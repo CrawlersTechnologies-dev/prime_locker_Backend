@@ -349,6 +349,37 @@ class EMIInstallmentViewSet(viewsets.GenericViewSet):
                     }
                 )
 
+                # Trigger WhatsApp confirmation to customer
+                try:
+                    from accounts.whatsapp import WhatsAppService
+                    if contract.customer and contract.customer.mobile_number:
+                        WhatsAppService.send_template(
+                            phone_number=contract.customer.mobile_number,
+                            template_name='payment_receipt_success',
+                            parameters={
+                                'customer_name': contract.customer.first_name or contract.customer.username,
+                                'amount': str(amount),
+                                'receipt_number': f"REC-{installment.id:06d}"
+                            },
+                            recipient_name=contract.customer.first_name
+                        )
+                except Exception:
+                    pass
+
+                # Trigger in-app notification to retailer
+                try:
+                    from accounts.views import send_system_notification
+                    if contract.retailer:
+                        send_system_notification(
+                            recipient=contract.retailer,
+                            title="EMI Payment Recorded",
+                            message=f"Payment of ₹{amount} recorded for contract #{contract.id} ({contract.device_imei}).",
+                            notification_type="PAYMENT_RECEIVED",
+                            reference_id=installment.id
+                        )
+                except Exception:
+                    pass
+
             return Response({
                 "message": f"Payment of ₹{amount} successfully recorded for Installment #{installment.installment_number}.",
                 "contract_status": contract.status,

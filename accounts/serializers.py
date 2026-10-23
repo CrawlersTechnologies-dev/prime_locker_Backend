@@ -430,3 +430,90 @@ class AuditLogSerializer(serializers.ModelSerializer):
             }
         return None
 
+
+from .models import Notification, PlatformSettings, WhatsAppMessageLog
+
+class NotificationSerializer(serializers.ModelSerializer):
+    sender_name = serializers.SerializerMethodField(read_only=True)
+
+    class Meta:
+        model = Notification
+        fields = [
+            'id', 'recipient', 'sender', 'sender_name', 'title', 'message',
+            'notification_type', 'reference_id', 'is_read', 'created_at'
+        ]
+        read_only_fields = ['id', 'created_at']
+
+    def get_sender_name(self, obj):
+        if obj.sender:
+            return f"{obj.sender.first_name} {obj.sender.last_name}".strip() or obj.sender.username
+        return "System"
+
+
+class PlatformSettingsSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PlatformSettings
+        fields = '__all__'
+
+    def to_representation(self, instance):
+        representation = super().to_representation(instance)
+        request = self.context.get('request')
+        is_super_admin = request and request.user and request.user.role == 'SUPER_ADMIN'
+        if not is_super_admin:
+            representation.pop('razorpay_key_secret', None)
+            representation.pop('whatsapp_api_key', None)
+        return representation
+
+
+class StaffUserSerializer(serializers.ModelSerializer):
+    username = serializers.CharField(required=False)
+    full_name = serializers.CharField(write_only=True, required=False)
+    password = serializers.CharField(write_only=True, required=True, style={'input_type': 'password'})
+
+    class Meta:
+        model = User
+        fields = [
+            'id', 'username', 'email', 'full_name', 'first_name', 'last_name',
+            'mobile_number', 'role', 'is_active', 'date_joined', 'password'
+        ]
+        read_only_fields = ['id', 'date_joined']
+
+    def validate_role(self, value):
+        valid_staff_roles = ['STAFF_OPERATIONS', 'STAFF_COLLECTIONS', 'STAFF_SUPPORT', 'STAFF_VIEWER']
+        if value not in valid_staff_roles:
+            raise serializers.ValidationError(f"Invalid staff role. Choices are: {', '.join(valid_staff_roles)}")
+        return value
+
+    def validate_email(self, value):
+        if value:
+            value = value.strip().lower()
+            qs = User.objects.filter(models.Q(email__iexact=value) | models.Q(username__iexact=value))
+            if self.instance:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError("A user with this email is already registered.")
+        return value
+
+    def create(self, validated_data):
+        password = validated_data.pop('password')
+        full_name = validated_data.pop('full_name', '')
+        if full_name:
+            parts = full_name.split(' ', 1)
+            validated_data['first_name'] = parts[0]
+            validated_data['last_name'] = parts[1] if len(parts) > 1 else ''
+        
+        if not validated_data.get('username'):
+            validated_data['username'] = validated_data.get('email')
+
+        user = User(**validated_data)
+        user.set_password(password)
+        user.is_staff = True
+        user.save()
+        return user
+
+
+class WhatsAppMessageLogSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = WhatsAppMessageLog
+        fields = '__all__'
+

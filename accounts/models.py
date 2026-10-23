@@ -8,6 +8,10 @@ class Role(models.TextChoices):
     SUB_DISTRIBUTOR = 'SUB_DISTRIBUTOR', 'Sub Distributor'
     RETAILER = 'RETAILER', 'Retailer'
     CUSTOMER = 'CUSTOMER', 'Customer'
+    STAFF_OPERATIONS = 'STAFF_OPERATIONS', 'Staff - Operations'
+    STAFF_COLLECTIONS = 'STAFF_COLLECTIONS', 'Staff - Collections'
+    STAFF_SUPPORT = 'STAFF_SUPPORT', 'Staff - Technical Support'
+    STAFF_VIEWER = 'STAFF_VIEWER', 'Staff - Auditor / Viewer'
 
 class UserManager(BaseUserManager):
     def create_user(self, username, email, password=None, **extra_fields):
@@ -120,3 +124,74 @@ class PasswordResetOTP(models.Model):
 
     def __str__(self):
         return f"OTP for {self.user.username}"
+
+
+class NotificationType(models.TextChoices):
+    KEY_REQUEST = 'KEY_REQUEST', 'Key Request'
+    PAYMENT_RECEIVED = 'PAYMENT_RECEIVED', 'Payment Received'
+    OVERDUE_ALERT = 'OVERDUE_ALERT', 'Overdue Alert'
+    DEVICE_LOCK = 'DEVICE_LOCK', 'Device Lock'
+    DEVICE_UNLOCK = 'DEVICE_UNLOCK', 'Device Unlock'
+    SYSTEM = 'SYSTEM', 'System Alert'
+
+
+class Notification(models.Model):
+    recipient = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
+    sender = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='sent_notifications')
+    title = models.CharField(max_length=255)
+    message = models.TextField()
+    notification_type = models.CharField(max_length=50, choices=NotificationType.choices, default=NotificationType.SYSTEM)
+    reference_id = models.CharField(max_length=100, null=True, blank=True)
+    is_read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.title} for {self.recipient.username}"
+
+
+class PlatformSettings(models.Model):
+    company_name = models.CharField(max_length=255, default='Prime Locker')
+    support_phone = models.CharField(max_length=50, default='+91 8000-111-222')
+    support_email = models.CharField(max_length=100, default='support@primelocker.pro')
+    company_address = models.TextField(default='100 MG Road, Bengaluru, Karnataka 560001')
+    gstin = models.CharField(max_length=50, null=True, blank=True, default='29AAAAA0000A1Z5')
+    default_grace_period_days = models.PositiveIntegerField(default=3)
+    auto_lock_enabled = models.BooleanField(default=True)
+    late_fee_per_day = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+    
+    # Third-party integrations
+    razorpay_key_id = models.CharField(max_length=100, null=True, blank=True)
+    razorpay_key_secret = models.CharField(max_length=100, null=True, blank=True)
+    whatsapp_provider = models.CharField(max_length=50, default='SIMULATION')
+    whatsapp_api_key = models.CharField(max_length=255, null=True, blank=True)
+    whatsapp_sender_id = models.CharField(max_length=50, null=True, blank=True)
+    
+    updated_at = models.DateTimeField(auto_now=True)
+
+    @classmethod
+    def get_settings(cls):
+        obj, _ = cls.objects.get_or_create(id=1)
+        return obj
+
+    def __str__(self):
+        return f"{self.company_name} Settings"
+
+
+class WhatsAppMessageLog(models.Model):
+    recipient_phone = models.CharField(max_length=20)
+    recipient_name = models.CharField(max_length=150, null=True, blank=True)
+    template_name = models.CharField(max_length=100)
+    parameters = models.JSONField(default=dict, blank=True)
+    status = models.CharField(max_length=20, default='SENT') # 'SENT', 'FAILED', 'SIMULATED'
+    provider = models.CharField(max_length=50, default='SIMULATION')
+    response_payload = models.JSONField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.template_name} to {self.recipient_phone} ({self.status})"

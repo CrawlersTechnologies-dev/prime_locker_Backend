@@ -586,6 +586,17 @@ class KeyRequestViewSet(viewsets.ModelViewSet):
             }
         )
 
+        if instance.parent:
+            from accounts.views import send_system_notification
+            send_system_notification(
+                recipient=instance.parent,
+                sender=self.request.user,
+                title="New Key Request Received",
+                message=f"{self.request.user.username} requested {instance.quantity} {instance.os_type or instance.device_type} keys.",
+                notification_type="KEY_REQUEST",
+                reference_id=instance.id
+            )
+
     @action(detail=True, methods=['post'])
     def approve(self, request, pk=None):
         key_req = self.get_object()

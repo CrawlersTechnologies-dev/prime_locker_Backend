@@ -228,3 +228,16 @@ python manage.py runserver
 | `GET`/`POST` | `/api/app-versions/` | Upload and manage Android Locker / Smart TV APK releases |
 | `GET` | `/api/app-versions/latest/?app_type=ANDROID_LOCKER` | Get latest active APK release with download link & QR code |
 
+### 🔔 Notifications, Staff & Advanced Administration
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `GET` | `/api/notifications/` | In-app alerts list for Bell Icon A-41 (`?unread=true`, `?type=`) |
+| `GET` | `/api/notifications/unread-count/` | Live badge count of unread notifications |
+| `POST` | `/api/notifications/{id}/mark-read/` | Mark individual notification as read |
+| `POST` | `/api/notifications/mark-all-read/` | Mark all notifications as read |
+| `GET`/`POST` | `/api/staff/` | Manage internal staff roles (`STAFF_OPERATIONS`, `STAFF_COLLECTIONS`, `STAFF_SUPPORT`, `STAFF_VIEWER`) |
+| `PATCH`/`DELETE` | `/api/staff/{id}/` | Update or deactivate staff member |
+| `GET`/`PATCH` | `/api/settings/` | Platform & Company Settings (Support phone, email, grace period, auto-lock toggle, gateway keys) |
+| `GET` | `/api/whatsapp/campaigns/` | View available message templates and recent delivery logs |
+| `POST` | `/api/whatsapp/campaigns/` | Dispatch automated or bulk WhatsApp reminder campaigns (`OVERDUE_ALL`, `LOCKED_DEVICES`, custom numbers) |
+

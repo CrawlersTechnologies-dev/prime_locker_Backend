@@ -14,7 +14,11 @@ from .views import (
     AuditLogViewSet,
     CurrentUserView,
     LogoutView,
-    ChangePasswordView
+    ChangePasswordView,
+    NotificationViewSet,
+    StaffViewSet,
+    PlatformSettingsView,
+    WhatsAppCampaignView
 )
 
 router = DefaultRouter()
@@ -24,6 +28,8 @@ router.register(r'sub-distributors', SubDistributorViewSet, basename='sub-distri
 router.register(r'retailers', RetailerViewSet, basename='retailer')
 router.register(r'customers', CustomerViewSet, basename='customer')
 router.register(r'audit-logs', AuditLogViewSet, basename='audit-logs')
+router.register(r'notifications', NotificationViewSet, basename='notifications')
+router.register(r'staff', StaffViewSet, basename='staff')
 
 urlpatterns = [
     path('auth/login/', CustomTokenObtainPairView.as_view(), name='token_obtain_pair'),
@@ -34,5 +40,7 @@ urlpatterns = [
     path('auth/password-reset-request/', PasswordResetRequestView.as_view(), name='password_reset_request'),
     path('auth/password-reset-confirm/', PasswordResetConfirmView.as_view(), name='password_reset_confirm'),
     path('dashboard/', DashboardView.as_view(), name='main-dashboard'),
+    path('settings/', PlatformSettingsView.as_view(), name='platform_settings'),
+    path('whatsapp/campaigns/', WhatsAppCampaignView.as_view(), name='whatsapp_campaigns'),
     path('', include(router.urls)),
 ]

@@ -615,6 +615,239 @@
           }
         }
       ]
+    },
+    {
+      "name": "8. Staff Management (RBAC)",
+      "item": [
+        {
+          "name": "List Staff Members",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/staff/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "staff",
+                ""
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Staff Member (Operations / Collections)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"full_name\": \"Kiran Operations\",\n  \"email\": \"kiran_ops@primelocker.pro\",\n  \"password\": \"StaffPassword123!\",\n  \"role\": \"STAFF_OPERATIONS\",\n  \"mobile_number\": \"9801122334\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/staff/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "staff",
+                ""
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "9. System & Company Settings (A-39 / A-40)",
+      "item": [
+        {
+          "name": "Get System Settings",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/settings/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "settings",
+                ""
+              ]
+            }
+          }
+        },
+        {
+          "name": "Update Settings (Grace Period, Support Phone)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"company_name\": \"Prime Locker Technologies\",\n  \"support_phone\": \"+91 8000-111-222\",\n  \"default_grace_period_days\": 3,\n  \"auto_lock_enabled\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/settings/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "settings",
+                ""
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "10. Notifications (Bell Icon Screen A-41)",
+      "item": [
+        {
+          "name": "List Notifications (All)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/notifications/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "notifications",
+                ""
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Unread Count (Badge)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/notifications/unread-count/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "notifications",
+                "unread-count",
+                ""
+              ]
+            }
+          }
+        },
+        {
+          "name": "Mark Notification as Read",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/notifications/1/mark-read/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "notifications",
+                "1",
+                "mark-read",
+                ""
+              ]
+            }
+          }
+        },
+        {
+          "name": "Mark All as Read",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/notifications/mark-all-read/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "notifications",
+                "mark-all-read",
+                ""
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "11. WhatsApp Campaigns & Delivery Logs",
+      "item": [
+        {
+          "name": "Get Templates & Recent Delivery Logs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/whatsapp/campaigns/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "whatsapp",
+                "campaigns",
+                ""
+              ]
+            }
+          }
+        },
+        {
+          "name": "Send WhatsApp Campaign (Overdue Defaulters)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"template_name\": \"emi_due_reminder\",\n  \"phone_numbers\": [\n    \"919876543210\"\n  ],\n  \"parameters\": {\n    \"amount\": \"4500\",\n    \"device_name\": \"Samsung S23\",\n    \"due_date\": \"2026-10-30\",\n    \"payment_link\": \"https://pay.primelocker.pro/pay/1\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/whatsapp/campaigns/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "whatsapp",
+                "campaigns",
+                ""
+              ]
+            }
+          }
+        }
+      ]
     }
   ]
 }
