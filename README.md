@@ -135,32 +135,37 @@ python manage.py runserver
 | :--- | :--- | :--- |
 | `POST` | `/api/auth/login/` | JWT token obtain (`username` / `email`, `password`, optional `keep_me_signed_in`) |
 | `POST` | `/api/auth/token/refresh/` | Refresh JWT access token |
+| `POST` | `/api/auth/logout/` | Blacklist JWT refresh token (`{"refresh": "<token>"}`) and record logout audit |
+| `POST` | `/api/auth/change-password/` | Change password (Screen A-42: `old_password`, `new_password`, `confirm_password`) |
+| `GET` | `/api/auth/me/` | Current user profile, role, parent, key counts, permissions (restores session on page reload) |
 | `POST` | `/api/auth/password-reset-request/` | Request 6-digit OTP for password reset |
 | `POST` | `/api/auth/password-reset-confirm/` | Verify OTP & set new password |
-| `GET`/`POST` | `/api/super-distributors/` | Manage Super Distributors |
-| `GET`/`POST` | `/api/distributors/` | Manage Distributors |
-| `GET`/`POST` | `/api/sub-distributors/` | Manage Sub-Distributors |
-| `GET`/`POST` | `/api/retailers/` | Manage Retailers |
-| `GET`/`POST` | `/api/customers/` | Onboard and view Customers (with photo, signature, alt phone) |
+| `GET`/`POST` | `/api/super-distributors/` | Manage Super Distributors (returns key balances, children counts, key flow stats) |
+| `GET`/`POST` | `/api/distributors/` | Manage Distributors (returns key balances, children counts, key flow stats) |
+| `GET`/`POST` | `/api/sub-distributors/` | Manage Sub-Distributors (returns key balances, children counts, key flow stats) |
+| `GET`/`POST` | `/api/retailers/` | Manage Retailers (returns key balances, children counts, key flow stats) |
+| `GET`/`POST` | `/api/customers/` | Onboard and view Customers (`first_name`, `last_name`, `name`, photo, signature, alt phone) |
 | `GET` | `/api/customers/loan-providers/` | Get list of loan providers/financiers for mobile app dropdown |
 | `POST` | `/api/customers/enroll/` | Step 1: Customer & Device Onboarding (Screen: Customer Device Details) with Photo, Signature, IMEI & Token Key |
-| `GET` | `/api/dashboard/` | Role-aware Main Overview Dashboard (Network, EMI, Collections, Keys, Recent Activity) |
+| `GET` | `/api/dashboard/` | Role-aware Overview Dashboard (`?range=today\|7d\|30d\|this_month` or `?start_date=&end_date=`) |
 | `GET` | `/api/audit-logs/` | Paginated, filterable Security Audit Logs (`?action=`, `?role=`, `?search=`, `?export=csv`) |
+| `GET` | `/media/<path>` | Secure, authenticated media file server for KYC docs, photos, and signatures |
 
 ### 🔑 Key Management
 | Method | Endpoint | Description |
 | :--- | :--- | :--- |
-| `POST` | `/api/keys/generate/` | *(Super Admin)* Generate batches of keys with prefix (`MOB-`, `TV-`) |
+| `POST` | `/api/keys/generate/` | *(Super Admin)* Generate batches of keys with prefix (`MOB-`, `TV-`, `AND-`, `IOS-`) and optional `reference_note` |
 | `GET` | `/api/keys/` | Paginated list of keys owned by current user (50/page) |
 | `GET` | `/api/keys/dashboard/` | Inventory summary grouped by device type & status |
 | `GET` | `/api/keys/recipients/` | Step 1: Get selectable recipient roles |
 | `GET` | `/api/keys/recipients/?role=RETAILER` | Step 2: Get active users of selected role with key balances |
-| `POST` | `/api/keys/allocate/` | Transfer keys directly down the hierarchy (by `target_user_id` and `target_role`) |
-| `POST` | `/api/keys/reclaim/` | Unilateral Key Recall: Higher authorities reclaim unactivated keys from downline nodes (irrespective of reason, no lower-user permission required) |
+| `POST` | `/api/keys/allocate/` | Transfer keys directly down the hierarchy (by `target_user_id`, `quantity`, optional `reference_note`) |
+| `POST` | `/api/keys/reclaim/` | Unilateral Key Recall: Higher authorities reclaim unactivated keys from downline nodes (supports optional `reason`) |
 | `POST` | `/api/keys/activate/` | Activate key against customer device IMEI |
-| `GET`/`POST` | `/api/key-requests/` | Bottom-up key requests (Retailer ➔ Parent). Supports explicit `os_type` (`ANDROID`, `IOS`) and `notes` so parent knows the exact target OS |
-| `POST` | `/api/key-requests/{id}/approve/` | Parent approves request & auto-transfers platform-matching keys (`IOS-` for iOS, `AND-` for Android) |
-| `POST` | `/api/key-requests/{id}/reject/` | Parent rejects key request |
+| `GET` | `/api/keys/transactions/` | Key history (Screen N-07): lists generated, allocated, reclaimed, activated transactions with `from_user`, `to_user`, date, type (`?type=`, `?start_date=`, `?end_date=`, `?search=`, `?export=csv`) |
+| `GET`/`POST` | `/api/key-requests/` | Bottom-up key requests (Retailer ➔ Parent). Returns requester key balance, keys used this month, platform display (`?search=`) |
+| `POST` | `/api/key-requests/{id}/approve/` | Parent approves request & auto-transfers keys (supports `{quantity}` for partial approval) |
+| `POST` | `/api/key-requests/{id}/reject/` | Parent rejects key request (supports `{reason}` stored in notes) |
 
 ### 💳 EMI & Payments Management
 | Method | Endpoint | Description |
@@ -168,10 +173,12 @@ python manage.py runserver
 | `GET`/`POST` | `/api/emi-plans/` | Master EMI Plan Templates (CRUD Super Admin only; read-only for others) |
 | `PATCH`/`PUT`| `/api/emi-plans/{id}/` | *(Super Admin)* Edit master plan terms |
 | `POST` | `/api/emi-plans/{id}/toggle-status/` | *(Super Admin)* Activate / Deactivate plan |
-| `GET`/`POST` | `/api/emi-contracts/` | Set up EMI contract (auto-generates installment schedule) |
+| `GET`/`POST` | `/api/emi-contracts/` | Set up EMI contract (auto-generates installment schedule; supports `?customer=`, `?retailer=`, `?status=`, `?search=`) |
 | `GET` | `/api/emi-contracts/{id}/schedule/` | View financial summary bar + all installment rows |
 | `POST` | `/api/emi-contracts/{id}/lock/` | Manual device lock override |
 | `POST` | `/api/emi-contracts/{id}/unlock/` | Manual device unlock override |
+| `GET` | `/api/payments/` | Paid installments list (Screen A-23) with customer, device, retailer, receipt number, mode, ref (`?date=`, `?start_date=`, `?end_date=`, `?mode=`, `?retailer=`, `?search=`, `?export=csv`) |
+| `GET` | `/api/payments/{id}/` | Payment receipt (Screen A-25) with receipt number (`REC-XXXXXX`), customer/retailer addresses, and contract financial breakdown |
 | `POST` | `/api/emi-installments/{id}/record-payment/` | Record in-store offline payment (Cash/UPI/Card) & auto-unlock device if overdue |
 | `POST` | `/api/emi-installments/{id}/create-payment-order/` | Create Razorpay order for online customer payment (returns `order_id`, key, paise amount; includes simulation mode) |
 | `POST` | `/api/emi-installments/{id}/verify-online-payment/` | Verify Razorpay checkout signature & mark installment as `PAID` via `ONLINE_GATEWAY` |
