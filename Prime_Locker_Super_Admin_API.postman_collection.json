@@ -848,6 +848,346 @@
           }
         }
       ]
+    },
+    {
+      "name": "12. Banners & Lock Messages (M1, M2)",
+      "item": [
+        {
+          "name": "List Banners (A-42)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/banners/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "banners",
+                ""
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Banner (A-42)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Diwali Festive Sale\",\n  \"link\": \"https://primelocker.pro/offers\",\n  \"target_role\": \"ALL\",\n  \"is_active\": true,\n  \"order\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/banners/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "banners",
+                ""
+              ]
+            }
+          }
+        },
+        {
+          "name": "List Lock Message Templates (A-40)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/lock-messages/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "lock-messages",
+                ""
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Lock Message Template (A-40)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Overdue Warning Notice\",\n  \"text\": \"Your EMI payment is overdue. Please visit your nearest store to clear dues.\",\n  \"is_default\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/lock-messages/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "lock-messages",
+                ""
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "13. RocketPay DLC & Device Controls (M4, M5, M7, M10, Webhook)",
+      "item": [
+        {
+          "name": "Device Command History (M4)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/devices/{{device_id}}/commands/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "devices",
+                "{{device_id}}",
+                "commands",
+                ""
+              ]
+            }
+          }
+        },
+        {
+          "name": "Set Device Controls (M5)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"camera_disabled\": true,\n  \"block_factory_reset\": true,\n  \"frp_protection_enabled\": true,\n  \"social_media_disabled\": false,\n  \"streaming_blocked\": true,\n  \"lock_message\": \"Please pay your pending EMI\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/devices/{{device_id}}/controls/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "devices",
+                "{{device_id}}",
+                "controls",
+                ""
+              ]
+            }
+          }
+        },
+        {
+          "name": "Generate Offline Code with Expiry (M7)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"expiry_option\": \"24_HOURS\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/devices/{{device_id}}/generate-offline-code/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "devices",
+                "{{device_id}}",
+                "generate-offline-code",
+                ""
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Installed Apps (M10)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/devices/{{device_id}}/apps/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "devices",
+                "{{device_id}}",
+                "apps",
+                ""
+              ]
+            }
+          }
+        },
+        {
+          "name": "Lock App (M10)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"package_name\": \"com.netflix.mediaclient\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/devices/{{device_id}}/apps/lock/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "devices",
+                "{{device_id}}",
+                "apps",
+                "lock",
+                ""
+              ]
+            }
+          }
+        },
+        {
+          "name": "Audio Reminder (M10)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Dear Customer, your EMI of Rs. 1500 is due today.\",\n  \"volume\": 100\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/devices/{{device_id}}/audio-reminder/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "devices",
+                "{{device_id}}",
+                "audio-reminder",
+                ""
+              ]
+            }
+          }
+        },
+        {
+          "name": "Block TV Streaming Apps (M10)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"streaming_blocked\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/devices/{{device_id}}/block-streaming/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "devices",
+                "{{device_id}}",
+                "block-streaming",
+                ""
+              ]
+            }
+          }
+        },
+        {
+          "name": "Refresh Location Now (M10)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/devices/{{device_id}}/refresh-location/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "devices",
+                "{{device_id}}",
+                "refresh-location",
+                ""
+              ]
+            }
+          }
+        },
+        {
+          "name": "RocketPay Webhook Event (Section B)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-RocketPay-Signature",
+                "value": "simulated_rocketpay_signature"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event\": \"device.locked\",\n  \"device_id\": \"rp_86000000_abc123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/integrations/rocketpay/webhook/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "integrations",
+                "rocketpay",
+                "webhook",
+                ""
+              ]
+            }
+          }
+        }
+      ]
     }
   ]
 }
