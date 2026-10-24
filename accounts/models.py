@@ -90,7 +90,7 @@ class User(AbstractUser):
 
     def get_all_subordinates(self):
         """Returns a flat list of all downstream subordinate users under this user."""
-        if self.role == 'SUPER_ADMIN':
+        if is_company_user(self):
             return list(User.objects.exclude(id=self.id))
         subordinates = list(self.children.all())
         for sub in subordinates:
@@ -99,6 +99,17 @@ class User(AbstractUser):
 
     def __str__(self):
         return f"{self.username} ({self.get_role_display()})"
+
+
+def is_company_user(user):
+    """
+    Checks if a user is a company-internal user (Super Admin or any Staff role).
+    Company users have company-wide visibility across all partners, customers, devices, and reports.
+    """
+    if not user or not getattr(user, 'is_authenticated', False):
+        return False
+    role = getattr(user, 'role', '')
+    return role == Role.SUPER_ADMIN or str(role).startswith('STAFF_')
 
 class AuditLog(models.Model):
     user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
@@ -128,6 +139,9 @@ class PasswordResetOTP(models.Model):
 
 class NotificationType(models.TextChoices):
     KEY_REQUEST = 'KEY_REQUEST', 'Key Request'
+    KEY_REQUEST_APPROVED = 'KEY_REQUEST_APPROVED', 'Key Request Approved'
+    KEY_REQUEST_REJECTED = 'KEY_REQUEST_REJECTED', 'Key Request Rejected'
+    PARTNER_ADDED = 'PARTNER_ADDED', 'Partner Added'
     PAYMENT_RECEIVED = 'PAYMENT_RECEIVED', 'Payment Received'
     OVERDUE_ALERT = 'OVERDUE_ALERT', 'Overdue Alert'
     DEVICE_LOCK = 'DEVICE_LOCK', 'Device Lock'
@@ -169,6 +183,12 @@ class PlatformSettings(models.Model):
     whatsapp_api_key = models.CharField(max_length=255, null=True, blank=True)
     whatsapp_sender_id = models.CharField(max_length=50, null=True, blank=True)
     
+    # RocketPay DLC integration
+    rocketpay_api_key = models.CharField(max_length=255, null=True, blank=True)
+    rocketpay_base_url = models.CharField(max_length=255, default='https://api.rocketpay.in')
+    rocketpay_webhook_secret = models.CharField(max_length=255, null=True, blank=True)
+    rocketpay_enabled = models.BooleanField(default=True)
+    
     updated_at = models.DateTimeField(auto_now=True)
 
     @classmethod
@@ -178,6 +198,37 @@ class PlatformSettings(models.Model):
 
     def __str__(self):
         return f"{self.company_name} Settings"
+
+
+class Banner(models.Model):
+    """
+    Screen A-42 Banners Management.
+    Promotional / Informational banners displayed on the mobile apps & web panels.
+    """
+    TARGET_ROLES = [
+        ('ALL', 'All Users'),
+        ('RETAILER', 'Retailers Only'),
+        ('CUSTOMER', 'Customers Only'),
+        ('SUPER_DISTRIBUTOR', 'Super Distributors'),
+        ('DISTRIBUTOR', 'Distributors'),
+        ('SUB_DISTRIBUTOR', 'Sub Distributors'),
+    ]
+
+    title = models.CharField(max_length=200)
+    image = models.FileField(upload_to='banners/')
+    link = models.URLField(blank=True, null=True)
+    target_role = models.CharField(max_length=50, choices=TARGET_ROLES, default='ALL')
+    is_active = models.BooleanField(default=True)
+    order = models.PositiveIntegerField(default=0)
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='created_banners')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['order', '-created_at']
+
+    def __str__(self):
+        return f"{self.title} ({self.target_role}) - {'Active' if self.is_active else 'Inactive'}"
 
 
 class WhatsAppMessageLog(models.Model):

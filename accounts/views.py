@@ -66,8 +66,14 @@ class BaseRoleViewSet(viewsets.ModelViewSet):
         user = self.request.user
         queryset = User.objects.filter(role=self.target_role)
         
-        if user.role != 'SUPER_ADMIN':
-            queryset = queryset.filter(parent=user)
+        from .models import is_company_user
+        if not is_company_user(user):
+            downline_ids = [u.id for u in user.get_all_subordinates() if u.role == self.target_role]
+            queryset = queryset.filter(id__in=downline_ids)
+
+        parent_param = self.request.query_params.get('parent')
+        if parent_param:
+            queryset = queryset.filter(parent_id=parent_param)
 
         search = self.request.query_params.get('search')
         if search:
@@ -91,13 +97,30 @@ class BaseRoleViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         user = self.request.user
+        if user.role == 'STAFF_VIEWER':
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("Viewer staff accounts have read-only access.")
+
         parent = self.request.data.get('parent')
-        
-        if user.role == 'SUPER_ADMIN' and parent:
+        from .models import is_company_user, NotificationType
+        parent_instance = None
+        if is_company_user(user) and parent:
             parent_instance = User.objects.filter(id=parent).first()
             serializer.save(parent=parent_instance, role=self.target_role)
         else:
+            parent_instance = user
             serializer.save(parent=user, role=self.target_role)
+
+        created_user = serializer.instance
+        if parent_instance:
+            send_system_notification(
+                recipient=parent_instance,
+                title="New Partner Added",
+                message=f"New {created_user.get_role_display()} '{created_user.username}' has been onboarded into your network.",
+                notification_type=NotificationType.PARTNER_ADDED,
+                reference_id=created_user.id,
+                sender=user
+            )
             
         AuditLog.objects.create(
             user=user,
@@ -169,6 +192,55 @@ class CustomerViewSet(BaseRoleViewSet):
     target_role = 'CUSTOMER'
     serializer_class = CustomerSerializer
 
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        
+        retailer_param = self.request.query_params.get('retailer')
+        if retailer_param:
+            if retailer_param.isdigit():
+                queryset = queryset.filter(parent_id=retailer_param)
+            else:
+                from django.db.models import Q
+                queryset = queryset.filter(
+                    Q(parent__username__icontains=retailer_param) |
+                    Q(parent__business_name__icontains=retailer_param)
+                )
+
+        emi_status = self.request.query_params.get('emi_status')
+        if emi_status:
+            emi_status = emi_status.lower()
+            from emi.models import CustomerEMIContract, EMIContractStatus, EMIInstallment, InstallmentStatus
+            from django.utils import timezone
+            from django.db.models import Q
+            today = timezone.localdate()
+
+            if emi_status == 'no_emi':
+                queryset = queryset.filter(emi_contracts__isnull=True)
+            elif emi_status == 'completed':
+                queryset = queryset.filter(emi_contracts__status=EMIContractStatus.COMPLETED).distinct()
+            elif emi_status == 'overdue':
+                overdue_cust_ids = EMIInstallment.objects.filter(
+                    Q(status=InstallmentStatus.OVERDUE) |
+                    Q(status__in=[InstallmentStatus.UPCOMING, InstallmentStatus.DUE], due_date__lt=today)
+                ).values_list('contract__customer_id', flat=True)
+                locked_cust_ids = CustomerEMIContract.objects.filter(
+                    status=EMIContractStatus.LOCKED
+                ).values_list('customer_id', flat=True)
+                all_overdue_ids = set(overdue_cust_ids).union(set(locked_cust_ids))
+                queryset = queryset.filter(id__in=all_overdue_ids)
+            elif emi_status == 'on_emi':
+                active_cust_ids = CustomerEMIContract.objects.filter(
+                    status=EMIContractStatus.ACTIVE
+                ).values_list('customer_id', flat=True)
+                overdue_cust_ids = EMIInstallment.objects.filter(
+                    Q(status=InstallmentStatus.OVERDUE) |
+                    Q(status__in=[InstallmentStatus.UPCOMING, InstallmentStatus.DUE], due_date__lt=today)
+                ).values_list('contract__customer_id', flat=True)
+                clean_active_ids = set(active_cust_ids) - set(overdue_cust_ids)
+                queryset = queryset.filter(id__in=clean_active_ids)
+
+        return queryset
+
     @action(detail=False, methods=['get'], url_path='loan-providers')
     def loan_providers(self, request):
         """
@@ -219,7 +291,7 @@ class CustomerViewSet(BaseRoleViewSet):
         loan_provider_other = data.get('loan_provider_other', '')
         loan_account_number = data.get('loan_account_number', '')
 
-        from devices.models import Device, DeviceCategory, OSType, DeviceScannerState, DeviceLockStatus
+        from devices.models import Device, DeviceCategory, OSType, DeviceScannerState, DeviceLockStatus, LockProvider
         from devices.imei_lookup import lookup_imei
         from keys.models import DeviceKey, KeyStatus, KeyAction, KeyTransaction
 
@@ -249,6 +321,39 @@ class CustomerViewSet(BaseRoleViewSet):
                 return Response({"detail": f"Activation key '{key_string}' is already {key_obj.status}."}, status=status.HTTP_400_BAD_REQUEST)
             if user.role != 'SUPER_ADMIN' and key_obj.current_owner != user:
                 return Response({"detail": "You do not own this activation key."}, status=status.HTTP_403_FORBIDDEN)
+
+        # Section B: Determine Lock Provider and invoke RocketPay DLC enrollment for Android devices
+        lock_provider = data.get('lock_provider')
+        if not lock_provider:
+            lock_provider = LockProvider.ROCKETPAY if os_type == OSType.ANDROID else (
+                LockProvider.APPLE_MDM if os_type == OSType.IOS else LockProvider.OWN_AGENT
+            )
+
+        rp_device_id = None
+        rp_status = None
+        if lock_provider == LockProvider.ROCKETPAY:
+            from devices.services.rocketpay_service import RocketPayService
+            temp_device = Device(
+                imei=imei,
+                secondary_imei=data.get('secondary_imei', ''),
+                brand=brand,
+                model=model,
+                serial_number=data.get('serial_number', '')
+            )
+            rp_result = RocketPayService.enroll_device(
+                device=temp_device,
+                customer_name=full_name,
+                customer_mobile=mobile_number,
+                retailer_name=getattr(user, 'business_name', '') or user.username,
+                user=user
+            )
+            if not rp_result.get('success'):
+                return Response(
+                    {"detail": f"RocketPay DLC enrollment failed: {rp_result.get('error')}. Device was not enrolled and Token Key was not activated."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            rp_device_id = rp_result.get('provider_device_id')
+            rp_status = rp_result.get('provider_status', 'ENROLLED')
 
         with transaction.atomic():
             # Check/Create Customer
@@ -294,7 +399,10 @@ class CustomerViewSet(BaseRoleViewSet):
                 loan_provider_other=loan_provider_other,
                 loan_account_number=loan_account_number,
                 activation_key=key_obj,
-                status=DeviceLockStatus.ACTIVE
+                status=DeviceLockStatus.ACTIVE,
+                lock_provider=lock_provider,
+                provider_device_id=rp_device_id,
+                provider_status=rp_status
             )
 
             # Activate Key if present
@@ -321,7 +429,9 @@ class CustomerViewSet(BaseRoleViewSet):
                     "customer_id": customer.id,
                     "device_id": device.id,
                     "imei": device.imei,
-                    "loan_provider": loan_provider
+                    "loan_provider": loan_provider,
+                    "lock_provider": lock_provider,
+                    "provider_device_id": rp_device_id
                 }
             )
 
@@ -351,6 +461,9 @@ class CustomerViewSet(BaseRoleViewSet):
                 "loan_provider_display": device.get_loan_provider_display(),
                 "loan_account_number": device.loan_account_number,
                 "status": device.status,
+                "lock_provider": device.lock_provider,
+                "provider_device_id": device.provider_device_id,
+                "provider_status": device.provider_status,
                 "offline_unlock_code": device.offline_unlock_code,
                 "activation_key": key_obj.key_string if key_obj else None
             },
@@ -1047,10 +1160,25 @@ class WhatsAppCampaignView(APIView):
         from emi.models import CustomerEMIContract, EMIContractStatus
         recipients = []
         if segment == 'OVERDUE_ALL':
-            overdue_contracts = CustomerEMIContract.objects.filter(status=EMIContractStatus.OVERDUE).select_related('customer')
-            for c in overdue_contracts:
-                if c.customer and c.customer.mobile_number:
-                    recipients.append((c.customer.mobile_number, c.customer.get_full_name() or c.customer.username))
+            from emi.models import EMIInstallment, InstallmentStatus
+            from django.utils import timezone
+            today = timezone.localdate()
+            EMIInstallment.objects.filter(
+                status__in=[InstallmentStatus.UPCOMING, InstallmentStatus.DUE],
+                due_date__lt=today
+            ).update(status=InstallmentStatus.OVERDUE)
+
+            overdue_insts = EMIInstallment.objects.filter(
+                status=InstallmentStatus.OVERDUE
+            ).select_related('contract__customer')
+
+            seen_phones = set()
+            for inst in overdue_insts:
+                c = inst.contract.customer
+                if c and c.mobile_number and c.mobile_number not in seen_phones:
+                    seen_phones.add(c.mobile_number)
+                    name = f"{c.first_name} {c.last_name}".strip() or c.username
+                    recipients.append((c.mobile_number, name))
         elif segment == 'LOCKED_DEVICES':
             locked_contracts = CustomerEMIContract.objects.filter(status=EMIContractStatus.LOCKED).select_related('customer')
             for c in locked_contracts:
@@ -1082,5 +1210,49 @@ class WhatsAppCampaignView(APIView):
             "total_recipients": len(recipients),
             "results": results[:20]
         })
+
+
+class BannerViewSet(viewsets.ModelViewSet):
+    """
+    Screen A-42 Banners Management.
+    GET /api/banners/ : lists active banners for user's role (or all banners for admins/staff).
+    POST, PUT, PATCH, DELETE : managed by Super Admin and Staff Operations.
+    """
+    from .models import Banner
+    from .serializers import BannerSerializer
+    queryset = Banner.objects.all()
+    serializer_class = BannerSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        from .models import is_company_user
+        if is_company_user(user):
+            return self.queryset.all()
+        return self.queryset.filter(
+            is_active=True,
+            target_role__in=['ALL', getattr(user, 'role', 'ALL')]
+        )
+
+    def perform_create(self, serializer):
+        user = self.request.user
+        if user.role not in ['SUPER_ADMIN', 'STAFF_OPERATIONS']:
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("Only Super Admin or Operations Staff can manage banners.")
+        serializer.save(created_by=user)
+
+    def perform_update(self, serializer):
+        user = self.request.user
+        if user.role not in ['SUPER_ADMIN', 'STAFF_OPERATIONS']:
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("Only Super Admin or Operations Staff can manage banners.")
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        user = self.request.user
+        if user.role not in ['SUPER_ADMIN', 'STAFF_OPERATIONS']:
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("Only Super Admin or Operations Staff can manage banners.")
+        instance.delete()
 
 

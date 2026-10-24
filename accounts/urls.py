@@ -18,7 +18,8 @@ from .views import (
     NotificationViewSet,
     StaffViewSet,
     PlatformSettingsView,
-    WhatsAppCampaignView
+    WhatsAppCampaignView,
+    BannerViewSet
 )
 
 router = DefaultRouter()
@@ -30,6 +31,7 @@ router.register(r'customers', CustomerViewSet, basename='customer')
 router.register(r'audit-logs', AuditLogViewSet, basename='audit-logs')
 router.register(r'notifications', NotificationViewSet, basename='notifications')
 router.register(r'staff', StaffViewSet, basename='staff')
+router.register(r'banners', BannerViewSet, basename='banners')
 
 urlpatterns = [
     path('auth/login/', CustomTokenObtainPairView.as_view(), name='token_obtain_pair'),

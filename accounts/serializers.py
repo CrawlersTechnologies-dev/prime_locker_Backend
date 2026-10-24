@@ -289,6 +289,9 @@ class CustomerSerializer(serializers.ModelSerializer):
     name = serializers.SerializerMethodField(read_only=True)
     masked_id_number = serializers.SerializerMethodField(read_only=True)
     password = serializers.CharField(write_only=True, required=True, style={'input_type': 'password'})
+    device_summary = serializers.SerializerMethodField(read_only=True)
+    contract_summary = serializers.SerializerMethodField(read_only=True)
+    emi_status = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = User
@@ -298,9 +301,13 @@ class CustomerSerializer(serializers.ModelSerializer):
             'customer_photo', 'customer_signature',
             'id_type', 'id_number', 'masked_id_number', 'id_front_image', 'id_back_image',
             'signed_emi_agreement_flag', 'draft_status',
-            'password', 'parent', 'role', 'is_active', 'date_joined'
+            'password', 'parent', 'role', 'is_active', 'date_joined',
+            'device_summary', 'contract_summary', 'emi_status'
         ]
-        read_only_fields = ['id', 'date_joined', 'role', 'parent', 'is_active', 'masked_id_number']
+        read_only_fields = [
+            'id', 'date_joined', 'role', 'parent', 'is_active', 'masked_id_number',
+            'device_summary', 'contract_summary', 'emi_status'
+        ]
 
     def get_name(self, obj):
         name = f"{obj.first_name} {obj.last_name}".strip()
@@ -313,6 +320,55 @@ class CustomerSerializer(serializers.ModelSerializer):
                 return ('X' * (len(raw) - 4)) + raw[-4:]
             return raw
         return None
+
+    def get_device_summary(self, obj):
+        device = obj.registered_devices.first()
+        if not device:
+            return None
+        return {
+            "id": device.id,
+            "imei": device.imei,
+            "brand": device.brand,
+            "model": device.model,
+            "device_name": device.device_name,
+            "device_category": device.device_category,
+            "status": device.status,
+            "is_online": device.is_online,
+            "lock_provider": device.lock_provider,
+            "provider_device_id": device.provider_device_id,
+            "provider_status": device.provider_status
+        }
+
+    def get_contract_summary(self, obj):
+        contract = getattr(obj, 'emi_contracts', None) and obj.emi_contracts.first()
+        if not contract:
+            return None
+        from emi.models import InstallmentStatus
+        overdue_count = contract.installments.filter(status=InstallmentStatus.OVERDUE).count()
+        next_inst = contract.installments.filter(
+            status__in=[InstallmentStatus.UPCOMING, InstallmentStatus.DUE]
+        ).order_by('due_date').first()
+        return {
+            "id": contract.id,
+            "status": contract.status,
+            "total_amount": str(contract.total_amount),
+            "paid_amount": str(contract.total_paid),
+            "remaining_amount": str(contract.total_remaining),
+            "overdue_count": overdue_count,
+            "next_due_date": next_inst.due_date if next_inst else None
+        }
+
+    def get_emi_status(self, obj):
+        contract = getattr(obj, 'emi_contracts', None) and obj.emi_contracts.first()
+        if not contract:
+            return 'no_emi'
+        if contract.status == 'COMPLETED':
+            return 'completed'
+        from emi.models import InstallmentStatus
+        has_overdue = contract.installments.filter(status=InstallmentStatus.OVERDUE).exists()
+        if has_overdue or contract.status == 'LOCKED':
+            return 'overdue'
+        return 'on_emi'
 
     def validate_email(self, value):
         if value:
@@ -516,4 +572,18 @@ class WhatsAppMessageLogSerializer(serializers.ModelSerializer):
     class Meta:
         model = WhatsAppMessageLog
         fields = '__all__'
+
+
+class BannerSerializer(serializers.ModelSerializer):
+    """
+    Serializer for Banner Management (Screen A-42).
+    """
+    class Meta:
+        from .models import Banner
+        model = Banner
+        fields = [
+            'id', 'title', 'image', 'link', 'target_role',
+            'is_active', 'order', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
 
