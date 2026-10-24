@@ -62,6 +62,8 @@ class EMIInstallmentSerializer(serializers.ModelSerializer):
     """
     collected_by_name = serializers.SerializerMethodField(read_only=True)
     days_overdue = serializers.ReadOnlyField()
+    late_fee = serializers.ReadOnlyField()
+    total_due = serializers.ReadOnlyField()
 
     class Meta:
         model = EMIInstallment
@@ -79,11 +81,14 @@ class EMIInstallmentSerializer(serializers.ModelSerializer):
             'collection_date',
             'transaction_ref',
             'notes',
-            'days_overdue'
+            'days_overdue',
+            'late_fee',
+            'total_due'
         ]
         read_only_fields = [
             'id', 'contract', 'installment_number', 'due_date', 'amount',
-            'paid_amount', 'status', 'collected_by', 'collection_date', 'days_overdue'
+            'paid_amount', 'status', 'collected_by', 'collection_date',
+            'days_overdue', 'late_fee', 'total_due'
         ]
 
     def get_collected_by_name(self, obj):
@@ -233,10 +238,12 @@ class CustomerEMIContractSerializer(serializers.ModelSerializer):
 class RecordPaymentSerializer(serializers.Serializer):
     """
     Serializer for collecting payment on an installment (Screen A-21 Record Payment).
+    Supports optional collection_date for recording payments back-dated (e.g. yesterday).
     """
     amount = serializers.DecimalField(max_digits=10, decimal_places=2, required=True)
     payment_mode = serializers.ChoiceField(choices=PaymentMode.choices, default=PaymentMode.CASH)
     transaction_ref = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    collection_date = serializers.DateTimeField(required=False, allow_null=True)
     notes = serializers.CharField(required=False, allow_blank=True)
 
 

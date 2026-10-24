@@ -181,3 +181,23 @@ class EMIInstallment(models.Model):
         if today > self.due_date:
             return (today - self.due_date).days
         return 0
+
+    @property
+    def late_fee(self):
+        """Late fee calculated dynamically based on PlatformSettings.late_fee_per_day and grace period."""
+        from decimal import Decimal
+        if self.status == InstallmentStatus.PAID:
+            return Decimal('0.00')
+        from accounts.models import PlatformSettings
+        settings = PlatformSettings.get_settings()
+        rate = settings.late_fee_per_day or Decimal('0.00')
+        if rate <= Decimal('0.00'):
+            return Decimal('0.00')
+        grace_days = self.contract.plan_template.grace_period_days if self.contract.plan_template else settings.default_grace_period_days
+        chargeable_days = max(0, self.days_overdue - grace_days)
+        return (Decimal(str(chargeable_days)) * rate).quantize(Decimal('0.01'))
+
+    @property
+    def total_due(self):
+        from decimal import Decimal
+        return (Decimal(str(self.amount)) + self.late_fee).quantize(Decimal('0.01'))

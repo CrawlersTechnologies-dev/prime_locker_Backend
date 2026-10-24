@@ -158,14 +158,58 @@ class RazorpayService:
 
             # Check if all contract installments are paid
             unpaid_count = contract.installments.exclude(status=InstallmentStatus.PAID).count()
+            overdue_count = contract.installments.filter(status=InstallmentStatus.OVERDUE).count()
+
             if unpaid_count == 0:
                 contract.status = EMIContractStatus.COMPLETED
                 contract.save(update_fields=['status'])
-            elif contract.status == EMIContractStatus.LOCKED:
-                overdue_count = contract.installments.filter(status=InstallmentStatus.OVERDUE).count()
-                if overdue_count == 0:
-                    contract.status = EMIContractStatus.ACTIVE
-                    contract.save(update_fields=['status'])
+            elif overdue_count == 0 and contract.status == EMIContractStatus.LOCKED:
+                contract.status = EMIContractStatus.ACTIVE
+                contract.save(update_fields=['status'])
+
+            # Bug B1 & Section B: When no overdue installments remain, restore device to ACTIVE and trigger unlock
+            if overdue_count == 0:
+                from devices.models import Device, DeviceLockStatus, DeviceCommand, CommandType, CommandStatus, LockProvider
+                from devices.services.rocketpay_service import RocketPayService
+                from accounts.views import send_system_notification
+                from accounts.models import NotificationType
+
+                device = Device.objects.filter(emi_contract=contract).first() or Device.objects.filter(imei=contract.device_imei).first()
+                if device and device.status == DeviceLockStatus.LOCKED:
+                    device.status = DeviceLockStatus.ACTIVE
+                    device.save(update_fields=['status'])
+
+                    DeviceCommand.objects.create(
+                        device=device,
+                        command_type=CommandType.UNLOCK,
+                        status=CommandStatus.PENDING,
+                        issued_by=user if (user and getattr(user, 'is_authenticated', False)) else None,
+                        parameters={"reason": "Online payment captured - auto unlock"}
+                    )
+
+                    if device.lock_provider == LockProvider.ROCKETPAY:
+                        RocketPayService.unlock_device(
+                            device=device,
+                            reason="Online payment captured - auto unlock",
+                            user=user
+                        )
+
+                    send_system_notification(
+                        recipient=contract.retailer,
+                        title="Device Auto-Unlocked",
+                        message=f"Device {device.imei} was auto-unlocked after online payment receipt ({payment_id}).",
+                        notification_type=NotificationType.DEVICE_UNLOCK,
+                        reference_id=device.id,
+                        sender=user
+                    )
+                    send_system_notification(
+                        recipient=contract.customer,
+                        title="Device Unlocked",
+                        message=f"Your device ({device.imei}) has been unlocked. Thank you for your online payment!",
+                        notification_type=NotificationType.DEVICE_UNLOCK,
+                        reference_id=device.id,
+                        sender=user
+                    )
 
             AuditLog.objects.create(
                 user=user or contract.customer,

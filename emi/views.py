@@ -29,12 +29,14 @@ from .serializers import (
 )
 from .services.razorpay_service import RazorpayService
 
+from accounts.models import is_company_user
+
 logger = logging.getLogger(__name__)
 
 
 class IsSuperAdminOrReadOnly(permissions.BasePermission):
     """
-    Super Admin can perform any action.
+    Super Admin or Staff Operations can perform any action.
     Other authenticated users have read-only access.
     """
     def has_permission(self, request, view):
@@ -42,13 +44,13 @@ class IsSuperAdminOrReadOnly(permissions.BasePermission):
             return False
         if request.method in permissions.SAFE_METHODS:
             return True
-        return request.user.role == 'SUPER_ADMIN'
+        return request.user.role in ['SUPER_ADMIN', 'STAFF_OPERATIONS']
 
 
 class EMIPlanTemplateViewSet(viewsets.ModelViewSet):
     """
     CRUD for Master EMI Plans (Screen A-19).
-    Only Super Admin can create, edit, deactivate plans.
+    Only Super Admin or Staff Operations can create, edit, deactivate plans.
     Retailers/Distributors can view active plans.
     """
     permission_classes = [IsSuperAdminOrReadOnly]
@@ -56,7 +58,7 @@ class EMIPlanTemplateViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        if user.role == 'SUPER_ADMIN':
+        if is_company_user(user):
             return EMIPlanTemplate.objects.all()
         # Non-superadmins only see active plans
         return EMIPlanTemplate.objects.filter(is_active=True)
@@ -78,9 +80,9 @@ class EMIPlanTemplateViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='toggle-status')
     def toggle_status(self, request, pk=None):
         """Toggle a plan between active and inactive"""
-        if request.user.role != 'SUPER_ADMIN':
+        if request.user.role not in ['SUPER_ADMIN', 'STAFF_OPERATIONS']:
             return Response(
-                {"detail": "Only Super Admin can activate or deactivate EMI plans."},
+                {"detail": "Only Super Admin or Operations Staff can activate or deactivate EMI plans."},
                 status=status.HTTP_403_FORBIDDEN
             )
         plan = self.get_object()
@@ -103,7 +105,7 @@ class CustomerEMIContractViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        if user.role == 'SUPER_ADMIN':
+        if is_company_user(user):
             qs = CustomerEMIContract.objects.all()
         elif user.role == 'RETAILER':
             qs = CustomerEMIContract.objects.filter(retailer=user)
@@ -212,11 +214,16 @@ class CustomerEMIContractViewSet(viewsets.ModelViewSet):
     def lock(self, request, pk=None):
         """
         Manual device lock button.
-        Accessible by all users EXCEPT Customers (Super Admin, Super Dist, Dist, Sub Dist, Retailer).
+        Accessible by all authorized users except Customers.
         """
         if request.user.role == 'CUSTOMER':
             return Response(
                 {"detail": "Customers do not have permission to lock devices."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        if request.user.role == 'STAFF_VIEWER':
+            return Response(
+                {"detail": "Viewer staff accounts have read-only access."},
                 status=status.HTTP_403_FORBIDDEN
             )
 
@@ -225,8 +232,48 @@ class CustomerEMIContractViewSet(viewsets.ModelViewSet):
         contract.save(update_fields=['status'])
 
         reason = request.data.get('reason', '').strip()
-        from accounts.models import AuditLog
+
+        from devices.models import Device, DeviceLockStatus, DeviceCommand, CommandType, CommandStatus, LockProvider
+        from devices.services.rocketpay_service import RocketPayService
+        from accounts.views import send_system_notification
+        from accounts.models import NotificationType, AuditLog
         from accounts.views import get_client_ip
+
+        device = Device.objects.filter(emi_contract=contract).first() or Device.objects.filter(imei=contract.device_imei).first()
+        if device:
+            device.status = DeviceLockStatus.LOCKED
+            device.save(update_fields=['status'])
+            DeviceCommand.objects.create(
+                device=device,
+                command_type=CommandType.LOCK,
+                status=CommandStatus.PENDING,
+                issued_by=request.user,
+                parameters={"reason": reason or "Manual lock from EMI contract"}
+            )
+            if device.lock_provider == LockProvider.ROCKETPAY:
+                RocketPayService.lock_device(
+                    device=device,
+                    reason=reason or "Manual lock from EMI contract",
+                    user=request.user
+                )
+
+            send_system_notification(
+                recipient=contract.retailer,
+                title="Device Locked",
+                message=f"Device {device.imei} ({contract.customer.username}) was locked.",
+                notification_type=NotificationType.DEVICE_LOCK,
+                reference_id=device.id,
+                sender=request.user
+            )
+            send_system_notification(
+                recipient=contract.customer,
+                title="Device Locked",
+                message=f"Your device ({contract.device_imei}) has been locked.",
+                notification_type=NotificationType.DEVICE_LOCK,
+                reference_id=device.id,
+                sender=request.user
+            )
+
         AuditLog.objects.create(
             user=request.user,
             action="MANUAL_LOCK_DEVICE",
@@ -250,11 +297,16 @@ class CustomerEMIContractViewSet(viewsets.ModelViewSet):
     def unlock(self, request, pk=None):
         """
         Manual device unlock button.
-        Accessible by all users EXCEPT Customers (Super Admin, Super Dist, Dist, Sub Dist, Retailer).
+        Accessible by all users EXCEPT Customers.
         """
         if request.user.role == 'CUSTOMER':
             return Response(
                 {"detail": "Customers do not have permission to unlock devices."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        if request.user.role == 'STAFF_VIEWER':
+            return Response(
+                {"detail": "Viewer staff accounts have read-only access."},
                 status=status.HTTP_403_FORBIDDEN
             )
 
@@ -263,8 +315,48 @@ class CustomerEMIContractViewSet(viewsets.ModelViewSet):
         contract.save(update_fields=['status'])
 
         reason = request.data.get('reason', '').strip()
-        from accounts.models import AuditLog
+
+        from devices.models import Device, DeviceLockStatus, DeviceCommand, CommandType, CommandStatus, LockProvider
+        from devices.services.rocketpay_service import RocketPayService
+        from accounts.views import send_system_notification
+        from accounts.models import NotificationType, AuditLog
         from accounts.views import get_client_ip
+
+        device = Device.objects.filter(emi_contract=contract).first() or Device.objects.filter(imei=contract.device_imei).first()
+        if device:
+            device.status = DeviceLockStatus.ACTIVE
+            device.save(update_fields=['status'])
+            DeviceCommand.objects.create(
+                device=device,
+                command_type=CommandType.UNLOCK,
+                status=CommandStatus.PENDING,
+                issued_by=request.user,
+                parameters={"reason": reason or "Manual unlock from EMI contract"}
+            )
+            if device.lock_provider == LockProvider.ROCKETPAY:
+                RocketPayService.unlock_device(
+                    device=device,
+                    reason=reason or "Manual unlock from EMI contract",
+                    user=request.user
+                )
+
+            send_system_notification(
+                recipient=contract.retailer,
+                title="Device Unlocked",
+                message=f"Device {device.imei} was unlocked.",
+                notification_type=NotificationType.DEVICE_UNLOCK,
+                reference_id=device.id,
+                sender=request.user
+            )
+            send_system_notification(
+                recipient=contract.customer,
+                title="Device Unlocked",
+                message=f"Your device ({contract.device_imei}) has been unlocked.",
+                notification_type=NotificationType.DEVICE_UNLOCK,
+                reference_id=device.id,
+                sender=request.user
+            )
+
         AuditLog.objects.create(
             user=request.user,
             action="MANUAL_UNLOCK_DEVICE",
@@ -298,9 +390,10 @@ class EMIInstallmentViewSet(viewsets.GenericViewSet):
         installment = self.get_object()
         contract = installment.contract
 
-        # Permission check: Retailer of this contract or Super Admin
-        if request.user.role not in ['SUPER_ADMIN', 'RETAILER']:
-            return Response({"detail": "Only Retailers or Super Admin can record payments."}, status=status.HTTP_403_FORBIDDEN)
+        # Permission check: Retailer of this contract, Super Admin, or Staff Operations / Collections
+        allowed_roles = ['SUPER_ADMIN', 'RETAILER', 'STAFF_OPERATIONS', 'STAFF_COLLECTIONS']
+        if request.user.role not in allowed_roles:
+            return Response({"detail": "You do not have permission to record payments."}, status=status.HTTP_403_FORBIDDEN)
 
         if installment.status == InstallmentStatus.PAID:
             return Response({"detail": "This installment has already been paid."}, status=status.HTTP_400_BAD_REQUEST)
@@ -310,6 +403,7 @@ class EMIInstallmentViewSet(viewsets.GenericViewSet):
             amount = serializer.validated_data['amount']
             payment_mode = serializer.validated_data['payment_mode']
             transaction_ref = serializer.validated_data.get('transaction_ref', '')
+            collection_date = serializer.validated_data.get('collection_date') or timezone.now()
             notes = serializer.validated_data.get('notes', '')
 
             with transaction.atomic():
@@ -317,22 +411,65 @@ class EMIInstallmentViewSet(viewsets.GenericViewSet):
                 installment.status = InstallmentStatus.PAID
                 installment.collected_by = request.user
                 installment.payment_mode = payment_mode
-                installment.collection_date = timezone.now()
+                installment.collection_date = collection_date
                 installment.transaction_ref = transaction_ref
                 installment.notes = notes
                 installment.save()
 
+                from devices.models import Device, DeviceLockStatus, DeviceCommand, CommandType, CommandStatus, LockProvider
+                from devices.services.rocketpay_service import RocketPayService
+                from accounts.views import send_system_notification
+                from accounts.models import NotificationType
+
                 # Check if all installments are now paid
                 unpaid_count = contract.installments.exclude(status=InstallmentStatus.PAID).count()
+                overdue_count = contract.installments.filter(status=InstallmentStatus.OVERDUE).count()
+
                 if unpaid_count == 0:
                     contract.status = EMIContractStatus.COMPLETED
                     contract.save(update_fields=['status'])
-                elif contract.status == EMIContractStatus.LOCKED:
-                    # Auto-unlock if no overdue installments remain
-                    overdue_count = contract.installments.filter(status=InstallmentStatus.OVERDUE).count()
-                    if overdue_count == 0:
-                        contract.status = EMIContractStatus.ACTIVE
-                        contract.save(update_fields=['status'])
+                elif overdue_count == 0 and contract.status == EMIContractStatus.LOCKED:
+                    contract.status = EMIContractStatus.ACTIVE
+                    contract.save(update_fields=['status'])
+
+                # Bug B1 & Section B: When no overdue installments remain, restore device to ACTIVE and trigger unlock
+                if overdue_count == 0:
+                    device = Device.objects.filter(emi_contract=contract).first() or Device.objects.filter(imei=contract.device_imei).first()
+                    if device and device.status == DeviceLockStatus.LOCKED:
+                        device.status = DeviceLockStatus.ACTIVE
+                        device.save(update_fields=['status'])
+
+                        DeviceCommand.objects.create(
+                            device=device,
+                            command_type=CommandType.UNLOCK,
+                            status=CommandStatus.PENDING,
+                            issued_by=request.user,
+                            parameters={"reason": "EMI payment received - auto unlock"}
+                        )
+
+                        if device.lock_provider == LockProvider.ROCKETPAY:
+                            RocketPayService.unlock_device(
+                                device=device,
+                                reason="EMI payment received - auto unlock",
+                                user=request.user
+                            )
+
+                        send_system_notification(
+                            recipient=contract.retailer,
+                            title="Device Auto-Unlocked",
+                            message=f"Device {device.imei} was auto-unlocked after payment receipt.",
+                            notification_type=NotificationType.DEVICE_UNLOCK,
+                            reference_id=device.id,
+                            sender=request.user
+                        )
+                        send_system_notification(
+                            recipient=contract.customer,
+                            title="Device Unlocked",
+                            message=f"Your device ({device.imei}) has been unlocked. Thank you for your payment!",
+                            notification_type=NotificationType.DEVICE_UNLOCK,
+                            reference_id=device.id,
+                            sender=request.user
+                        )
 
                 from accounts.models import AuditLog
                 from accounts.views import get_client_ip
@@ -477,14 +614,8 @@ class OverdueEMIsViewSet(viewsets.ViewSet):
         # Filter by hierarchy
         if user.role == 'RETAILER':
             overdue_qs = overdue_qs.filter(contract__retailer=user)
-        elif user.role != 'SUPER_ADMIN':
-            from accounts.models import User
-            def get_all_subordinates(parent_user):
-                subs = list(parent_user.children.all())
-                for s in subs:
-                    subs.extend(get_all_subordinates(s))
-                return subs
-            retailer_ids = [u.id for u in get_all_subordinates(user) if u.role == 'RETAILER']
+        elif not is_company_user(user):
+            retailer_ids = [u.id for u in user.get_all_subordinates() if u.role == 'RETAILER']
             overdue_qs = overdue_qs.filter(contract__retailer_id__in=retailer_ids)
 
         # Calculate Ageing Buckets for Top KPI Cards (Screen A-22)
@@ -628,7 +759,7 @@ class PaymentViewSet(viewsets.ReadOnlyModelViewSet):
         )
 
         # Hierarchy scoping
-        if user.role == 'SUPER_ADMIN':
+        if is_company_user(user):
             pass
         elif user.role == 'RETAILER':
             qs = qs.filter(contract__retailer=user)
