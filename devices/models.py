@@ -30,6 +30,13 @@ class DeviceLockStatus(models.TextChoices):
     UNENROLLED = 'UNENROLLED', 'Unenrolled / Released'
 
 
+class LockProvider(models.TextChoices):
+    ROCKETPAY = 'ROCKETPAY', 'RocketPay DLC'
+    OWN_AGENT = 'OWN_AGENT', 'Prime Locker Agent'
+    APPLE_MDM = 'APPLE_MDM', 'Apple MDM'
+    NONE = 'NONE', 'None / Uncontrolled'
+
+
 class LoanProvider(models.TextChoices):
     BAJAJ_FINANCE = 'BAJAJ_FINANCE', 'Bajaj Finance'
     TVS_CREDIT = 'TVS_CREDIT', 'TVS Credit'
@@ -158,6 +165,33 @@ class Device(models.Model):
     
     # Emergency Offline Unlock Code
     offline_unlock_code = models.CharField(max_length=16, default=generate_offline_code)
+    offline_code_expires_at = models.DateTimeField(null=True, blank=True)
+    offline_code_expiry_type = models.CharField(max_length=30, blank=True, null=True)
+
+    # Lock Provider & Third-Party Integration (Section B)
+    lock_provider = models.CharField(
+        max_length=30, 
+        choices=LockProvider.choices, 
+        default=LockProvider.OWN_AGENT,
+        help_text="Underlying lock engine (RocketPay OEM DLC, Prime Agent, Apple MDM)"
+    )
+    provider_device_id = models.CharField(
+        max_length=150, 
+        blank=True, 
+        null=True, 
+        help_text="Device ID assigned by the lock provider (e.g. RocketPay)"
+    )
+    provider_status = models.CharField(
+        max_length=50, 
+        blank=True, 
+        null=True, 
+        help_text="Status reported by provider (e.g. ENROLLED, LOCKED, UNLOCKED)"
+    )
+
+    # Device Agent Commands & Control Extensions (Section C: M10)
+    installed_apps = models.JSONField(default=list, blank=True)
+    locked_packages = models.JSONField(default=list, blank=True)
+    streaming_blocked = models.BooleanField(default=False)
     
     # Live GPS Location Tracking
     current_latitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
@@ -245,3 +279,22 @@ class AppVersion(models.Model):
 
     def __str__(self):
         return f"{self.get_app_type_display()} v{self.version_name} ({self.version_code}) - {'Active' if self.is_active else 'Inactive'}"
+
+
+class LockMessageTemplate(models.Model):
+    """
+    Screen A-40 Lock Message Templates.
+    Pre-configured messages displayed on locked phone/TV screens.
+    """
+    title = models.CharField(max_length=150)
+    text = models.TextField()
+    is_default = models.BooleanField(default=False)
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='lock_templates')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-is_default', '-created_at']
+
+    def __str__(self):
+        return f"{self.title}{' (Default)' if self.is_default else ''}"

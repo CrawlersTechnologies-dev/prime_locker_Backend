@@ -16,6 +16,7 @@ from .models import (
     OSType,
     DeviceScannerState,
     DeviceLockStatus,
+    LockProvider,
     CommandType,
     CommandStatus,
     AppType
@@ -53,14 +54,15 @@ class DeviceViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        if user.role == 'SUPER_ADMIN':
+        from accounts.models import is_company_user
+        if is_company_user(user):
             qs = Device.objects.all()
         elif user.role == 'RETAILER':
             qs = Device.objects.filter(retailer=user)
         elif user.role == 'CUSTOMER':
             qs = Device.objects.filter(customer=user)
         else:
-            downline_users = get_all_downstream_users(user)
+            downline_users = user.get_all_subordinates()
             retailer_ids = [u.id for u in downline_users if u.role == 'RETAILER']
             qs = Device.objects.filter(retailer_id__in=retailer_ids)
 
@@ -146,6 +148,8 @@ class DeviceViewSet(viewsets.ModelViewSet):
     def _block_customer(self, request):
         if request.user.role == 'CUSTOMER':
             return Response({"detail": "Customers do not have permission to control devices."}, status=status.HTTP_403_FORBIDDEN)
+        if request.user.role == 'STAFF_VIEWER':
+            return Response({"detail": "Viewer staff accounts have read-only access."}, status=status.HTTP_403_FORBIDDEN)
         return None
 
     @action(detail=True, methods=['post'])
@@ -164,6 +168,32 @@ class DeviceViewSet(viewsets.ModelViewSet):
             device.emi_contract.save(update_fields=['status'])
 
         reason = request.data.get('reason', '').strip()
+
+        # Section B: Trigger RocketPay OEM DLC Lock if device is controlled by RocketPay
+        if device.lock_provider == LockProvider.ROCKETPAY:
+            from .services.rocketpay_service import RocketPayService
+            RocketPayService.lock_device(device=device, reason=reason or "Remote lock from dashboard", user=request.user)
+
+        # In-app notifications (M9)
+        from accounts.views import send_system_notification
+        from accounts.models import NotificationType
+        send_system_notification(
+            recipient=device.retailer,
+            title="Device Locked",
+            message=f"Device {device.imei} was locked.",
+            notification_type=NotificationType.DEVICE_LOCK,
+            reference_id=device.id,
+            sender=request.user
+        )
+        send_system_notification(
+            recipient=device.customer,
+            title="Device Locked",
+            message=f"Your device ({device.imei}) has been locked.",
+            notification_type=NotificationType.DEVICE_LOCK,
+            reference_id=device.id,
+            sender=request.user
+        )
+
         AuditLog.objects.create(
             user=request.user,
             action="REMOTE_LOCK_DEVICE",
@@ -187,13 +217,38 @@ class DeviceViewSet(viewsets.ModelViewSet):
             device.emi_contract.save(update_fields=['status'])
 
         reason = request.data.get('reason', '').strip()
+
+        # Section B: Trigger RocketPay OEM DLC Unlock if device is controlled by RocketPay
+        if device.lock_provider == LockProvider.ROCKETPAY:
+            from .services.rocketpay_service import RocketPayService
+            RocketPayService.unlock_device(device=device, reason=reason or "Remote unlock from dashboard", user=request.user)
+
+        # In-app notifications (M9)
+        from accounts.views import send_system_notification
+        from accounts.models import NotificationType
+        send_system_notification(
+            recipient=device.retailer,
+            title="Device Unlocked",
+            message=f"Device {device.imei} was unlocked.",
+            notification_type=NotificationType.DEVICE_UNLOCK,
+            reference_id=device.id,
+            sender=request.user
+        )
+        send_system_notification(
+            recipient=device.customer,
+            title="Device Unlocked",
+            message=f"Your device ({device.imei}) has been unlocked.",
+            notification_type=NotificationType.DEVICE_UNLOCK,
+            reference_id=device.id,
+            sender=request.user
+        )
+
         AuditLog.objects.create(
             user=request.user,
             action="REMOTE_UNLOCK_DEVICE",
             ip_address=get_client_ip(request),
             details={"device_id": device.id, "imei": device.imei, "reason": reason}
         )
-        return Response({"message": f"Device {device.imei} unlocked.", "status": device.status})
         return Response({"message": f"Device {device.imei} unlocked.", "status": device.status})
 
     @action(detail=True, methods=['post'])
@@ -250,21 +305,271 @@ class DeviceViewSet(viewsets.ModelViewSet):
         self._create_command(device, CommandType.PUSH_MESSAGE, {"message": message})
         return Response({"message": "Screen reminder sent successfully.", "lock_message": device.lock_message})
 
+    @action(detail=True, methods=['get'], url_path='commands')
+    def command_history(self, request, pk=None):
+        """
+        Device Command History (Screen A-12 / Activity Tab - Missing API M4).
+        Returns historical log of remote commands sent to this device.
+        """
+        device = self.get_object()
+        commands = device.commands.all()[:100]
+        results = [
+            {
+                "id": c.id,
+                "command_type": c.command_type,
+                "command_type_display": c.get_command_type_display(),
+                "status": c.status,
+                "parameters": c.parameters,
+                "issued_by": {
+                    "id": c.issued_by.id,
+                    "username": c.issued_by.username,
+                    "role": c.issued_by.role
+                } if c.issued_by else None,
+                "created_at": c.created_at,
+                "executed_at": c.executed_at,
+                "error_message": c.error_message
+            }
+            for c in commands
+        ]
+        return Response({"device_imei": device.imei, "commands": results})
+
+    @action(detail=True, methods=['post'], url_path='controls')
+    def set_controls(self, request, pk=None):
+        """
+        Set-style controls (Missing API M5): POST /api/devices/:id/controls/
+        Accepts explicit boolean dictionary of controls to avoid race conditions:
+        {"camera_disabled": true, "block_factory_reset": true, ...}
+        """
+        denied = self._block_customer(request)
+        if denied:
+            return denied
+        device = self.get_object()
+        data = request.data
+
+        control_fields = [
+            'camera_disabled', 'block_factory_reset', 'frp_protection_enabled',
+            'social_media_disabled', 'whatsapp_disabled', 'instagram_disabled',
+            'facebook_disabled', 'wallpaper_locked', 'streaming_blocked'
+        ]
+        updated = {}
+        for field in control_fields:
+            if field in data:
+                val = bool(data[field])
+                setattr(device, field, val)
+                updated[field] = val
+
+        if 'lock_message' in data:
+            device.lock_message = str(data['lock_message']).strip()
+            updated['lock_message'] = device.lock_message
+
+        if updated:
+            device.save(update_fields=list(updated.keys()))
+            self._create_command(device, CommandType.UPDATE_POLICY, updated)
+
+            AuditLog.objects.create(
+                user=request.user,
+                action="SET_DEVICE_CONTROLS",
+                ip_address=get_client_ip(request),
+                details={"device_id": device.id, "imei": device.imei, "updated_controls": updated}
+            )
+
+        return Response({
+            "message": "Device controls updated successfully.",
+            "device_imei": device.imei,
+            "controls": {
+                "camera_disabled": device.camera_disabled,
+                "block_factory_reset": device.block_factory_reset,
+                "frp_protection_enabled": device.frp_protection_enabled,
+                "social_media_disabled": device.social_media_disabled,
+                "whatsapp_disabled": device.whatsapp_disabled,
+                "instagram_disabled": device.instagram_disabled,
+                "facebook_disabled": device.facebook_disabled,
+                "wallpaper_locked": device.wallpaper_locked,
+                "streaming_blocked": device.streaming_blocked,
+                "lock_message": device.lock_message
+            }
+        })
+
     @action(detail=True, methods=['post'], url_path='generate-offline-code')
     def generate_offline_code_view(self, request, pk=None):
+        """
+        Generates a secure offline unlock code with expiry options (Missing API M7).
+        expiry_option choices: 'UNTIL_NEXT_DUE_DATE' (default), '24_HOURS', 'PERMANENT'
+        """
         denied = self._block_customer(request)
         if denied:
             return denied
         from .models import generate_offline_code
         device = self.get_object()
         new_code = generate_offline_code()
+
+        expiry_option = request.data.get('expiry_option', 'UNTIL_NEXT_DUE_DATE').upper()
+        expires_at = None
+
+        if expiry_option == '24_HOURS':
+            expires_at = timezone.now() + timedelta(hours=24)
+        elif expiry_option == 'PERMANENT':
+            expires_at = None
+        else:
+            expiry_option = 'UNTIL_NEXT_DUE_DATE'
+            if device.emi_contract:
+                from emi.models import InstallmentStatus
+                next_inst = device.emi_contract.installments.filter(
+                    status__in=[InstallmentStatus.UPCOMING, InstallmentStatus.DUE]
+                ).order_by('due_date').first()
+                if next_inst:
+                    from datetime import datetime, time
+                    dt = datetime.combine(next_inst.due_date, time(23, 59, 59))
+                    expires_at = timezone.make_aware(dt) if timezone.is_naive(dt) else dt
+                else:
+                    expires_at = timezone.now() + timedelta(days=30)
+            else:
+                expires_at = timezone.now() + timedelta(days=30)
+
         device.offline_unlock_code = new_code
-        device.save(update_fields=['offline_unlock_code'])
+        device.offline_code_expires_at = expires_at
+        device.offline_code_expiry_type = expiry_option
+        device.save(update_fields=['offline_unlock_code', 'offline_code_expires_at', 'offline_code_expiry_type'])
+
+        AuditLog.objects.create(
+            user=request.user,
+            action="GENERATED_OFFLINE_CODE",
+            ip_address=get_client_ip(request),
+            details={
+                "device_id": device.id,
+                "imei": device.imei,
+                "expiry_option": expiry_option,
+                "expires_at": str(expires_at)
+            }
+        )
+
         return Response({
             "message": "New offline unlock code generated.",
             "device_imei": device.imei,
-            "offline_unlock_code": new_code
+            "offline_unlock_code": new_code,
+            "expiry_option": expiry_option,
+            "expires_at": expires_at
         })
+
+    @action(detail=True, methods=['get'], url_path='apps')
+    def get_apps(self, request, pk=None):
+        """
+        Device Agent Commands (Missing API M10):
+        Lists installed apps and currently locked packages on the device.
+        """
+        device = self.get_object()
+        return Response({
+            "device_imei": device.imei,
+            "installed_apps": device.installed_apps or [],
+            "locked_packages": device.locked_packages or []
+        })
+
+    @action(detail=True, methods=['post'], url_path='apps/lock')
+    def lock_app(self, request, pk=None):
+        """
+        Per-app lock (Missing API M10): locks specified package name(s).
+        """
+        denied = self._block_customer(request)
+        if denied:
+            return denied
+        device = self.get_object()
+        package_name = request.data.get('package_name')
+        package_names = request.data.get('package_names', [])
+        if package_name and package_name not in package_names:
+            package_names.append(package_name)
+
+        if not package_names:
+            return Response({"detail": "Field 'package_name' or 'package_names' is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        current_locked = list(device.locked_packages or [])
+        for pkg in package_names:
+            if pkg not in current_locked:
+                current_locked.append(pkg)
+
+        device.locked_packages = current_locked
+        device.save(update_fields=['locked_packages'])
+        self._create_command(device, CommandType.UPDATE_POLICY, {"locked_packages": current_locked})
+
+        return Response({
+            "message": f"Locked {len(package_names)} package(s).",
+            "locked_packages": device.locked_packages
+        })
+
+    @action(detail=True, methods=['post'], url_path='apps/unlock')
+    def unlock_app(self, request, pk=None):
+        """
+        Per-app unlock (Missing API M10): removes package name from locked list.
+        """
+        denied = self._block_customer(request)
+        if denied:
+            return denied
+        device = self.get_object()
+        package_name = request.data.get('package_name')
+        if not package_name:
+            return Response({"detail": "Field 'package_name' is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        current_locked = [pkg for pkg in (device.locked_packages or []) if pkg != package_name]
+        device.locked_packages = current_locked
+        device.save(update_fields=['locked_packages'])
+        self._create_command(device, CommandType.UPDATE_POLICY, {"locked_packages": current_locked})
+
+        return Response({
+            "message": f"Unlocked package '{package_name}'.",
+            "locked_packages": device.locked_packages
+        })
+
+    @action(detail=True, methods=['post'], url_path='audio-reminder')
+    def audio_reminder(self, request, pk=None):
+        """
+        Audio Reminder (Missing API M10): plays sound/voice reminder on the phone/TV.
+        """
+        denied = self._block_customer(request)
+        if denied:
+            return denied
+        device = self.get_object()
+        message = request.data.get('message', 'Please pay your EMI to avoid device locking.')
+        volume = int(request.data.get('volume', 100))
+
+        self._create_command(device, CommandType.PUSH_MESSAGE, {
+            "action": "AUDIO_REMINDER",
+            "message": message,
+            "volume": volume
+        })
+        return Response({"message": f"Audio reminder command dispatched to device {device.imei}."})
+
+    @action(detail=True, methods=['post'], url_path='block-streaming')
+    def block_streaming(self, request, pk=None):
+        """
+        TV/Mobile Streaming app block (Missing API M10): blocks Netflix, Prime Video, Hotstar, YouTube.
+        """
+        denied = self._block_customer(request)
+        if denied:
+            return denied
+        device = self.get_object()
+        streaming_blocked = request.data.get('streaming_blocked')
+        if streaming_blocked is None:
+            streaming_blocked = not device.streaming_blocked
+
+        device.streaming_blocked = bool(streaming_blocked)
+        device.save(update_fields=['streaming_blocked'])
+        self._create_command(device, CommandType.UPDATE_POLICY, {"streaming_blocked": device.streaming_blocked})
+
+        return Response({
+            "message": f"Streaming apps are now {'BLOCKED' if device.streaming_blocked else 'UNBLOCKED'}.",
+            "streaming_blocked": device.streaming_blocked
+        })
+
+    @action(detail=True, methods=['post'], url_path='refresh-location')
+    def refresh_location(self, request, pk=None):
+        """
+        Refresh Location Now (Missing API M10): immediately requests live GPS sync from device agent.
+        """
+        denied = self._block_customer(request)
+        if denied:
+            return denied
+        device = self.get_object()
+        self._create_command(device, CommandType.SYNC_LOCATION)
+        return Response({"message": f"Live GPS location refresh command dispatched to device {device.imei}."})
 
     @action(detail=True, methods=['get'], url_path='location-history')
     def location_history(self, request, pk=None):
@@ -637,3 +942,70 @@ class AppVersionViewSet(viewsets.ModelViewSet):
         qr_target = data.get('download_url') or data.get('external_download_url') or ""
         data['qr_code_generator_url'] = f"https://api.qrserver.com/v1/create-qr-code/?size=250x250&data={qr_target}" if qr_target else None
         return Response(data)
+
+
+class LockMessageTemplateViewSet(viewsets.ModelViewSet):
+    """
+    Screen A-40 Lock Message Templates (Missing API M2).
+    Pre-configured messages displayed on locked phone/TV screens.
+    GET /api/lock-messages/ : list all templates
+    POST /api/lock-messages/ : create template (Super Admin, Staff Operations)
+    PATCH/DELETE /api/lock-messages/:id/ : update / remove template
+    """
+    from .models import LockMessageTemplate
+    from .serializers import LockMessageTemplateSerializer
+    queryset = LockMessageTemplate.objects.all()
+    serializer_class = LockMessageTemplateSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def perform_create(self, serializer):
+        user = self.request.user
+        if user.role not in ['SUPER_ADMIN', 'STAFF_OPERATIONS']:
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("Only Super Admin or Operations Staff can create lock message templates.")
+        if serializer.validated_data.get('is_default'):
+            from .models import LockMessageTemplate
+            LockMessageTemplate.objects.filter(is_default=True).update(is_default=False)
+        serializer.save(created_by=user)
+
+    def perform_update(self, serializer):
+        user = self.request.user
+        if user.role not in ['SUPER_ADMIN', 'STAFF_OPERATIONS']:
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("Only Super Admin or Operations Staff can edit lock message templates.")
+        if serializer.validated_data.get('is_default'):
+            from .models import LockMessageTemplate
+            LockMessageTemplate.objects.filter(is_default=True).update(is_default=False)
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        user = self.request.user
+        if user.role not in ['SUPER_ADMIN', 'STAFF_OPERATIONS']:
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("Only Super Admin or Operations Staff can delete lock message templates.")
+        instance.delete()
+
+
+class RocketPayWebhookView(APIView):
+    """
+    RocketPay OEM DLC Webhook Callback Handler (Section B Item 6).
+    Receives real-time device lifecycle callbacks:
+    Events: 'enrolled', 'locked', 'unlocked', 'failed', 'tampered'
+    URL: /api/integrations/rocketpay/webhook/
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        from .services.rocketpay_service import RocketPayService
+        signature_header = (
+            request.headers.get('X-RocketPay-Signature') or
+            request.headers.get('X-Signature') or
+            request.headers.get('Signature') or
+            ''
+        )
+        is_valid = RocketPayService.verify_webhook_signature(request.body, signature_header)
+        if not is_valid:
+            return Response({"error": "Invalid webhook signature"}, status=status.HTTP_400_BAD_REQUEST)
+
+        result = RocketPayService.process_webhook_payload(request.data)
+        return Response(result, status=status.HTTP_200_OK)

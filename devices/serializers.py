@@ -71,13 +71,21 @@ class DeviceSerializer(serializers.ModelSerializer):
             'custom_wallpaper_url',
             'lock_message',
             'offline_unlock_code',
+            'offline_code_expires_at',
+            'offline_code_expiry_type',
+            'lock_provider',
+            'provider_device_id',
+            'provider_status',
+            'streaming_blocked',
+            'locked_packages',
             # Live GPS
             'current_latitude',
             'current_longitude',
             'current_address',
             'last_location_at',
-            # Synced contacts
+            # Synced contacts & apps
             'synced_contacts',
+            'installed_apps',
             'created_at',
             'updated_at'
         ]
@@ -272,3 +280,14 @@ class DeviceHeartbeatSerializer(serializers.Serializer):
     longitude = serializers.DecimalField(max_digits=10, decimal_places=7, required=False)
     address = serializers.CharField(required=False, allow_blank=True)
     synced_contacts = serializers.ListField(required=False, child=serializers.DictField())
+
+
+class LockMessageTemplateSerializer(serializers.ModelSerializer):
+    """
+    Serializer for Screen A-40 Lock Message Templates.
+    """
+    class Meta:
+        from .models import LockMessageTemplate
+        model = LockMessageTemplate
+        fields = ['id', 'title', 'text', 'is_default', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at']
