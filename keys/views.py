@@ -65,6 +65,13 @@ class KeyViewSet(viewsets.GenericViewSet, viewsets.mixins.ListModelMixin, viewse
                 prefix += '-'
                 
             device_type = serializer.validated_data['device_type']
+            if prefix.startswith('AND'):
+                device_type = 'ANDROID'
+            elif prefix.startswith('IOS'):
+                device_type = 'IOS'
+            elif prefix.startswith('TV'):
+                device_type = 'TV'
+
             quantity = serializer.validated_data['quantity']
             reference_note = serializer.validated_data.get('reference_note', '').strip()
             
@@ -124,13 +131,31 @@ class KeyViewSet(viewsets.GenericViewSet, viewsets.mixins.ListModelMixin, viewse
 
     @action(detail=False, methods=['get'])
     def dashboard(self, request):
-        """Get summary of owned keys grouped by device type and status"""
-        from django.db.models import Count
+        """Get summary of owned keys grouped by device type/prefix and status (B5 Fix)"""
+        from django.db.models import Count, Case, When, Value, CharField
         
-        summary = DeviceKey.objects.filter(current_owner=request.user) \
-            .values('device_type', 'status') \
-            .annotate(count=Count('id')) \
-            .order_by('device_type', 'status')
+        # Group by platform prefix to cleanly distinguish Android vs iOS stock
+        inventory_annotated = DeviceKey.objects.filter(current_owner=request.user).annotate(
+            platform=Case(
+                When(key_string__istartswith='IOS-', then=Value('IOS')),
+                When(device_type__iexact='IOS', then=Value('IOS')),
+                When(key_string__istartswith='AND-', then=Value('ANDROID')),
+                When(device_type__iexact='ANDROID', then=Value('ANDROID')),
+                When(key_string__istartswith='TV-', then=Value('TV')),
+                When(device_type__iexact='TV', then=Value('TV')),
+                default=Value('ANDROID'),
+                output_field=CharField()
+            )
+        ).values('platform', 'status').annotate(count=Count('id')).order_by('platform', 'status')
+        
+        summary = [
+            {
+                "device_type": item['platform'],
+                "status": item['status'],
+                "count": item['count']
+            }
+            for item in inventory_annotated
+        ]
             
         return Response({"inventory": summary})
 
@@ -601,7 +626,8 @@ class KeyRequestViewSet(viewsets.ModelViewSet):
     def approve(self, request, pk=None):
         key_req = self.get_object()
         
-        if key_req.parent != request.user:
+        from accounts.models import is_company_user
+        if key_req.parent != request.user and not is_company_user(request.user):
             return Response({"detail": "You are not authorized to approve this request."}, status=status.HTTP_403_FORBIDDEN)
             
         if key_req.status != KeyRequestStatus.PENDING:
@@ -620,12 +646,14 @@ class KeyRequestViewSet(viewsets.ModelViewSet):
         with transaction.atomic():
             requested_target = (key_req.os_type or key_req.device_type or '').upper()
 
-            # Match based on requested platform and key prefix/device_type
+            # Bug B5: Match based on requested platform and key prefix/device_type strictly
             keys_filter = models.Q(current_owner=request.user, status=KeyStatus.AVAILABLE)
             if requested_target in ['IOS', 'IPHONE', 'MOBILE_IOS']:
                 keys_filter &= (models.Q(device_type__iexact='IOS') | models.Q(key_string__istartswith='IOS-'))
             elif requested_target in ['ANDROID', 'MOBILE_ANDROID']:
-                keys_filter &= (models.Q(device_type__iexact='ANDROID') | models.Q(key_string__istartswith='AND-') | models.Q(device_type='MOBILE'))
+                keys_filter &= (models.Q(device_type__iexact='ANDROID') | models.Q(key_string__istartswith='AND-'))
+                # Strict exclusion of IOS and TV keys
+                keys_filter &= ~models.Q(key_string__istartswith='IOS-') & ~models.Q(key_string__istartswith='TV-')
             elif requested_target in ['TV', 'SMART_TV']:
                 keys_filter &= (models.Q(device_type__iexact='TV') | models.Q(key_string__istartswith='TV-'))
             else:
@@ -660,6 +688,18 @@ class KeyRequestViewSet(viewsets.ModelViewSet):
             
             transferred_key_strings = list(DeviceKey.objects.filter(id__in=key_ids).values_list('key_string', flat=True))
 
+            # Send Notification to Requester (M9)
+            from accounts.views import send_system_notification
+            from accounts.models import NotificationType
+            send_system_notification(
+                recipient=key_req.requester,
+                sender=request.user,
+                title="Key Request Approved",
+                message=f"Your key request for {approve_qty} {requested_target} keys has been approved.",
+                notification_type=NotificationType.KEY_REQUEST_APPROVED,
+                reference_id=key_req.id
+            )
+
             AuditLog.objects.create(
                 user=request.user,
                 action="APPROVED_KEY_REQUEST",
@@ -682,7 +722,8 @@ class KeyRequestViewSet(viewsets.ModelViewSet):
     def reject(self, request, pk=None):
         key_req = self.get_object()
         
-        if key_req.parent != request.user:
+        from accounts.models import is_company_user
+        if key_req.parent != request.user and not is_company_user(request.user):
             return Response({"detail": "You are not authorized to reject this request."}, status=status.HTTP_403_FORBIDDEN)
             
         if key_req.status != KeyRequestStatus.PENDING:
@@ -694,6 +735,18 @@ class KeyRequestViewSet(viewsets.ModelViewSet):
 
         key_req.status = KeyRequestStatus.REJECTED
         key_req.save()
+
+        # Send Notification to Requester (M9)
+        from accounts.views import send_system_notification
+        from accounts.models import NotificationType
+        send_system_notification(
+            recipient=key_req.requester,
+            sender=request.user,
+            title="Key Request Rejected",
+            message=f"Your key request for {key_req.quantity} {key_req.device_type} keys was rejected. Reason: {reason or 'Not specified'}",
+            notification_type=NotificationType.KEY_REQUEST_REJECTED,
+            reference_id=key_req.id
+        )
 
         AuditLog.objects.create(
             user=request.user,
