@@ -56,8 +56,28 @@ A high-performance Django REST Framework (DRF) backend engineered for Mobile Dev
 *   **Auto IMEI Lookup:** Auto-identifies brand, model, OS type, and category from the 15-digit IMEI.
 *   **Remote MDM Commands:** Instant Lock/Unlock, Remote Reboot, Camera block, Social media block, Wallpaper control, Screen reminders, and Emergency 8-digit offline unlock codes.
 *   **Silent Heartbeat API:** Pings server periodically from Android/TV APK to report GPS location, battery level, and sync lock policies.
+*   **Device Alerts Status Board:** Real-time visibility into tamper events, offline devices (> 3 days), and provider command failures (`/api/devices/alerts/`).
+*   **Retailer Emergency Offline Code:** In-app and WhatsApp dispatch of offline 8-digit unlock codes to retailers (`/api/devices/{id}/send-offline-code/`).
 
-### 8. App Versions & APK Management
+### 8. RocketPay DLC + OEM Hardware-Level Locking
+*   **Zero-Touch OEM Locking:** Integrates with RocketPay SuperKey API (`/super-key/v2/only-key` and `/superkey/keys/{key_id}/control/LOCK/apply/LOCK|UNLOCK`) for direct Knox/hardware-level device enforcement.
+*   **Strict Security & Signature Verification:** Webhooks require authentic HMAC-SHA256 signatures with timestamp replay protection; simulated bypasses are strictly prevented.
+*   **Database-First Enrollment & Atomic Rollback:** Enrolls the device in the local database first and coordinates with RocketPay; if either step fails, transactions are atomically rolled back.
+*   **RBI Compliance:** Overdue loan payment auto-unlocks are fired via `transaction.on_commit`, eliminating payment gateway timeouts while guaranteeing unlock execution within the 1-hour regulatory guideline.
+*   **Resilience & Manual Retry:** Captures `provider_status="FAILED"` and detailed `provider_error` logs, enabling one-click retailer command retries.
+
+### 9. TV & Appliance Financing (Phone Collateral Security)
+*   **Dual-Asset Separation:** EMI contracts maintain independent tracking for the financed asset (`TV`, `APPLIANCE`, etc.) and the collateral lock device (`lock_device`).
+*   **Multi-Contract Collateral:** Allows a single high-trust customer smartphone to secure multiple installment contracts simultaneously.
+*   **Collateral Hot-Swap:** Dedicated endpoint (`/api/emi-contracts/{id}/swap-lock-device/`) to transfer security to a replacement phone with audit logging (automatically rejects iPhones/iOS devices).
+*   **Automated Lock Redirection:** Daily automated overdue locks and payment unlocks directly target the associated collateral smartphone.
+
+### 10. Approved Phone Models & TAC Whitelist Governance
+*   **Hardware Compatibility Check:** Validates customer device TAC (first 8 digits of IMEI) against an approved device registry before enrollment.
+*   **Environment Segregation:** Separate staging and production whitelists for brands, models, and marketing names.
+*   **Pre-Flight Verification API:** Frontend calls `/api/tac-list/check/?imei=` for instant eligibility feedback prior to KYC onboarding.
+
+### 11. App Versions & APK Management
 *   **Centralized APK Repository:** Super Admin uploads and manages Android Locker APKs, TV APKs, and Retailer Apps.
 *   **QR Provisioning & Direct Download:** Automatically produces direct download links and dynamic QR code generation URLs for instant installation on customer devices.
 *   **Mandatory Update Flags:** Enforces mandatory app updates on remote devices.
@@ -126,6 +146,30 @@ python manage.py createsuperuser
 python manage.py runserver
 ```
 
+**8. Run the Automated Test Suite**
+```bash
+python manage.py test
+```
+
+---
+
+## 🚀 Production Deployment & Automation
+
+For staging and production deployments on Ubuntu/Linux servers, use the built-in deployment script:
+```bash
+chmod +x deploy.sh
+./deploy.sh
+```
+
+### What `deploy.sh` Automates:
+1. **Code Synchronization:** Pulls the latest commits from GitHub (`git pull origin main`).
+2. **Environment Activation:** Automatically detects and activates `venv` or `.venv`.
+3. **Dependency Sync:** Installs any new packages from `requirements.txt`.
+4. **Database Migrations:** Applies all pending schema migrations (`python manage.py migrate`).
+5. **Static Asset Compilation:** Compiles static files into the web root (`python manage.py collectstatic --noinput`).
+6. **Automated Daily Cron Job:** Registers a midnight cron job (`0 0 * * *`) that executes `python manage.py auto_lock_overdue` and logs output to `/var/log/prime_locker_auto_lock.log`.
+7. **Zero-Downtime Server Reload:** Restarts the Gunicorn / systemd service (`systemctl restart prime-locker`).
+
 ---
 
 ## 📡 API Endpoints Reference
@@ -137,7 +181,7 @@ python manage.py runserver
 | `POST` | `/api/auth/token/refresh/` | Refresh JWT access token |
 | `POST` | `/api/auth/logout/` | Blacklist JWT refresh token (`{"refresh": "<token>"}`) and record logout audit |
 | `POST` | `/api/auth/change-password/` | Change password (Screen A-42: `old_password`, `new_password`, `confirm_password`) |
-| `GET` | `/api/auth/me/` | Current user profile, role, parent, key counts, permissions (restores session on page reload) |
+| `GET`/`PATCH` | `/api/auth/me/` | Current user profile, role, parent, key counts, permissions. `PATCH` allows partners and retailers to update their business profile (`name`, `business_name`, `address`, `city`, `store_phone`, and `logo` image) |
 | `POST` | `/api/auth/password-reset-request/` | Request 6-digit OTP for password reset |
 | `POST` | `/api/auth/password-reset-confirm/` | Verify OTP & set new password |
 | `GET`/`POST` | `/api/super-distributors/` | Manage Super Distributors (returns key balances, children counts, key flow stats) |
@@ -173,17 +217,18 @@ python manage.py runserver
 | `GET`/`POST` | `/api/emi-plans/` | Master EMI Plan Templates (CRUD Super Admin only; read-only for others) |
 | `PATCH`/`PUT`| `/api/emi-plans/{id}/` | *(Super Admin)* Edit master plan terms |
 | `POST` | `/api/emi-plans/{id}/toggle-status/` | *(Super Admin)* Activate / Deactivate plan |
-| `GET`/`POST` | `/api/emi-contracts/` | Set up EMI contract (auto-generates installment schedule; supports `?customer=`, `?retailer=`, `?status=`, `?search=`) |
+| `GET`/`POST` | `/api/emi-contracts/` | Set up EMI contract (auto-generates installment schedule; supports `?customer=`, `?retailer=`, `?status=`, `?search=`). For TV/Appliance contracts, captures product details and collateral `lock_device`. |
 | `GET` | `/api/emi-contracts/{id}/schedule/` | View financial summary bar + all installment rows |
-| `POST` | `/api/emi-contracts/{id}/lock/` | Manual device lock override |
-| `POST` | `/api/emi-contracts/{id}/unlock/` | Manual device unlock override |
+| `POST` | `/api/emi-contracts/{id}/lock/` | Manual device lock override (targets collateral phone for TV contracts) |
+| `POST` | `/api/emi-contracts/{id}/unlock/` | Manual device unlock override (targets collateral phone for TV contracts) |
+| `POST` | `/api/emi-contracts/{id}/swap-lock-device/` | Hot-swap collateral phone securing a TV or appliance contract (`{"new_device_id": <int>, "reason": "string"}`). Refuses iOS/iPhone devices. |
 | `GET` | `/api/payments/` | Paid installments list (Screen A-23) with customer, device, retailer, receipt number, mode, ref (`?date=`, `?start_date=`, `?end_date=`, `?mode=`, `?retailer=`, `?search=`, `?export=csv`) |
 | `GET` | `/api/payments/{id}/` | Payment receipt (Screen A-25) with receipt number (`REC-XXXXXX`), customer/retailer addresses, and contract financial breakdown |
-| `POST` | `/api/emi-installments/{id}/record-payment/` | Record in-store offline payment (Cash/UPI/Card) & auto-unlock device if overdue |
+| `POST` | `/api/emi-installments/{id}/record-payment/` | Record in-store offline payment (Cash/UPI/Card) & auto-unlock device via `transaction.on_commit` if overdue |
 | `POST` | `/api/emi-installments/{id}/create-payment-order/` | Create Razorpay order for online customer payment (returns `order_id`, key, paise amount; includes simulation mode) |
 | `POST` | `/api/emi-installments/{id}/verify-online-payment/` | Verify Razorpay checkout signature & mark installment as `PAID` via `ONLINE_GATEWAY` |
 | `POST` | `/api/emi/webhook/razorpay/` | External webhook for asynchronous gateway notifications (`payment.captured`, `order.paid`) |
-| `GET` | `/api/emi-overdue/` | Overdue dashboard with Ageing KPIs (`?bucket=1-7`, `8-15`, `16-30`, `30+`) |
+| `GET` | `/api/emi-overdue/` | Overdue dashboard with Ageing KPIs (`?bucket=1-7`, `8-15`, `16-30`, `30+`), per-row `late_fee`, and calculated `total_due` |
 
 ### 🎁 Offers & Promotions
 | Method | Endpoint | Description |
@@ -208,19 +253,30 @@ python manage.py runserver
 | :--- | :--- | :--- |
 | `GET`/`POST` | `/api/devices/` | Register device (`NEW` vs `RUNNING` collateral, Android/iOS/Smart TV) & filter list |
 | `GET` | `/api/devices/imei-lookup/?imei=...` | Auto-detect brand, model, OS & category from 15-digit IMEI |
-| `POST` | `/api/devices/{id}/lock/` | Remote lock device instantly |
-| `POST` | `/api/devices/{id}/unlock/` | Remote unlock device instantly |
+| `GET` | `/api/devices/alerts/` | Status Board Device Alerts: aggregates tamper alerts, devices offline > X days (`?days=3`), and failed RocketPay commands |
+| `POST` | `/api/devices/{id}/lock/` | Remote lock device instantly (coordinates with RocketPay DLC if enrolled) |
+| `POST` | `/api/devices/{id}/unlock/` | Remote unlock device instantly (coordinates with RocketPay DLC if enrolled) |
+| `POST` | `/api/devices/{id}/retry-provider-command/` | Manually retry a failed RocketPay command (`{"command": "LOCK"|"UNLOCK"}`) |
 | `POST` | `/api/devices/{id}/reboot/` | Queue remote reboot command |
-| `POST` | `/api/devices/{id}/toggle-camera/` | Remotely enable/disable camera |
-| `POST` | `/api/devices/{id}/toggle-social-media/` | Remotely enable/disable WhatsApp, Instagram, Facebook |
+| `POST` | `/api/devices/{id}/toggle-camera/` | Remotely enable/disable camera (native MDM only; returns 400 on RocketPay) |
+| `POST` | `/api/devices/{id}/toggle-social-media/` | Remotely enable/disable WhatsApp, Instagram, Facebook (native MDM only; returns 400 on RocketPay) |
 | `POST` | `/api/devices/{id}/toggle-reset-block/` | Reset Option Block & FRP Protection (block unauthorized factory reset) |
 | `POST` | `/api/devices/{id}/set-wallpaper/` | Wallpaper Control (change, lock or customize wallpaper on device) |
 | `POST` | `/api/devices/{id}/push-reminder/` | Device Reminders (push custom reminder message to device screen) |
 | `GET` | `/api/devices/{id}/contacts/` | Get Contact Details (owner contact info & synced address book) |
 | `POST` | `/api/devices/{id}/generate-offline-code/` | Generate emergency 8-digit offline unlock code |
+| `POST` | `/api/devices/{id}/send-offline-code/` | Dispatch emergency 8-digit offline unlock code directly to retailer via In-App notification and WhatsApp |
 | `GET` | `/api/devices/{id}/location-history/` | Live Location Tracking & historical GPS breadcrumbs |
 | `POST` | `/api/devices/{id}/attach-emi/` | Step 2: Attach EMI Plan to device (via Master Plan Template, Custom Terms, or Existing Contract) |
 | `POST` | `/api/devices/ping/` | Silent Heartbeat API for Android Locker APK / TV app / iOS agent |
+| `POST` | `/api/devices/webhook/rocketpay/` | Hardware webhook endpoint for RocketPay OEM events (`device.locked`, `device.unlocked`, `device.tamper`) with HMAC-SHA256 verification |
+
+### 📋 Approved Device Models (TAC Whitelist Governance)
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `GET`/`POST` | `/api/tac-list/` | Manage approved TAC list (`tac` [8 digits], `brand`, `model_number`, `marketing_name`, `environment` [`staging`/`production`], `active`). Supports search and environment filters. |
+| `GET`/`PATCH`/`DELETE` | `/api/tac-list/{id}/` | Retrieve, update, or remove approved model entry |
+| `GET` | `/api/tac-list/check/?imei=...` | Pre-flight verification endpoint: checks whether a device IMEI TAC is authorized before proceeding with enrollment |
 
 ### 📦 App Versions & APK Management
 | Method | Endpoint | Description |
