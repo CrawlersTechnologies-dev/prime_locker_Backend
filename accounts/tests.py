@@ -1,4 +1,4 @@
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.contrib.auth import get_user_model
 from rest_framework.test import APIClient
 from rest_framework import status
@@ -10,6 +10,7 @@ from keys.models import DeviceKey, KeyStatus
 User = get_user_model()
 
 
+@override_settings(ROCKETPAY_SIMULATION=True)
 class AccountsBackendTests(TestCase):
     def setUp(self):
         self.retailer = User.objects.create_user(
@@ -105,3 +106,42 @@ class AccountsBackendTests(TestCase):
         # Verify key was not activated and was kept available
         key.refresh_from_db()
         self.assertEqual(key.status, KeyStatus.AVAILABLE)
+
+    def test_dpc_enrollment_returns_qr_code(self):
+        """Tests RP5: Enrolling device with mdm_type=DPC returns qr_code_data"""
+        key = DeviceKey.objects.create(
+            key_string='AND-TEST-DPC-001',
+            device_type='ANDROID',
+            status=KeyStatus.AVAILABLE,
+            current_owner=self.retailer
+        )
+        payload = {
+            'full_name': 'Test DPC Customer',
+            'mobile_number': '+919877777777',
+            'imei': '866671060005555',
+            'brand': 'VIVO',
+            'model': 'Y35',
+            'activation_key_string': key.key_string,
+            'lock_provider': 'ROCKETPAY',
+            'mdm_type': 'DPC',
+            'frp_email': 'customer@gmail.com'
+        }
+        resp = self.client.post('/api/customers/enroll/', payload, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        self.assertIn('device', resp.data)
+        self.assertTrue(resp.data['device'].get('qr_code_data'))
+
+    def test_superadmin_dashboard_shows_rocketpay_wallet(self):
+        """Tests RP11: Super Admin dashboard returns RocketPay wallet key balance"""
+        admin = User.objects.create_superuser(
+            username='test_admin_wallet',
+            email='admin_wallet@test.com',
+            password='Password@123',
+            role=Role.SUPER_ADMIN
+        )
+        client = APIClient()
+        client.force_authenticate(user=admin)
+        resp = client.get('/api/dashboard/')
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertIn('rocketpay_wallet', resp.data)
+        self.assertIsNotNone(resp.data['rocketpay_wallet'])

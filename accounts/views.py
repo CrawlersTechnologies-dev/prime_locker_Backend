@@ -400,14 +400,22 @@ class CustomerViewSet(BaseRoleViewSet):
 
             # Enrol with RocketPay if lock_provider is ROCKETPAY
             rp_device_id = None
+            qr_code_data = None
             if lock_provider == LockProvider.ROCKETPAY:
                 from devices.services.rocketpay_service import RocketPayService
+                mdm_type = data.get('mdm_type', 'DLC').upper()
+                frp_email = data.get('frp_email') or data.get('google_account_email', '')
+                is_running = (device_state == DeviceScannerState.RUNNING)
+
                 rp_result = RocketPayService.enroll_device(
                     device=device,
                     customer_name=full_name,
                     customer_mobile=mobile_number,
                     retailer_name=getattr(user, 'business_name', '') or user.username,
-                    user=user
+                    user=user,
+                    mdm_type=mdm_type,
+                    frp_email=frp_email,
+                    is_running=is_running
                 )
                 if not rp_result.get('success'):
                     transaction.set_rollback(True)
@@ -416,8 +424,9 @@ class CustomerViewSet(BaseRoleViewSet):
                         status=status.HTTP_400_BAD_REQUEST
                     )
                 rp_device_id = rp_result.get('provider_device_id')
+                qr_code_data = rp_result.get('qr_code_data')
                 device.provider_device_id = rp_device_id
-                device.provider_status = rp_result.get('provider_status', 'ENROLLED')
+                device.provider_status = rp_result.get('provider_status', 'PENDING')
                 device.save(update_fields=['provider_device_id', 'provider_status'])
 
             # Activate Key if present
@@ -479,6 +488,7 @@ class CustomerViewSet(BaseRoleViewSet):
                 "lock_provider": device.lock_provider,
                 "provider_device_id": device.provider_device_id,
                 "provider_status": device.provider_status,
+                "qr_code_data": qr_code_data,
                 "offline_unlock_code": device.offline_unlock_code,
                 "activation_key": key_obj.key_string if key_obj else None
             },
@@ -742,6 +752,16 @@ class DashboardView(APIView):
 
         user_name = f"{user.first_name} {user.last_name}".strip() or user.username
 
+        # RP11: RocketPay Wallet Key Balance for Super Admin & Company Staff
+        rocketpay_wallet = None
+        from accounts.models import is_company_user
+        if is_company_user(user):
+            from devices.services.rocketpay_service import RocketPayService
+            try:
+                rocketpay_wallet = RocketPayService.get_wallet_balance()
+            except Exception:
+                rocketpay_wallet = {"outstanding": 0, "low_balance_warning": True}
+
         return Response({
             "user_profile": {
                 "id": user.id,
@@ -754,6 +774,7 @@ class DashboardView(APIView):
             "device_and_emi_kpis": device_and_emi_kpis,
             "financial_kpis": financial_kpis,
             "key_inventory_kpis": key_inventory_kpis,
+            "rocketpay_wallet": rocketpay_wallet,
             "recent_payments": recent_payments,
             "recent_activity": recent_activity
         })
