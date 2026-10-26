@@ -105,6 +105,7 @@ class CustomerEMIContractSerializer(serializers.ModelSerializer):
     customer_details = serializers.SerializerMethodField(read_only=True)
     retailer_details = serializers.SerializerMethodField(read_only=True)
     plan_template_name = serializers.ReadOnlyField(source='plan_template.name')
+    lock_device_imei = serializers.ReadOnlyField(source='lock_device.imei')
     total_paid = serializers.ReadOnlyField()
     total_remaining = serializers.ReadOnlyField()
     paid_installments_count = serializers.ReadOnlyField()
@@ -126,6 +127,13 @@ class CustomerEMIContractSerializer(serializers.ModelSerializer):
             'device_state',
             'device_brand',
             'device_model',
+            'lock_device',
+            'lock_device_imei',
+            'product_type',
+            'product_brand',
+            'product_model',
+            'product_serial_number',
+            'product_price',
             'loan_provider',
             'loan_provider_other',
             'loan_account_number',

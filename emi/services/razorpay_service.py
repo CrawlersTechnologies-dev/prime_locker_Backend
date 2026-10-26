@@ -167,14 +167,15 @@ class RazorpayService:
                 contract.status = EMIContractStatus.ACTIVE
                 contract.save(update_fields=['status'])
 
-            # Bug B1 & Section B: When no overdue installments remain, restore device to ACTIVE and trigger unlock
+            # Bug B1 & Section B & Item 6: When no overdue installments remain, restore device to ACTIVE
+            # and trigger RocketPay unlock via transaction.on_commit
             if overdue_count == 0:
                 from devices.models import Device, DeviceLockStatus, DeviceCommand, CommandType, CommandStatus, LockProvider
                 from devices.services.rocketpay_service import RocketPayService
                 from accounts.views import send_system_notification
                 from accounts.models import NotificationType
 
-                device = Device.objects.filter(emi_contract=contract).first() or Device.objects.filter(imei=contract.device_imei).first()
+                device = contract.target_lock_device or Device.objects.filter(emi_contract=contract).first() or Device.objects.filter(imei=contract.device_imei).first()
                 if device and device.status == DeviceLockStatus.LOCKED:
                     device.status = DeviceLockStatus.ACTIVE
                     device.save(update_fields=['status'])
@@ -187,29 +188,48 @@ class RazorpayService:
                         parameters={"reason": "Online payment captured - auto unlock"}
                     )
 
-                    if device.lock_provider == LockProvider.ROCKETPAY:
-                        RocketPayService.unlock_device(
-                            device=device,
-                            reason="Online payment captured - auto unlock",
-                            user=user
-                        )
+                    dev_id = device.id
+                    ret_id = contract.retailer_id
+                    cust_id = contract.customer_id
+                    u_id = user.id if (user and getattr(user, 'is_authenticated', False)) else None
 
-                    send_system_notification(
-                        recipient=contract.retailer,
-                        title="Device Auto-Unlocked",
-                        message=f"Device {device.imei} was auto-unlocked after online payment receipt ({payment_id}).",
-                        notification_type=NotificationType.DEVICE_UNLOCK,
-                        reference_id=device.id,
-                        sender=user
-                    )
-                    send_system_notification(
-                        recipient=contract.customer,
-                        title="Device Unlocked",
-                        message=f"Your device ({device.imei}) has been unlocked. Thank you for your online payment!",
-                        notification_type=NotificationType.DEVICE_UNLOCK,
-                        reference_id=device.id,
-                        sender=user
-                    )
+                    def _trigger_on_commit_online_unlock():
+                        from devices.models import Device, LockProvider
+                        from devices.services.rocketpay_service import RocketPayService
+                        from accounts.views import send_system_notification
+                        from accounts.models import NotificationType, User
+                        dev = Device.objects.filter(id=dev_id).first()
+                        if not dev:
+                            return
+                        u = User.objects.filter(id=u_id).first() if u_id else None
+                        if dev.lock_provider == LockProvider.ROCKETPAY:
+                            RocketPayService.unlock_device(
+                                device=dev,
+                                reason="Online payment captured - auto unlock",
+                                user=u
+                            )
+                        r = User.objects.filter(id=ret_id).first()
+                        c = User.objects.filter(id=cust_id).first()
+                        if r:
+                            send_system_notification(
+                                recipient=r,
+                                title="Device Auto-Unlocked",
+                                message=f"Device {dev.imei} was auto-unlocked after online payment receipt ({payment_id}).",
+                                notification_type=NotificationType.DEVICE_UNLOCK,
+                                reference_id=dev.id,
+                                sender=u
+                            )
+                        if c:
+                            send_system_notification(
+                                recipient=c,
+                                title="Device Unlocked",
+                                message=f"Your device ({dev.imei}) has been unlocked. Thank you for your online payment!",
+                                notification_type=NotificationType.DEVICE_UNLOCK,
+                                reference_id=dev.id,
+                                sender=u
+                            )
+
+                    transaction.on_commit(_trigger_on_commit_online_unlock)
 
             AuditLog.objects.create(
                 user=user or contract.customer,

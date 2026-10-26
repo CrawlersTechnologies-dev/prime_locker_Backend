@@ -55,8 +55,8 @@ class Command(BaseCommand):
                 contract.status = EMIContractStatus.LOCKED
                 contract.save(update_fields=['status'])
 
-                # Find associated device
-                device = Device.objects.filter(emi_contract=contract).first() or Device.objects.filter(imei=contract.device_imei).first()
+                # Find associated device (collateral lock device or purchased device)
+                device = contract.target_lock_device or Device.objects.filter(emi_contract=contract).first() or Device.objects.filter(imei=contract.device_imei).first()
                 if device and device.status != DeviceLockStatus.LOCKED:
                     device.status = DeviceLockStatus.LOCKED
                     device.save(update_fields=['status'])

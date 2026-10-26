@@ -239,7 +239,7 @@ class CustomerEMIContractViewSet(viewsets.ModelViewSet):
         from accounts.models import NotificationType, AuditLog
         from accounts.views import get_client_ip
 
-        device = Device.objects.filter(emi_contract=contract).first() or Device.objects.filter(imei=contract.device_imei).first()
+        device = contract.target_lock_device or Device.objects.filter(emi_contract=contract).first() or Device.objects.filter(imei=contract.device_imei).first()
         if device:
             device.status = DeviceLockStatus.LOCKED
             device.save(update_fields=['status'])
@@ -322,7 +322,7 @@ class CustomerEMIContractViewSet(viewsets.ModelViewSet):
         from accounts.models import NotificationType, AuditLog
         from accounts.views import get_client_ip
 
-        device = Device.objects.filter(emi_contract=contract).first() or Device.objects.filter(imei=contract.device_imei).first()
+        device = contract.target_lock_device or Device.objects.filter(emi_contract=contract).first() or Device.objects.filter(imei=contract.device_imei).first()
         if device:
             device.status = DeviceLockStatus.ACTIVE
             device.save(update_fields=['status'])
@@ -375,6 +375,69 @@ class CustomerEMIContractViewSet(viewsets.ModelViewSet):
             "device_imei": contract.device_imei,
             "status": contract.status
         })
+
+    @action(detail=True, methods=['post'], url_path='swap-lock-device')
+    def swap_lock_device(self, request, pk=None):
+        """
+        TV EMI Collateral Management (Item 13):
+        Swaps the customer collateral phone securing this contract.
+        Refuses iPhones as collateral.
+        Allows one phone to secure multiple contracts.
+        """
+        if request.user.role == 'CUSTOMER':
+            return Response({"detail": "Customers cannot swap collateral devices."}, status=status.HTTP_403_FORBIDDEN)
+        if request.user.role == 'STAFF_VIEWER':
+            return Response({"detail": "Viewer staff have read-only access."}, status=status.HTTP_403_FORBIDDEN)
+
+        contract = self.get_object()
+        new_imei = request.data.get('imei') or request.data.get('device_imei')
+        new_device_id = request.data.get('device_id') or request.data.get('new_device_id')
+
+        from devices.models import Device, OSType
+        target_device = None
+        if new_device_id:
+            target_device = Device.objects.filter(id=new_device_id).first()
+        elif new_imei:
+            target_device = Device.objects.filter(imei=new_imei).first()
+
+        if not target_device:
+            return Response(
+                {"error": "Target collateral device not found. Please provide a valid device_id or imei."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Refuse iPhones as collateral
+        if target_device.os_type == OSType.IOS or (target_device.brand and 'apple' in target_device.brand.lower()):
+            return Response(
+                {"error": "iPhones cannot be used as collateral for TV/Appliance EMI contracts. Only Android devices are supported."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        contract.lock_device = target_device
+        contract.save(update_fields=['lock_device'])
+
+        from accounts.models import AuditLog
+        from accounts.views import get_client_ip
+        AuditLog.objects.create(
+            user=request.user,
+            action="SWAPPED_COLLATERAL_DEVICE",
+            ip_address=get_client_ip(request),
+            details={
+                "contract_id": contract.id,
+                "new_lock_device_id": target_device.id,
+                "new_lock_device_imei": target_device.imei
+            }
+        )
+
+        return Response({
+            "success": True,
+            "message": f"Collateral device swapped to {target_device.brand} {target_device.model} ({target_device.imei}).",
+            "contract_id": contract.id,
+            "lock_device_id": target_device.id,
+            "lock_device_imei": target_device.imei,
+            "product_type": contract.product_type
+        })
+
 
 
 class EMIInstallmentViewSet(viewsets.GenericViewSet):
@@ -432,9 +495,10 @@ class EMIInstallmentViewSet(viewsets.GenericViewSet):
                     contract.status = EMIContractStatus.ACTIVE
                     contract.save(update_fields=['status'])
 
-                # Bug B1 & Section B: When no overdue installments remain, restore device to ACTIVE and trigger unlock
+                # Bug B1 & Section B & Item 6: When no overdue installments remain, restore device to ACTIVE
+                # and trigger RocketPay unlock via transaction.on_commit (prevents 10s timeout from holding payment transaction)
                 if overdue_count == 0:
-                    device = Device.objects.filter(emi_contract=contract).first() or Device.objects.filter(imei=contract.device_imei).first()
+                    device = contract.target_lock_device or Device.objects.filter(emi_contract=contract).first() or Device.objects.filter(imei=contract.device_imei).first()
                     if device and device.status == DeviceLockStatus.LOCKED:
                         device.status = DeviceLockStatus.ACTIVE
                         device.save(update_fields=['status'])
@@ -447,29 +511,48 @@ class EMIInstallmentViewSet(viewsets.GenericViewSet):
                             parameters={"reason": "EMI payment received - auto unlock"}
                         )
 
-                        if device.lock_provider == LockProvider.ROCKETPAY:
-                            RocketPayService.unlock_device(
-                                device=device,
-                                reason="EMI payment received - auto unlock",
-                                user=request.user
-                            )
+                        device_id = device.id
+                        retailer_id = contract.retailer_id
+                        customer_id = contract.customer_id
+                        user_id = request.user.id
 
-                        send_system_notification(
-                            recipient=contract.retailer,
-                            title="Device Auto-Unlocked",
-                            message=f"Device {device.imei} was auto-unlocked after payment receipt.",
-                            notification_type=NotificationType.DEVICE_UNLOCK,
-                            reference_id=device.id,
-                            sender=request.user
-                        )
-                        send_system_notification(
-                            recipient=contract.customer,
-                            title="Device Unlocked",
-                            message=f"Your device ({device.imei}) has been unlocked. Thank you for your payment!",
-                            notification_type=NotificationType.DEVICE_UNLOCK,
-                            reference_id=device.id,
-                            sender=request.user
-                        )
+                        def _trigger_on_commit_unlock():
+                            from devices.models import Device, LockProvider
+                            from devices.services.rocketpay_service import RocketPayService
+                            from accounts.views import send_system_notification
+                            from accounts.models import NotificationType, User
+                            dev = Device.objects.filter(id=device_id).first()
+                            if not dev:
+                                return
+                            u = User.objects.filter(id=user_id).first()
+                            if dev.lock_provider == LockProvider.ROCKETPAY:
+                                RocketPayService.unlock_device(
+                                    device=dev,
+                                    reason="EMI payment received - auto unlock",
+                                    user=u
+                                )
+                            r = User.objects.filter(id=retailer_id).first()
+                            c = User.objects.filter(id=customer_id).first()
+                            if r:
+                                send_system_notification(
+                                    recipient=r,
+                                    title="Device Auto-Unlocked",
+                                    message=f"Device {dev.imei} was auto-unlocked after payment receipt.",
+                                    notification_type=NotificationType.DEVICE_UNLOCK,
+                                    reference_id=dev.id,
+                                    sender=u
+                                )
+                            if c:
+                                send_system_notification(
+                                    recipient=c,
+                                    title="Device Unlocked",
+                                    message=f"Your device ({dev.imei}) has been unlocked. Thank you for your payment!",
+                                    notification_type=NotificationType.DEVICE_UNLOCK,
+                                    reference_id=dev.id,
+                                    sender=u
+                                )
+
+                        transaction.on_commit(_trigger_on_commit_unlock)
 
                 from accounts.models import AuditLog
                 from accounts.views import get_client_ip
@@ -655,6 +738,8 @@ class OverdueEMIsViewSet(viewsets.ViewSet):
                 "retailer_store": r.business_name,
                 "due_date": inst.due_date,
                 "overdue_amount": inst.amount,
+                "late_fee": inst.late_fee,
+                "total_due": inst.total_due,
                 "days_overdue": days,
             })
 

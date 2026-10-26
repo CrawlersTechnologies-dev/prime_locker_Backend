@@ -82,13 +82,40 @@ class CustomerEMIContract(models.Model):
     retailer = models.ForeignKey(User, on_delete=models.CASCADE, related_name='retailer_emi_contracts')
     plan_template = models.ForeignKey(EMIPlanTemplate, on_delete=models.SET_NULL, null=True, blank=True, related_name='contracts')
     
-    # Device details
+    # Device details (purchased product or default device)
     device_imei = models.CharField(max_length=50, db_index=True)
     device_name = models.CharField(max_length=150, blank=True, null=True)
     device_type = models.CharField(max_length=20, choices=DeviceType.choices, default=DeviceType.MOBILE)
     device_state = models.CharField(max_length=20, choices=DeviceState.choices, default=DeviceState.NEW)
     device_brand = models.CharField(max_length=100, blank=True, null=True)
     device_model = models.CharField(max_length=100, blank=True, null=True)
+    
+    # TV / Appliance Collateral: Lock device (FK to phone that gets locked)
+    lock_device = models.ForeignKey(
+        'devices.Device',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='secured_contracts',
+        help_text="Customer phone that gets locked if this EMI defaults (can secure TV/Appliance EMIs)"
+    )
+
+    # Financed Product Details (stored separately from the collateral lock device)
+    product_type = models.CharField(
+        max_length=50, 
+        default='PHONE', 
+        choices=[
+            ('PHONE', 'Smartphone'),
+            ('TV', 'Television'),
+            ('APPLIANCE', 'Home Appliance'),
+            ('OTHER', 'Other Product')
+        ],
+        help_text="Type of financed item"
+    )
+    product_brand = models.CharField(max_length=100, blank=True, null=True)
+    product_model = models.CharField(max_length=100, blank=True, null=True)
+    product_serial_number = models.CharField(max_length=100, blank=True, null=True)
+    product_price = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
     
     # Loan Financier
     loan_provider = models.CharField(max_length=50, default='NO_LOAN_CASH')
@@ -137,6 +164,14 @@ class CustomerEMIContract(models.Model):
     @property
     def remaining_installments_count(self):
         return self.installments.exclude(status=InstallmentStatus.PAID).count()
+
+    @property
+    def target_lock_device(self):
+        """Returns the device to lock/unlock for this contract (collateral phone or purchased device)."""
+        if self.lock_device:
+            return self.lock_device
+        from devices.models import Device
+        return Device.objects.filter(imei=self.device_imei).first()
 
 
 def add_months(sourcedate, months):
