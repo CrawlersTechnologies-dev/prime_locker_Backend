@@ -35,22 +35,12 @@ class RocketPayService:
     def enroll_device(cls, device, customer_name="", customer_mobile="", retailer_name="", user=None):
         """
         Registers an Android device with RocketPay OEM DLC at point of sale.
+        Calls RocketPay POST /super-key/v2/only-key.
         Returns dict with {"success": bool, "provider_device_id": str, "provider_status": str, "error": str}
         """
         config = cls.get_config()
         api_key = config['API_KEY']
         base_url = config['BASE_URL']
-
-        payload = {
-            "imei": device.imei,
-            "secondary_imei": device.secondary_imei or "",
-            "brand": device.brand or "",
-            "model": device.model or "",
-            "serial_number": device.serial_number or "",
-            "customer_name": customer_name,
-            "customer_mobile": customer_mobile,
-            "retailer_name": retailer_name
-        }
 
         # Simulation Mode
         if not api_key:
@@ -73,26 +63,46 @@ class RocketPayService:
                 "message": "Enrolled successfully (Simulation Mode)."
             }
 
-        # Live API Call
-        url = f"{base_url}/v1/devices/enroll"
+        # Real RocketPay API Call
+        # Endpoint: POST https://api-staging.rocketpay.co.in/super-key/v2/only-key
+        super_key_url = f"{base_url}/super-key/v2/only-key"
         headers = {
-            "Authorization": f"Bearer {api_key}",
+            "x-token": api_key,
             "Content-Type": "application/json"
         }
+        payload = {
+            "device_info": {
+                "imei_no": str(device.imei),
+                "imei_no2": str(device.secondary_imei or device.imei),
+                "manufacturer": (device.brand or "Unknown").upper(),
+                "model": str(device.model or "Unknown"),
+                "mdm_type": "DLC"
+            },
+            "is_auto_reminder_enabled": False,
+            "mobile_number": str(customer_mobile or "+919999999999"),
+            "name": str(customer_name or "Prime Locker Customer")
+        }
         try:
-            resp = requests.post(url, json=payload, headers=headers, timeout=12)
-            res_data = resp.json() if resp.headers.get('content-type') == 'application/json' else {"raw": resp.text}
+            resp = requests.post(super_key_url, json=payload, headers=headers, timeout=15)
+            try:
+                res_data = resp.json()
+            except Exception:
+                res_data = {"raw": resp.text}
+
             cls._log_audit(
                 action="ROCKETPAY_DEVICE_ENROLL_CALL",
                 user=user or device.retailer,
                 details={"imei": device.imei, "status_code": resp.status_code, "response": res_data}
             )
             if resp.status_code in [200, 201]:
-                provider_id = res_data.get('device_id') or res_data.get('id') or f"rp_{device.imei}"
+                # key_id is used for controls (lock, unlock, controls), id is super-key id
+                key_id = res_data.get('key_id') or res_data.get('id')
                 return {
                     "success": True,
-                    "provider_device_id": str(provider_id),
-                    "provider_status": res_data.get('status', 'ENROLLED')
+                    "provider_device_id": str(key_id),
+                    "provider_status": "ENROLLED",
+                    "super_key_id": str(res_data.get('id', '')),
+                    "details": res_data
                 }
             else:
                 err_msg = res_data.get('message') or res_data.get('error') or f"RocketPay error ({resp.status_code})"
@@ -100,11 +110,47 @@ class RocketPayService:
         except requests.RequestException as e:
             logger.error(f"Network error enrolling with RocketPay: {e}")
             return {"success": False, "error": f"RocketPay connection failed: {str(e)}"}
+            logger.error(f"Network error enrolling with RocketPay: {e}")
+            return {"success": False, "error": f"RocketPay connection failed: {str(e)}"}
 
     @classmethod
-    def lock_device(cls, device, reason="EMI payment overdue", user=None):
+    def check_device_catalogue(cls, imei):
+        """
+        Queries RocketPay catalogue by IMEI to determine if device is eligible for DLC locking.
+        Returns dict with eligibility state: 'APPROVED', 'UNDER_REVIEW', 'REJECTED'.
+        """
+        config = cls.get_config()
+        api_key = config['API_KEY']
+        base_url = config['BASE_URL']
+        if not api_key:
+            return {"eligible": True, "state": "APPROVED", "mode": "SIMULATION"}
+
+        url = f"{base_url}/superkey/keys/device-catalogue?imei={imei}"
+        headers = {"x-token": api_key}
+        try:
+            resp = requests.get(url, headers=headers, timeout=10)
+            if resp.status_code == 200:
+                data = resp.json()
+                state = data.get('state', '').upper()
+                return {
+                    "eligible": state == 'APPROVED',
+                    "state": state,
+                    "brand": data.get('brand'),
+                    "model": data.get('model'),
+                    "marketing_name": data.get('marketing_name'),
+                    "mdm_type": data.get('mdm_type'),
+                    "details": data
+                }
+            return {"eligible": False, "state": "NOT_FOUND", "status_code": resp.status_code}
+        except Exception as e:
+            logger.error(f"Error checking device catalogue: {e}")
+            return {"eligible": False, "error": str(e)}
+
+    @classmethod
+    def lock_device(cls, device, reason="EMI payment overdue", title="Device Locked - EMI Overdue", user=None):
         """
         Triggers OEM lock command via RocketPay API.
+        Endpoint: PUT /superkey/keys/{key_id}/control/LOCK/apply/LOCK
         """
         config = cls.get_config()
         api_key = config['API_KEY']
@@ -123,20 +169,32 @@ class RocketPayService:
             )
             return {"success": True, "provider_status": "LOCKED"}
 
-        url = f"{base_url}/v1/devices/{target_id}/lock"
-        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        # Real RocketPay Lock Endpoint
+        url = f"{base_url}/superkey/keys/{target_id}/control/LOCK/apply/LOCK"
+        headers = {
+            "x-token": api_key,
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "title": str(title),
+            "message": str(reason)
+        }
         try:
-            resp = requests.post(url, json={"reason": reason}, headers=headers, timeout=10)
-            res_data = resp.json() if resp.headers.get('content-type') == 'application/json' else {"raw": resp.text}
+            resp = requests.put(url, json=payload, headers=headers, timeout=12)
+            try:
+                res_data = resp.json()
+            except Exception:
+                res_data = {"raw": resp.text}
+
             cls._log_audit(
                 action="ROCKETPAY_LOCK_CALL",
                 user=user,
-                details={"imei": device.imei, "status_code": resp.status_code, "response": res_data}
+                details={"imei": device.imei, "target_id": target_id, "status_code": resp.status_code, "response": res_data}
             )
-            if resp.status_code in [200, 201]:
+            if resp.status_code in [200, 201, 204]:
                 device.provider_status = "LOCKED"
                 device.save(update_fields=['provider_status'])
-                return {"success": True, "provider_status": "LOCKED"}
+                return {"success": True, "provider_status": "LOCKED", "details": res_data}
             else:
                 return {"success": False, "error": str(res_data)}
         except requests.RequestException as e:
@@ -147,6 +205,7 @@ class RocketPayService:
     def unlock_device(cls, device, reason="EMI payment cleared", user=None):
         """
         Triggers OEM unlock command via RocketPay API.
+        Endpoint: PUT /superkey/keys/{key_id}/control/LOCK/apply/UNLOCK
         """
         config = cls.get_config()
         api_key = config['API_KEY']
@@ -165,24 +224,62 @@ class RocketPayService:
             )
             return {"success": True, "provider_status": "UNLOCKED"}
 
-        url = f"{base_url}/v1/devices/{target_id}/unlock"
-        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        # Real RocketPay Unlock Endpoint
+        url = f"{base_url}/superkey/keys/{target_id}/control/LOCK/apply/UNLOCK"
+        headers = {
+            "x-token": api_key,
+            "Content-Type": "application/json"
+        }
         try:
-            resp = requests.post(url, json={"reason": reason}, headers=headers, timeout=10)
-            res_data = resp.json() if resp.headers.get('content-type') == 'application/json' else {"raw": resp.text}
+            resp = requests.put(url, json={}, headers=headers, timeout=12)
+            try:
+                res_data = resp.json()
+            except Exception:
+                res_data = {"raw": resp.text}
+
             cls._log_audit(
                 action="ROCKETPAY_UNLOCK_CALL",
                 user=user,
-                details={"imei": device.imei, "status_code": resp.status_code, "response": res_data}
+                details={"imei": device.imei, "target_id": target_id, "status_code": resp.status_code, "response": res_data}
             )
-            if resp.status_code in [200, 201]:
+            if resp.status_code in [200, 201, 204]:
                 device.provider_status = "UNLOCKED"
                 device.save(update_fields=['provider_status'])
-                return {"success": True, "provider_status": "UNLOCKED"}
+                return {"success": True, "provider_status": "UNLOCKED", "details": res_data}
             else:
                 return {"success": False, "error": str(res_data)}
         except requests.RequestException as e:
             logger.error(f"Network error unlocking via RocketPay: {e}")
+            return {"success": False, "error": str(e)}
+
+    @classmethod
+    def generate_offline_code(cls, device, challenge_code=""):
+        """
+        Requests an offline challenge-response unlock code from RocketPay.
+        Endpoint: PUT /superkey/keys/{key_id}/control/UNLOCK_CODE/apply/FETCH
+        """
+        config = cls.get_config()
+        api_key = config['API_KEY']
+        base_url = config['BASE_URL']
+        target_id = device.provider_device_id or device.imei
+
+        if not api_key:
+            import random
+            simulated_code = f"{random.randint(100000, 999999)}"
+            return {"success": True, "code": simulated_code, "mode": "SIMULATION"}
+
+        url = f"{base_url}/superkey/keys/{target_id}/control/UNLOCK_CODE/apply/FETCH"
+        headers = {"x-token": api_key, "Content-Type": "application/json"}
+        try:
+            resp = requests.put(url, json={"code": challenge_code}, headers=headers, timeout=12)
+            if resp.status_code in [200, 201]:
+                res_data = resp.json()
+                items = res_data.get('meta', {}).get('items', [])
+                if items and 'code' in items[0]:
+                    return {"success": True, "code": items[0]['code'], "details": res_data}
+                return {"success": True, "code": res_data.get('code'), "details": res_data}
+            return {"success": False, "error": resp.text}
+        except Exception as e:
             return {"success": False, "error": str(e)}
 
     @classmethod
