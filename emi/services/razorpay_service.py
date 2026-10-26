@@ -163,6 +163,24 @@ class RazorpayService:
             if unpaid_count == 0:
                 contract.status = EMIContractStatus.COMPLETED
                 contract.save(update_fields=['status'])
+
+                # RP10: If all contracts secured by this lock_device are COMPLETED, unregister RocketPay key (RBI requirement)
+                from devices.models import LockProvider
+                from django.db.models import Q
+                target_dev = contract.target_lock_device or Device.objects.filter(emi_contract=contract).first() or Device.objects.filter(imei=contract.device_imei).first()
+                if target_dev and target_dev.lock_provider == LockProvider.ROCKETPAY:
+                    other_active = CustomerEMIContract.objects.filter(
+                        Q(lock_device=target_dev) | Q(device_imei=target_dev.imei)
+                    ).exclude(id=contract.id).exclude(status=EMIContractStatus.COMPLETED).exists()
+                    if not other_active:
+                        target_dev_id = target_dev.id
+                        def _trigger_on_commit_unregister():
+                            from devices.models import Device
+                            from devices.services.rocketpay_service import RocketPayService
+                            d = Device.objects.filter(id=target_dev_id).first()
+                            if d and d.provider_device_id:
+                                RocketPayService.unregister_key(d)
+                        transaction.on_commit(_trigger_on_commit_unregister)
             elif overdue_count == 0 and contract.status == EMIContractStatus.LOCKED:
                 contract.status = EMIContractStatus.ACTIVE
                 contract.save(update_fields=['status'])
@@ -202,7 +220,7 @@ class RazorpayService:
                         if not dev:
                             return
                         u = User.objects.filter(id=u_id).first() if u_id else None
-                        if dev.lock_provider == LockProvider.ROCKETPAY:
+                        if dev.lock_provider == LockProvider.ROCKETPAY and dev.provider_status != "UNREGISTERED":
                             RocketPayService.unlock_device(
                                 device=dev,
                                 reason="Online payment captured - auto unlock",

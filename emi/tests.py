@@ -1,6 +1,6 @@
 from decimal import Decimal
 from datetime import timedelta
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 from django.core.management import call_command
@@ -28,6 +28,7 @@ from emi.models import (
 User = get_user_model()
 
 
+@override_settings(ROCKETPAY_SIMULATION=True)
 class EMIBackendTests(TestCase):
     def setUp(self):
         # Configure simulation settings
@@ -197,3 +198,35 @@ class EMIBackendTests(TestCase):
         resp_iphone = self.client.post(swap_url, {'imei': iphone_device.imei}, format='json')
         self.assertEqual(resp_iphone.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn('iPhones cannot be used as collateral', resp_iphone.data.get('error', ''))
+
+    def test_completed_contract_unregisters_rocketpay_key(self):
+        """Tests RP10: When all installments are paid, contract completes and unregisters RocketPay key"""
+        # Configure device to ROCKETPAY provider
+        self.device.lock_provider = LockProvider.ROCKETPAY
+        self.device.provider_device_id = 'rp_test_close_123'
+        self.device.save()
+
+        # Delete any existing installments and create exactly 1 installment
+        self.contract.installments.all().delete()
+        inst = EMIInstallment.objects.create(
+            contract=self.contract,
+            installment_number=1,
+            due_date=timezone.localdate(),
+            amount=Decimal('1000.00'),
+            status=InstallmentStatus.UPCOMING
+        )
+
+        # Pay this installment in full
+        with self.captureOnCommitCallbacks(execute=True):
+            resp = self.client.post(
+                f'/api/emi-installments/{inst.id}/record-payment/',
+                {'amount': '1000.00', 'payment_mode': PaymentMode.CASH},
+                format='json'
+            )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+        self.contract.refresh_from_db()
+        self.assertEqual(self.contract.status, EMIContractStatus.COMPLETED)
+
+        self.device.refresh_from_db()
+        self.assertEqual(self.device.provider_status, 'UNREGISTERED')
