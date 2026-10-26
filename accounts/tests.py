@@ -83,8 +83,7 @@ class AccountsBackendTests(TestCase):
             key_string='AND-TEST-TAC-001',
             device_type='ANDROID',
             status=KeyStatus.AVAILABLE,
-            current_owner=self.retailer,
-            created_by=self.retailer
+            current_owner=self.retailer
         )
 
         enroll_url = '/api/customers/enroll/'
