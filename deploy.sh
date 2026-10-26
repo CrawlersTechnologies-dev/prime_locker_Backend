@@ -69,8 +69,18 @@ else
     echo "Successfully registered daily auto-lock cron job (Runs daily at midnight 00:00)."
 fi
 
-# 7. Restart application server
-echo "--> 7. Restarting application server service..."
+# 7. Configure periodic RocketPay status sync cron job (Item RP2)
+echo "--> 7. Configuring periodic RocketPay status sync cron job (RP2)..."
+SYNC_CRON="*/10 * * * * cd $PROJECT_DIR && $PYTHON_BIN manage.py sync_rocketpay_status >> /var/log/prime_locker_rocketpay_sync.log 2>&1"
+if crontab -l 2>/dev/null | grep -q "sync_rocketpay_status"; then
+    echo "RocketPay sync cron job is already registered in crontab."
+else
+    (crontab -l 2>/dev/null; echo "$SYNC_CRON") | crontab -
+    echo "Successfully registered RocketPay status sync cron job (Runs every 10 minutes)."
+fi
+
+# 8. Restart application server
+echo "--> 8. Restarting application server service..."
 if command -v systemctl >/dev/null 2>&1; then
     if systemctl is-active --quiet gunicorn; then
         sudo systemctl restart gunicorn
