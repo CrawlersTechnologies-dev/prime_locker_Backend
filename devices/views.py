@@ -33,6 +33,32 @@ from accounts.models import User, AuditLog
 from accounts.views import get_client_ip, get_all_downstream_users
 from decimal import Decimal
 from emi.models import CustomerEMIContract, EMIContractStatus, EMIPlanTemplate, EMIInstallment, InstallmentStatus, add_months
+from .services.rocketpay_service import RocketPayService
+
+ROCKETPAY_APP_MAP = {
+    'com.whatsapp': 'WHATSAPP',
+    'com.whatsapp.w4b': 'WHATSAPP',
+    'com.instagram.android': 'INSTAGRAM',
+    'com.facebook.katana': 'FACEBOOK',
+    'com.facebook.lite': 'FACEBOOK',
+    'com.google.android.youtube': 'YOUTUBE',
+    'com.snapchat.android': 'SNAPCHAT',
+    'org.telegram.messenger': 'TELEGRAM',
+    'com.android.chrome': 'CHROME',
+    'com.truecaller': 'TRUECALLER',
+    'in.startv.hotstar': 'HOTSTAR',
+    'com.amazon.avod.thirdpartyclient': 'AMAZON_PRIME',
+    'com.jio.media.ondemand': 'JIO_CINEMA',
+    'com.phonepe.app': 'PHONEPE',
+    'com.google.android.apps.nbu.paisa.user': 'GOOGLE_PAY',
+    'net.one97.paytm': 'PAYTM',
+    'in.org.npci.upiapp': 'BHIM',
+    'com.google.android.apps.maps': 'GOOGLE_MAPS',
+}
+
+def is_rocketpay_running_phone(device):
+    """Running phones (collateral) on RocketPay only support lock, unlock code, audio warning, location, and unregister."""
+    return device.lock_provider == LockProvider.ROCKETPAY and device.device_state == DeviceScannerState.RUNNING
 
 
 class IsSuperAdminOrReadOnly(permissions.BasePermission):
@@ -266,7 +292,21 @@ class DeviceViewSet(viewsets.ModelViewSet):
         if denied:
             return denied
         device = self.get_object()
-        device.camera_disabled = not device.camera_disabled
+        if is_rocketpay_running_phone(device):
+            return Response(
+                {"error": "Running collateral phones on RocketPay do not support camera controls. Only LOCK, UNLOCK_CODE, AUDIO_WARNING, GET_LOCATION, and UNREGISTER are supported."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        new_camera_disabled = not device.camera_disabled
+        if device.lock_provider == LockProvider.ROCKETPAY:
+            # RP7: camera_disabled -> CAMERA OFF/ON
+            action = 'OFF' if new_camera_disabled else 'ON'
+            rp_res = RocketPayService.apply_control(device, control='CAMERA', action=action, user=request.user)
+            if not rp_res.get('success'):
+                return Response({"error": rp_res.get('error')}, status=status.HTTP_400_BAD_REQUEST)
+
+        device.camera_disabled = new_camera_disabled
         device.save(update_fields=['camera_disabled'])
         self._create_command(device, CommandType.UPDATE_POLICY, {"camera_disabled": device.camera_disabled})
         return Response({
@@ -280,12 +320,20 @@ class DeviceViewSet(viewsets.ModelViewSet):
         if denied:
             return denied
         device = self.get_object()
-        if device.lock_provider == LockProvider.ROCKETPAY:
+        if is_rocketpay_running_phone(device):
             return Response(
-                {"error": "Social media switch is not supported on RocketPay OEM DLC devices. Use device hardware controls or own-agent MDM."},
+                {"error": "Running collateral phones on RocketPay do not support social media controls. Only LOCK, UNLOCK_CODE, AUDIO_WARNING, GET_LOCATION, and UNREGISTER are supported."},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        device.social_media_disabled = not device.social_media_disabled
+
+        new_state = not device.social_media_disabled
+        if device.lock_provider == LockProvider.ROCKETPAY:
+            # RP6: social media = WHATSAPP + INSTAGRAM + FACEBOOK + SNAPCHAT + TELEGRAM (OFF=block, ON=allow)
+            action = 'OFF' if new_state else 'ON'
+            for app in ['WHATSAPP', 'INSTAGRAM', 'FACEBOOK', 'SNAPCHAT', 'TELEGRAM']:
+                RocketPayService.apply_control(device, control=app, action=action, user=request.user)
+
+        device.social_media_disabled = new_state
         device.whatsapp_disabled = device.social_media_disabled
         device.instagram_disabled = device.social_media_disabled
         device.facebook_disabled = device.social_media_disabled
@@ -307,6 +355,9 @@ class DeviceViewSet(viewsets.ModelViewSet):
         device = self.get_object()
         device.lock_message = message
         device.save(update_fields=['lock_message'])
+        if device.lock_provider == LockProvider.ROCKETPAY:
+            # RP9: Forward to TEXT_REMINDER
+            RocketPayService.apply_control(device, control='TEXT_REMINDER', action='SEND', payload={"message": message}, user=request.user)
         self._create_command(device, CommandType.PUSH_MESSAGE, {"message": message})
         return Response({"message": "Screen reminder sent successfully.", "lock_message": device.lock_message})
 
@@ -408,13 +459,27 @@ class DeviceViewSet(viewsets.ModelViewSet):
         """
         Generates a secure offline unlock code with expiry options (Missing API M7).
         expiry_option choices: 'UNTIL_NEXT_DUE_DATE' (default), '24_HOURS', 'PERMANENT'
+        For RocketPay DLC devices, calls RocketPay's real UNLOCK_CODE API (RP1).
         """
         denied = self._block_customer(request)
         if denied:
             return denied
         from .models import generate_offline_code
         device = self.get_object()
-        new_code = generate_offline_code()
+
+        # RP1: If RocketPay device, request official challenge/response unlock code
+        if device.lock_provider == LockProvider.ROCKETPAY:
+            challenge = request.data.get('code') or request.data.get('challenge_code') or ""
+            rp_res = RocketPayService.generate_offline_code(device, challenge_code=challenge)
+            if rp_res.get('success') and rp_res.get('code'):
+                new_code = rp_res.get('code')
+            else:
+                return Response(
+                    {"error": rp_res.get('error', 'Failed to generate offline unlock code via RocketPay.')},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        else:
+            new_code = generate_offline_code()
 
         expiry_option = request.data.get('expiry_option', 'UNTIL_NEXT_DUE_DATE').upper()
         expires_at = None
@@ -452,7 +517,8 @@ class DeviceViewSet(viewsets.ModelViewSet):
                 "device_id": device.id,
                 "imei": device.imei,
                 "expiry_option": expiry_option,
-                "expires_at": str(expires_at)
+                "expires_at": str(expires_at),
+                "lock_provider": device.lock_provider
             }
         )
 
@@ -480,17 +546,20 @@ class DeviceViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='apps/lock')
     def lock_app(self, request, pk=None):
         """
-        Per-app lock (Missing API M10): locks specified package name(s).
+        Per-app lock (Missing API M10 & RP6):
+        For RocketPay, maps package to app_control and applies OFF (blocked).
+        Running phones on RocketPay do not support app locking.
         """
         denied = self._block_customer(request)
         if denied:
             return denied
         device = self.get_object()
-        if device.lock_provider == LockProvider.ROCKETPAY:
+        if is_rocketpay_running_phone(device):
             return Response(
-                {"error": "App locking is not supported on RocketPay OEM DLC devices. Use device hardware controls or own-agent MDM."},
+                {"error": "Running collateral phones on RocketPay do not support app locking. Only LOCK, UNLOCK_CODE, AUDIO_WARNING, GET_LOCATION, and UNREGISTER are supported."},
                 status=status.HTTP_400_BAD_REQUEST
             )
+
         package_name = request.data.get('package_name')
         package_names = request.data.get('package_names', [])
         if package_name and package_name not in package_names:
@@ -498,6 +567,12 @@ class DeviceViewSet(viewsets.ModelViewSet):
 
         if not package_names:
             return Response({"detail": "Field 'package_name' or 'package_names' is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # RP6: Forward to RocketPay if device is ROCKETPAY
+        if device.lock_provider == LockProvider.ROCKETPAY:
+            for pkg in package_names:
+                app_name = ROCKETPAY_APP_MAP.get(pkg.lower(), pkg.split('.')[-1].upper())
+                RocketPayService.apply_control(device, control=app_name, action='OFF', user=request.user)
 
         current_locked = list(device.locked_packages or [])
         for pkg in package_names:
@@ -516,20 +591,27 @@ class DeviceViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='apps/unlock')
     def unlock_app(self, request, pk=None):
         """
-        Per-app unlock (Missing API M10): removes package name from locked list.
+        Per-app unlock (Missing API M10 & RP6):
+        For RocketPay, maps package to app_control and applies ON (allowed).
         """
         denied = self._block_customer(request)
         if denied:
             return denied
         device = self.get_object()
-        if device.lock_provider == LockProvider.ROCKETPAY:
+        if is_rocketpay_running_phone(device):
             return Response(
-                {"error": "App unlocking is not supported on RocketPay OEM DLC devices."},
+                {"error": "Running collateral phones on RocketPay do not support app controls."},
                 status=status.HTTP_400_BAD_REQUEST
             )
+
         package_name = request.data.get('package_name')
         if not package_name:
             return Response({"detail": "Field 'package_name' is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # RP6: Forward to RocketPay if device is ROCKETPAY
+        if device.lock_provider == LockProvider.ROCKETPAY:
+            app_name = ROCKETPAY_APP_MAP.get(package_name.lower(), package_name.split('.')[-1].upper())
+            RocketPayService.apply_control(device, control=app_name, action='ON', user=request.user)
 
         current_locked = [pkg for pkg in (device.locked_packages or []) if pkg != package_name]
         device.locked_packages = current_locked
@@ -544,7 +626,8 @@ class DeviceViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='audio-reminder')
     def audio_reminder(self, request, pk=None):
         """
-        Audio Reminder (Missing API M10): plays sound/voice reminder on the phone/TV.
+        Audio Reminder (Missing API M10 & RP7): plays sound/voice reminder on the phone/TV.
+        For RocketPay: calls AUDIO_WARNING apply SEND.
         """
         denied = self._block_customer(request)
         if denied:
@@ -552,6 +635,9 @@ class DeviceViewSet(viewsets.ModelViewSet):
         device = self.get_object()
         message = request.data.get('message', 'Please pay your EMI to avoid device locking.')
         volume = int(request.data.get('volume', 100))
+
+        if device.lock_provider == LockProvider.ROCKETPAY:
+            RocketPayService.apply_control(device, control='AUDIO_WARNING', action='SEND', payload={"message": message, "volume": volume}, user=request.user)
 
         self._create_command(device, CommandType.PUSH_MESSAGE, {
             "action": "AUDIO_REMINDER",
@@ -563,20 +649,28 @@ class DeviceViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='block-streaming')
     def block_streaming(self, request, pk=None):
         """
-        TV/Mobile Streaming app block (Missing API M10): blocks Netflix, Prime Video, Hotstar, YouTube.
+        TV/Mobile Streaming app block (Missing API M10 & RP6):
+        Blocks/unblocks YouTube, Hotstar, Prime Video, Jio Cinema.
         """
         denied = self._block_customer(request)
         if denied:
             return denied
         device = self.get_object()
-        if device.lock_provider == LockProvider.ROCKETPAY:
+        if is_rocketpay_running_phone(device):
             return Response(
-                {"error": "Streaming block is not supported on RocketPay OEM DLC devices. Use device hardware controls or own-agent MDM."},
+                {"error": "Running collateral phones on RocketPay do not support streaming app blocking."},
                 status=status.HTTP_400_BAD_REQUEST
             )
+
         streaming_blocked = request.data.get('streaming_blocked')
         if streaming_blocked is None:
             streaming_blocked = not device.streaming_blocked
+
+        # RP6: Forward to RocketPay streaming apps
+        if device.lock_provider == LockProvider.ROCKETPAY:
+            action = 'OFF' if streaming_blocked else 'ON'
+            for app in ['YOUTUBE', 'HOTSTAR', 'AMAZON_PRIME', 'JIO_CINEMA']:
+                RocketPayService.apply_control(device, control=app, action=action, user=request.user)
 
         device.streaming_blocked = bool(streaming_blocked)
         device.save(update_fields=['streaming_blocked'])
@@ -590,12 +684,15 @@ class DeviceViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='refresh-location')
     def refresh_location(self, request, pk=None):
         """
-        Refresh Location Now (Missing API M10): immediately requests live GPS sync from device agent.
+        Refresh Location Now (Missing API M10 & RP7): immediately requests live GPS sync from device agent or RocketPay GET_LOCATION FETCH.
         """
         denied = self._block_customer(request)
         if denied:
             return denied
         device = self.get_object()
+        if device.lock_provider == LockProvider.ROCKETPAY:
+            RocketPayService.apply_control(device, control='GET_LOCATION', action='FETCH', user=request.user)
+
         self._create_command(device, CommandType.SYNC_LOCATION)
         return Response({"message": f"Live GPS location refresh command dispatched to device {device.imei}."})
 
@@ -618,14 +715,28 @@ class DeviceViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='toggle-reset-block')
     def toggle_reset_block(self, request, pk=None):
         """
-        Reset Option Block & FRP Protection:
-        Remotely blocks/unblocks factory data reset and enables/disables FRP lock resistance.
+        Reset Option Block & FRP Protection (RP7):
+        Remotely blocks/unblocks factory data reset (HARD_RESET OFF/ON on RocketPay).
         """
         denied = self._block_customer(request)
         if denied:
             return denied
         device = self.get_object()
-        device.block_factory_reset = not device.block_factory_reset
+        if is_rocketpay_running_phone(device):
+            return Response(
+                {"error": "Running collateral phones on RocketPay do not support factory-reset blocking. Only LOCK, UNLOCK_CODE, AUDIO_WARNING, GET_LOCATION, and UNREGISTER are supported."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        new_state = not device.block_factory_reset
+        if device.lock_provider == LockProvider.ROCKETPAY:
+            # RP7: block_factory_reset -> HARD_RESET OFF/ON
+            action = 'OFF' if new_state else 'ON'
+            rp_res = RocketPayService.apply_control(device, control='HARD_RESET', action=action, user=request.user)
+            if not rp_res.get('success'):
+                return Response({"error": rp_res.get('error')}, status=status.HTTP_400_BAD_REQUEST)
+
+        device.block_factory_reset = new_state
         device.frp_protection_enabled = device.block_factory_reset
         device.save(update_fields=['block_factory_reset', 'frp_protection_enabled'])
         self._create_command(device, CommandType.UPDATE_POLICY, {
@@ -648,16 +759,40 @@ class DeviceViewSet(viewsets.ModelViewSet):
             "frp_protection_enabled": device.frp_protection_enabled
         })
 
+    @action(detail=True, methods=['get'], url_path='controls-status')
+    def controls_status(self, request, pk=None):
+        """
+        Read Current Control States (RP8):
+        GET /api/devices/:id/controls-status/
+        For RocketPay, calls GET /superkey/keys/:key_id/controls/status to return real switch states.
+        """
+        device = self.get_object()
+        if device.lock_provider == LockProvider.ROCKETPAY:
+            return Response(RocketPayService.get_controls_status(device))
+        return Response({
+            "camera_disabled": device.camera_disabled,
+            "block_factory_reset": device.block_factory_reset,
+            "social_media_disabled": device.social_media_disabled,
+            "streaming_blocked": device.streaming_blocked,
+            "wallpaper_locked": device.wallpaper_locked
+        })
+
     @action(detail=True, methods=['post'], url_path='set-wallpaper')
     def set_wallpaper(self, request, pk=None):
         """
-        Wallpaper Control:
+        Wallpaper Control (RP9):
         Changes, locks, or customizes the lock wallpaper shown on the locked device.
+        RocketPay OEM DLC devices do not support wallpaper control (returns 400).
         """
         denied = self._block_customer(request)
         if denied:
             return denied
         device = self.get_object()
+        if device.lock_provider == LockProvider.ROCKETPAY:
+            return Response(
+                {"error": "Wallpaper control is not supported on RocketPay OEM DLC devices."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
         wallpaper_url = request.data.get('wallpaper_url')
         lock_wallpaper = request.data.get('lock_wallpaper', True)
 
@@ -974,7 +1109,8 @@ class DeviceViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='send-offline-code')
     def send_offline_code(self, request, pk=None):
         """
-        Sends the emergency offline unlock code to the retailer (Item 17).
+        Sends the emergency offline unlock code to the retailer (Item 17 & RP1).
+        For RocketPay DLC devices, calls RocketPay's real UNLOCK_CODE API.
         Dispatches via in-app notification and WhatsApp template.
         """
         denied = self._block_customer(request)
@@ -982,7 +1118,15 @@ class DeviceViewSet(viewsets.ModelViewSet):
             return denied
         device = self.get_object()
         code = device.offline_unlock_code
-        if not code:
+
+        # RP1: If RocketPay, fetch official offline code from RocketPay engine
+        if device.lock_provider == LockProvider.ROCKETPAY:
+            rp_res = RocketPayService.generate_offline_code(device)
+            if rp_res.get('success') and rp_res.get('code'):
+                code = rp_res.get('code')
+                device.offline_unlock_code = code
+                device.save(update_fields=['offline_unlock_code'])
+        elif not code:
             from .models import generate_offline_code
             code = generate_offline_code()
             device.offline_unlock_code = code
@@ -1283,7 +1427,8 @@ class ApprovedDeviceTACViewSet(viewsets.ModelViewSet):
     def check(self, request):
         """
         GET /api/tac-list/check/?imei=...
-        Checks if device IMEI (first 8 digits) is on the approved TAC list.
+        Checks if device IMEI (first 8 digits) is on the approved TAC list (Item 12 & RP12).
+        First queries RocketPay's live device catalogue; falls back to local TAC whitelist.
         """
         imei = request.query_params.get('imei', '').strip()
         if len(imei) < 8:
@@ -1296,6 +1441,24 @@ class ApprovedDeviceTACViewSet(viewsets.ModelViewSet):
         from accounts.models import PlatformSettings
         ps = PlatformSettings.get_settings()
         current_env = 'STAGING' if ('staging' in (ps.rocketpay_base_url or '').lower()) else 'PRODUCTION'
+
+        # RP12: Check RocketPay's live device catalogue first
+        try:
+            rp_cat = RocketPayService.check_device_catalogue(imei)
+            if rp_cat.get('eligible'):
+                return Response({
+                    "eligible": True,
+                    "tac": tac,
+                    "brand": rp_cat.get('brand'),
+                    "model_number": rp_cat.get('model'),
+                    "marketing_name": rp_cat.get('marketing_name'),
+                    "mdm_type": rp_cat.get('mdm_type', 'DLC'),
+                    "environment": current_env,
+                    "source": "ROCKETPAY_CATALOGUE",
+                    "message": f"Device model {rp_cat.get('brand')} {rp_cat.get('marketing_name') or rp_cat.get('model')} is approved by RocketPay."
+                })
+        except Exception:
+            pass
 
         from .models import ApprovedDeviceTAC
         tac_entry = ApprovedDeviceTAC.objects.filter(
@@ -1312,6 +1475,7 @@ class ApprovedDeviceTACViewSet(viewsets.ModelViewSet):
                 "model_number": tac_entry.model_number,
                 "marketing_name": tac_entry.marketing_name,
                 "environment": tac_entry.environment,
+                "source": "LOCAL_TAC_WHITELIST",
                 "message": f"Device model {tac_entry.brand} {tac_entry.marketing_name or tac_entry.model_number} is approved for DLC enrollment."
             })
         else:

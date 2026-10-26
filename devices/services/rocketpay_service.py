@@ -53,15 +53,16 @@ class RocketPayService:
             return {"raw": resp.text}
 
     @classmethod
-    def enroll_device(cls, device, customer_name="", customer_mobile="", retailer_name="", user=None):
+    def enroll_device(cls, device, customer_name="", customer_mobile="", retailer_name="", user=None, mdm_type="DLC", frp_email="", is_running=False):
         """
-        Registers an Android device with RocketPay OEM DLC at point of sale.
+        Registers an Android device with RocketPay OEM DLC or DPC at point of sale.
         Calls RocketPay POST /super-key/v2/only-key.
-        Returns dict with {"success": bool, "provider_device_id": str, "provider_status": str, "error": str}
+        Returns dict with {"success": bool, "provider_device_id": str, "provider_status": str, "qr_code_data": str, "error": str}
         """
         config = cls.get_config()
         api_key = config['API_KEY']
         base_url = config['BASE_URL']
+        mdm_type = (mdm_type or "DLC").upper()
 
         # No Silent Simulation: if no API key is set, fail unless ROCKETPAY_SIMULATION=true
         if not api_key:
@@ -79,13 +80,17 @@ class RocketPayService:
                     "mode": "SIMULATION",
                     "imei": device.imei,
                     "provider_device_id": provider_device_id,
-                    "status": "ENROLLED"
+                    "status": "PENDING",
+                    "mdm_type": mdm_type
                 }
             )
+            sim_qr = f"https://rocketpay.co.in/qr/sim_{provider_device_id}" if mdm_type == "DPC" else None
             return {
                 "success": True,
                 "provider_device_id": provider_device_id,
-                "provider_status": "ENROLLED",
+                "provider_status": "PENDING",
+                "journey": "PENDING",
+                "qr_code_data": sim_qr,
                 "message": "Enrolled successfully (Simulation Mode)."
             }
 
@@ -101,12 +106,17 @@ class RocketPayService:
                 "imei_no2": str(device.secondary_imei or device.imei),
                 "manufacturer": (device.brand or "Unknown").upper(),
                 "model": str(device.model or "Unknown"),
-                "mdm_type": "DLC"
+                "mdm_type": mdm_type
             },
             "is_auto_reminder_enabled": False,
             "mobile_number": str(customer_mobile or "+919999999999"),
             "name": str(customer_name or "Prime Locker Customer")
         }
+        if is_running:
+            payload["running"] = True
+        if frp_email:
+            payload["frp"] = {"email_id": str(frp_email)}
+
         try:
             resp = requests.post(super_key_url, json=payload, headers=headers, timeout=15)
             res_data = cls._parse_response_data(resp)
@@ -118,11 +128,22 @@ class RocketPayService:
             )
             if resp.status_code in [200, 201]:
                 key_id = res_data.get('key_id') or res_data.get('id')
+                qr_code_data = None
+                # RP5: If DPC, check gateway_meta or fetch key v5
+                if mdm_type == "DPC":
+                    qr_code_data = res_data.get('gateway_meta', {}).get('qr_code_data')
+                    if not qr_code_data and key_id:
+                        v5_info = cls.get_key_v5(key_id)
+                        qr_code_data = v5_info.get('gateway_meta', {}).get('qr_code_data')
+
+                # RP4: Enrolment starts in PENDING until journey becomes REGISTERED
                 return {
                     "success": True,
                     "provider_device_id": str(key_id),
-                    "provider_status": "ENROLLED",
+                    "provider_status": "PENDING",
+                    "journey": "PENDING",
                     "super_key_id": str(res_data.get('id', '')),
+                    "qr_code_data": qr_code_data,
                     "details": res_data
                 }
             else:
@@ -150,7 +171,20 @@ class RocketPayService:
         if not api_key:
             if not cls.is_simulation_allowed():
                 return {"eligible": False, "error": "RocketPay API key is not configured."}
-            return {"eligible": True, "state": "APPROVED", "mode": "SIMULATION"}
+            from devices.models import ApprovedDeviceTAC
+            tac = (imei or '')[:8]
+            tac_entry = ApprovedDeviceTAC.objects.filter(tac=tac, active=True).first()
+            if tac_entry:
+                return {
+                    "eligible": True,
+                    "state": "APPROVED",
+                    "brand": tac_entry.brand,
+                    "model": tac_entry.model_number,
+                    "marketing_name": tac_entry.marketing_name,
+                    "mdm_type": "DLC",
+                    "mode": "SIMULATION"
+                }
+            return {"eligible": False, "state": "NOT_FOUND", "mode": "SIMULATION"}
 
         url = f"{base_url}/superkey/keys/device-catalogue?imei={imei}"
         headers = {"x-token": api_key}
@@ -437,18 +471,276 @@ class RocketPayService:
 
         return {"status": "processed", "device_id": device.id, "device_status": device.status}
 
-    @staticmethod
-    def _log_audit(action, user, details):
-        from accounts.models import AuditLog
-        try:
-            AuditLog.objects.create(
-                user=user if (user and user.is_authenticated) else None,
-                action=action,
-                details=details
-            )
-        except Exception as e:
-            logger.error(f"Failed to write AuditLog for RocketPay action {action}: {e}")
+    @classmethod
+    def get_key_v5(cls, key_id):
+        """
+        Retrieves live key and device state from RocketPay SuperKey v5 API.
+        Endpoint: GET /superkey/keys/v5/{key_id}
+        """
+        config = cls.get_config()
+        api_key = config['API_KEY']
+        base_url = config['BASE_URL']
+        if not api_key:
+            return {"status": "REGISTERED", "is_locked": False, "journey": "REGISTERED", "mode": "SIMULATION"}
 
+        url = f"{base_url}/superkey/keys/v5/{key_id}"
+        headers = {"x-token": api_key}
+        try:
+            resp = requests.get(url, headers=headers, timeout=10)
+            if resp.status_code == 200:
+                return cls._parse_response_data(resp)
+            return {"error": f"HTTP {resp.status_code}", "status_code": resp.status_code}
+        except Exception as e:
+            logger.error(f"Error fetching RocketPay key v5: {e}")
+            return {"error": str(e)}
+
+    @classmethod
+    def get_actions(cls, key_id):
+        """
+        Retrieves action history for this key.
+        Endpoint: GET /superkey/keys/{key_id}/actions
+        """
+        config = cls.get_config()
+        api_key = config['API_KEY']
+        base_url = config['BASE_URL']
+        if not api_key:
+            return {"items": [{"status": "COMPLETED", "action": "LOCK"}]}
+
+        url = f"{base_url}/superkey/keys/{key_id}/actions"
+        headers = {"x-token": api_key}
+        try:
+            resp = requests.get(url, headers=headers, timeout=10)
+            if resp.status_code == 200:
+                return cls._parse_response_data(resp)
+            return {"error": f"HTTP {resp.status_code}", "items": []}
+        except Exception as e:
+            logger.error(f"Error fetching RocketPay actions: {e}")
+            return {"error": str(e), "items": []}
+
+    @classmethod
+    def sync_device_status(cls, device):
+        """
+        Polls RocketPay key details and actions (RP2, RP3, RP4):
+        - Syncs is_locked, status, and journey from /superkey/keys/v5/{key_id}
+        - Syncs latest action state (PENDING / COMPLETED / FAILED) from /superkey/keys/{key_id}/actions
+        """
+        from devices.models import DeviceLockStatus
+        target_id = device.provider_device_id or device.imei
+        if not target_id:
+            return {"success": False, "error": "No provider device ID"}
+
+        v5_data = cls.get_key_v5(target_id)
+        if v5_data.get('error') and not v5_data.get('status'):
+            return {"success": False, "error": v5_data.get('error')}
+
+        journey = str(v5_data.get('journey', '')).upper()
+        is_locked = v5_data.get('is_locked')
+
+        # RP4: Enrolment stays PENDING until journey is REGISTERED
+        if journey and journey != 'REGISTERED' and device.provider_status == 'PENDING':
+            device.provider_status = 'PENDING'
+        elif journey == 'REGISTERED' and device.provider_status == 'PENDING':
+            device.provider_status = 'REGISTERED'
+
+        # Check action statuses (RP3)
+        actions_data = cls.get_actions(target_id)
+        items = actions_data.get('items') or actions_data.get('data') or []
+        if isinstance(items, list) and items:
+            latest_action = items[0]
+            action_status = str(latest_action.get('status', '')).upper()
+            action_name = str(latest_action.get('action') or latest_action.get('type') or '').upper()
+
+            if action_status == 'COMPLETED':
+                if action_name in ['LOCK', 'LOCKED'] or is_locked is True:
+                    device.status = DeviceLockStatus.LOCKED
+                    device.provider_status = "LOCKED"
+                    device.provider_error = None
+                elif action_name in ['UNLOCK', 'UNLOCKED'] or is_locked is False:
+                    device.status = DeviceLockStatus.ACTIVE
+                    device.provider_status = "UNLOCKED"
+                    device.provider_error = None
+            elif action_status == 'FAILED':
+                device.provider_status = "FAILED"
+                device.provider_error = latest_action.get('error') or latest_action.get('message') or "Action execution failed"
+            elif action_status == 'PENDING':
+                device.provider_status = "PENDING"
+        elif is_locked is not None:
+            if is_locked:
+                device.status = DeviceLockStatus.LOCKED
+                device.provider_status = "LOCKED"
+            else:
+                if device.status == DeviceLockStatus.LOCKED:
+                    device.status = DeviceLockStatus.ACTIVE
+                device.provider_status = "UNLOCKED"
+
+        device.save(update_fields=['status', 'provider_status', 'provider_error'])
+        return {
+            "success": True,
+            "device_status": device.status,
+            "provider_status": device.provider_status,
+            "journey": journey,
+            "is_locked": is_locked
+        }
+
+    @classmethod
+    def apply_control(cls, device, control, action, payload=None, user=None):
+        """
+        Forwards device hardware or app control commands to RocketPay (RP6, RP7):
+        Endpoint: PUT /superkey/keys/{key_id}/control/{control}/apply/{action}
+        Supported apps: WHATSAPP, INSTAGRAM, FACEBOOK, YOUTUBE, SNAPCHAT, TELEGRAM, CHROME, etc.
+        Supported hardware: CAMERA, HARD_RESET, USB_DEBUGGING, AUDIO_WARNING, GET_LOCATION, etc.
+        """
+        config = cls.get_config()
+        api_key = config['API_KEY']
+        base_url = config['BASE_URL']
+        target_id = device.provider_device_id or device.imei
+        control = str(control).upper()
+        action = str(action).upper()
+
+        if not api_key:
+            if not cls.is_simulation_allowed():
+                return {"success": False, "error": "RocketPay API key is not configured and simulation is disabled."}
+            logger.info(f"[SIMULATION] Applied RocketPay control {control} -> {action} on IMEI {device.imei}")
+            cls._log_audit(
+                action="ROCKETPAY_APPLY_CONTROL",
+                user=user,
+                details={"mode": "SIMULATION", "imei": device.imei, "control": control, "action": action}
+            )
+            return {"success": True, "control": control, "action": action, "mode": "SIMULATION"}
+
+        url = f"{base_url}/superkey/keys/{target_id}/control/{control}/apply/{action}"
+        headers = {
+            "x-token": api_key,
+            "Content-Type": "application/json"
+        }
+        body = payload or {}
+        try:
+            resp = requests.put(url, json=body, headers=headers, timeout=12)
+            res_data = cls._parse_response_data(resp)
+            cls._log_audit(
+                action="ROCKETPAY_APPLY_CONTROL_CALL",
+                user=user,
+                details={"imei": device.imei, "control": control, "action": action, "status_code": resp.status_code, "response": res_data}
+            )
+            if resp.status_code in [200, 201, 204]:
+                return {"success": True, "control": control, "action": action, "details": res_data}
+            err_msg = res_data.get('message') or res_data.get('error') or f"RocketPay control error ({resp.status_code})"
+            return {"success": False, "error": str(err_msg)}
+        except requests.RequestException as e:
+            logger.error(f"Network error applying RocketPay control {control}: {e}")
+            return {"success": False, "error": str(e)}
+
+    @classmethod
+    def get_controls_status(cls, device):
+        """
+        Reads current hardware & app control states from RocketPay (RP8):
+        Endpoint: GET /superkey/keys/{key_id}/controls/status
+        Returns: { "on": [...], "off": [...], "locked": [...], "unlocked": [...] }
+        """
+        config = cls.get_config()
+        api_key = config['API_KEY']
+        base_url = config['BASE_URL']
+        target_id = device.provider_device_id or device.imei
+
+        if not api_key:
+            return {
+                "on": ["CAMERA", "USB_DEBUGGING"],
+                "off": ["HARD_RESET"],
+                "locked": [],
+                "unlocked": ["WHATSAPP", "INSTAGRAM", "FACEBOOK"],
+                "mode": "SIMULATION"
+            }
+
+        url = f"{base_url}/superkey/keys/{target_id}/controls/status"
+        headers = {"x-token": api_key}
+        try:
+            resp = requests.get(url, headers=headers, timeout=10)
+            if resp.status_code == 200:
+                return cls._parse_response_data(resp)
+            return {"error": f"HTTP {resp.status_code}", "status_code": resp.status_code}
+        except Exception as e:
+            logger.error(f"Error fetching RocketPay controls status: {e}")
+            return {"error": str(e)}
+
+    @classmethod
+    def unregister_key(cls, device, user=None):
+        """
+        Permanently unregisters key from phone when EMI contract is completed (RP10).
+        Endpoint: POST /superkey/keys/{key_id}/actions/unregister
+        """
+        config = cls.get_config()
+        api_key = config['API_KEY']
+        base_url = config['BASE_URL']
+        target_id = device.provider_device_id or device.imei
+
+        if not api_key:
+            if not cls.is_simulation_allowed():
+                return {"success": False, "error": "RocketPay API key not configured and simulation disabled."}
+            logger.info(f"[SIMULATION] Unregistered RocketPay key for IMEI {device.imei}")
+            device.provider_status = "UNREGISTERED"
+            device.save(update_fields=['provider_status'])
+            cls._log_audit(
+                action="ROCKETPAY_UNREGISTER_KEY",
+                user=user,
+                details={"mode": "SIMULATION", "imei": device.imei, "target_id": target_id}
+            )
+            return {"success": True, "provider_status": "UNREGISTERED", "mode": "SIMULATION"}
+
+        url = f"{base_url}/superkey/keys/{target_id}/actions/unregister"
+        headers = {"x-token": api_key, "Content-Type": "application/json"}
+        try:
+            resp = requests.post(url, json={}, headers=headers, timeout=12)
+            res_data = cls._parse_response_data(resp)
+            cls._log_audit(
+                action="ROCKETPAY_UNREGISTER_KEY_CALL",
+                user=user,
+                details={"imei": device.imei, "target_id": target_id, "status_code": resp.status_code, "response": res_data}
+            )
+            if resp.status_code in [200, 201, 204]:
+                device.provider_status = "UNREGISTERED"
+                device.save(update_fields=['provider_status'])
+                return {"success": True, "provider_status": "UNREGISTERED", "details": res_data}
+            err = res_data.get('message') or res_data.get('error') or f"Unregister error ({resp.status_code})"
+            return {"success": False, "error": str(err)}
+        except requests.RequestException as e:
+            logger.error(f"Network error unregistering RocketPay key: {e}")
+            return {"success": False, "error": str(e)}
+
+    @classmethod
+    def get_wallet_balance(cls):
+        """
+        Retrieves remaining RocketPay key inventory in the company wallet (RP11):
+        Endpoint: GET /common/wallets/v2?product_type=KEY
+        Returns outstanding count (keys remaining).
+        """
+        config = cls.get_config()
+        api_key = config['API_KEY']
+        base_url = config['BASE_URL']
+
+        if not api_key:
+            return {"outstanding": 150, "low_balance_warning": False, "mode": "SIMULATION"}
+
+        url = f"{base_url}/common/wallets/v2?product_type=KEY"
+        headers = {"x-token": api_key}
+        try:
+            resp = requests.get(url, headers=headers, timeout=10)
+            if resp.status_code == 200:
+                data = cls._parse_response_data(resp)
+                items = data.get('items') or data.get('data') or []
+                outstanding = 0
+                if isinstance(items, list) and items:
+                    outstanding = items[0].get('outstanding', 0)
+                elif 'outstanding' in data:
+                    outstanding = data.get('outstanding', 0)
+                return {
+                    "outstanding": int(outstanding),
+                    "low_balance_warning": int(outstanding) < 20,
+                    "details": data
+                }
+            return {"outstanding": 0, "low_balance_warning": True, "error": f"HTTP {resp.status_code}"}
+        except Exception as e:
+            logger.error(f"Error fetching RocketPay wallet: {e}")
+            return {"outstanding": 0, "low_balance_warning": True, "error": str(e)}
 
     @staticmethod
     def _log_audit(action, user, details):
