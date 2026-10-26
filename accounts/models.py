@@ -184,9 +184,9 @@ class PlatformSettings(models.Model):
     whatsapp_sender_id = models.CharField(max_length=50, null=True, blank=True)
     
     # RocketPay DLC integration
-    rocketpay_api_key = models.CharField(max_length=255, null=True, blank=True)
+    rocketpay_api_key = models.TextField(null=True, blank=True)
     rocketpay_base_url = models.CharField(max_length=255, default='https://api.rocketpay.in')
-    rocketpay_webhook_secret = models.CharField(max_length=255, null=True, blank=True)
+    rocketpay_webhook_secret = models.TextField(null=True, blank=True)
     rocketpay_enabled = models.BooleanField(default=True)
     
     updated_at = models.DateTimeField(auto_now=True)
