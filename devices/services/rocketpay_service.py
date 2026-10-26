@@ -7,6 +7,7 @@ Operates with live API credentials or simulation mode if credentials are not con
 import hmac
 import hashlib
 import uuid
+import os
 import logging
 import requests
 from django.conf import settings
@@ -17,11 +18,17 @@ logger = logging.getLogger(__name__)
 
 class RocketPayService:
     @staticmethod
-    def get_config():
+    def is_simulation_allowed():
+        """Returns True only when ROCKETPAY_SIMULATION=true is explicitly configured in settings or environment."""
+        sim_env = os.getenv('ROCKETPAY_SIMULATION', '').strip().lower()
+        return sim_env in ['true', '1', 'yes'] or getattr(settings, 'ROCKETPAY_SIMULATION', False)
+
+    @classmethod
+    def get_config(cls):
         from accounts.models import PlatformSettings
         ps = PlatformSettings.get_settings()
         api_key = ps.rocketpay_api_key or getattr(settings, 'ROCKETPAY_API_KEY', '')
-        base_url = ps.rocketpay_base_url or getattr(settings, 'ROCKETPAY_BASE_URL', 'https://api.rocketpay.in')
+        base_url = ps.rocketpay_base_url or getattr(settings, 'ROCKETPAY_BASE_URL', 'https://api-staging.rocketpay.co.in')
         webhook_secret = ps.rocketpay_webhook_secret or getattr(settings, 'ROCKETPAY_WEBHOOK_SECRET', '')
         enabled = ps.rocketpay_enabled if hasattr(ps, 'rocketpay_enabled') else True
         return {
@@ -30,6 +37,20 @@ class RocketPayService:
             'WEBHOOK_SECRET': webhook_secret,
             'ENABLED': enabled
         }
+
+    @classmethod
+    def _parse_response_data(cls, resp):
+        """Fix for content-type: parses JSON if content-type starts with application/json or contains it."""
+        content_type = resp.headers.get('content-type', '').lower()
+        if content_type.startswith('application/json') or 'application/json' in content_type:
+            try:
+                return resp.json()
+            except Exception:
+                return {"raw": resp.text}
+        try:
+            return resp.json()
+        except Exception:
+            return {"raw": resp.text}
 
     @classmethod
     def enroll_device(cls, device, customer_name="", customer_mobile="", retailer_name="", user=None):
@@ -42,8 +63,13 @@ class RocketPayService:
         api_key = config['API_KEY']
         base_url = config['BASE_URL']
 
-        # Simulation Mode
+        # No Silent Simulation: if no API key is set, fail unless ROCKETPAY_SIMULATION=true
         if not api_key:
+            if not cls.is_simulation_allowed():
+                return {
+                    "success": False,
+                    "error": "RocketPay API key is not configured and simulation is disabled. Set ROCKETPAY_SIMULATION=true to test offline."
+                }
             provider_device_id = f"rp_{device.imei[:8]}_{uuid.uuid4().hex[:6]}"
             logger.info(f"[SIMULATION] RocketPay enrollment for IMEI {device.imei} -> ID: {provider_device_id}")
             cls._log_audit(
@@ -64,7 +90,6 @@ class RocketPayService:
             }
 
         # Real RocketPay API Call
-        # Endpoint: POST https://api-staging.rocketpay.co.in/super-key/v2/only-key
         super_key_url = f"{base_url}/super-key/v2/only-key"
         headers = {
             "x-token": api_key,
@@ -84,10 +109,7 @@ class RocketPayService:
         }
         try:
             resp = requests.post(super_key_url, json=payload, headers=headers, timeout=15)
-            try:
-                res_data = resp.json()
-            except Exception:
-                res_data = {"raw": resp.text}
+            res_data = cls._parse_response_data(resp)
 
             cls._log_audit(
                 action="ROCKETPAY_DEVICE_ENROLL_CALL",
@@ -95,7 +117,6 @@ class RocketPayService:
                 details={"imei": device.imei, "status_code": resp.status_code, "response": res_data}
             )
             if resp.status_code in [200, 201]:
-                # key_id is used for controls (lock, unlock, controls), id is super-key id
                 key_id = res_data.get('key_id') or res_data.get('id')
                 return {
                     "success": True,
@@ -106,11 +127,15 @@ class RocketPayService:
                 }
             else:
                 err_msg = res_data.get('message') or res_data.get('error') or f"RocketPay error ({resp.status_code})"
+                device.provider_status = "FAILED"
+                device.provider_error = str(err_msg)
+                device.save(update_fields=['provider_status', 'provider_error'])
                 return {"success": False, "error": str(err_msg)}
         except requests.RequestException as e:
             logger.error(f"Network error enrolling with RocketPay: {e}")
-            return {"success": False, "error": f"RocketPay connection failed: {str(e)}"}
-            logger.error(f"Network error enrolling with RocketPay: {e}")
+            device.provider_status = "FAILED"
+            device.provider_error = str(e)
+            device.save(update_fields=['provider_status', 'provider_error'])
             return {"success": False, "error": f"RocketPay connection failed: {str(e)}"}
 
     @classmethod
@@ -123,6 +148,8 @@ class RocketPayService:
         api_key = config['API_KEY']
         base_url = config['BASE_URL']
         if not api_key:
+            if not cls.is_simulation_allowed():
+                return {"eligible": False, "error": "RocketPay API key is not configured."}
             return {"eligible": True, "state": "APPROVED", "mode": "SIMULATION"}
 
         url = f"{base_url}/superkey/keys/device-catalogue?imei={imei}"
@@ -130,7 +157,7 @@ class RocketPayService:
         try:
             resp = requests.get(url, headers=headers, timeout=10)
             if resp.status_code == 200:
-                data = resp.json()
+                data = cls._parse_response_data(resp)
                 state = data.get('state', '').upper()
                 return {
                     "eligible": state == 'APPROVED',
@@ -157,11 +184,17 @@ class RocketPayService:
         base_url = config['BASE_URL']
         target_id = device.provider_device_id or device.imei
 
-        # Simulation Mode
+        # Simulation Mode check
         if not api_key:
+            if not cls.is_simulation_allowed():
+                device.provider_status = "FAILED"
+                device.provider_error = "RocketPay API key not configured."
+                device.save(update_fields=['provider_status', 'provider_error'])
+                return {"success": False, "error": "RocketPay API key not configured and simulation is disabled."}
             logger.info(f"[SIMULATION] RocketPay device locked: IMEI {device.imei} ({target_id})")
             device.provider_status = "LOCKED"
-            device.save(update_fields=['provider_status'])
+            device.provider_error = None
+            device.save(update_fields=['provider_status', 'provider_error'])
             cls._log_audit(
                 action="ROCKETPAY_LOCK_DEVICE",
                 user=user,
@@ -181,10 +214,7 @@ class RocketPayService:
         }
         try:
             resp = requests.put(url, json=payload, headers=headers, timeout=12)
-            try:
-                res_data = resp.json()
-            except Exception:
-                res_data = {"raw": resp.text}
+            res_data = cls._parse_response_data(resp)
 
             cls._log_audit(
                 action="ROCKETPAY_LOCK_CALL",
@@ -193,12 +223,20 @@ class RocketPayService:
             )
             if resp.status_code in [200, 201, 204]:
                 device.provider_status = "LOCKED"
-                device.save(update_fields=['provider_status'])
+                device.provider_error = None
+                device.save(update_fields=['provider_status', 'provider_error'])
                 return {"success": True, "provider_status": "LOCKED", "details": res_data}
             else:
-                return {"success": False, "error": str(res_data)}
+                err_msg = res_data.get('message') or res_data.get('error') or str(res_data)
+                device.provider_status = "FAILED"
+                device.provider_error = str(err_msg)
+                device.save(update_fields=['provider_status', 'provider_error'])
+                return {"success": False, "error": str(err_msg)}
         except requests.RequestException as e:
             logger.error(f"Network error locking via RocketPay: {e}")
+            device.provider_status = "FAILED"
+            device.provider_error = str(e)
+            device.save(update_fields=['provider_status', 'provider_error'])
             return {"success": False, "error": str(e)}
 
     @classmethod
@@ -212,11 +250,17 @@ class RocketPayService:
         base_url = config['BASE_URL']
         target_id = device.provider_device_id or device.imei
 
-        # Simulation Mode
+        # Simulation Mode check
         if not api_key:
+            if not cls.is_simulation_allowed():
+                device.provider_status = "FAILED"
+                device.provider_error = "RocketPay API key not configured."
+                device.save(update_fields=['provider_status', 'provider_error'])
+                return {"success": False, "error": "RocketPay API key not configured and simulation is disabled."}
             logger.info(f"[SIMULATION] RocketPay device unlocked: IMEI {device.imei} ({target_id})")
             device.provider_status = "UNLOCKED"
-            device.save(update_fields=['provider_status'])
+            device.provider_error = None
+            device.save(update_fields=['provider_status', 'provider_error'])
             cls._log_audit(
                 action="ROCKETPAY_UNLOCK_DEVICE",
                 user=user,
@@ -232,10 +276,7 @@ class RocketPayService:
         }
         try:
             resp = requests.put(url, json={}, headers=headers, timeout=12)
-            try:
-                res_data = resp.json()
-            except Exception:
-                res_data = {"raw": resp.text}
+            res_data = cls._parse_response_data(resp)
 
             cls._log_audit(
                 action="ROCKETPAY_UNLOCK_CALL",
@@ -244,12 +285,20 @@ class RocketPayService:
             )
             if resp.status_code in [200, 201, 204]:
                 device.provider_status = "UNLOCKED"
-                device.save(update_fields=['provider_status'])
+                device.provider_error = None
+                device.save(update_fields=['provider_status', 'provider_error'])
                 return {"success": True, "provider_status": "UNLOCKED", "details": res_data}
             else:
-                return {"success": False, "error": str(res_data)}
+                err_msg = res_data.get('message') or res_data.get('error') or str(res_data)
+                device.provider_status = "FAILED"
+                device.provider_error = str(err_msg)
+                device.save(update_fields=['provider_status', 'provider_error'])
+                return {"success": False, "error": str(err_msg)}
         except requests.RequestException as e:
             logger.error(f"Network error unlocking via RocketPay: {e}")
+            device.provider_status = "FAILED"
+            device.provider_error = str(e)
+            device.save(update_fields=['provider_status', 'provider_error'])
             return {"success": False, "error": str(e)}
 
     @classmethod
@@ -264,6 +313,8 @@ class RocketPayService:
         target_id = device.provider_device_id or device.imei
 
         if not api_key:
+            if not cls.is_simulation_allowed():
+                return {"success": False, "error": "RocketPay API key not configured and simulation is disabled."}
             import random
             simulated_code = f"{random.randint(100000, 999999)}"
             return {"success": True, "code": simulated_code, "mode": "SIMULATION"}
@@ -273,7 +324,7 @@ class RocketPayService:
         try:
             resp = requests.put(url, json={"code": challenge_code}, headers=headers, timeout=12)
             if resp.status_code in [200, 201]:
-                res_data = resp.json()
+                res_data = cls._parse_response_data(resp)
                 items = res_data.get('meta', {}).get('items', [])
                 if items and 'code' in items[0]:
                     return {"success": True, "code": items[0]['code'], "details": res_data}
@@ -284,29 +335,40 @@ class RocketPayService:
 
     @classmethod
     def verify_webhook_signature(cls, raw_body_bytes, signature_header):
-        """Verifies HMAC SHA256 webhook signature from RocketPay"""
+        """
+        Verifies HMAC SHA256 webhook signature from RocketPay.
+        Strict verification: Rejects EVERY webhook when no secret is configured.
+        """
         config = cls.get_config()
         secret = config['WEBHOOK_SECRET']
-        if not secret or signature_header == 'simulated_rocketpay_signature':
-            return True
-        if not signature_header:
+        if not secret:
+            logger.error("RocketPay webhook rejected: ROCKETPAY_WEBHOOK_SECRET is not configured on server.")
             return False
+        if not signature_header:
+            logger.warning("RocketPay webhook rejected: Missing signature header.")
+            return False
+
+        sig = signature_header.strip()
+        if sig.startswith('sha256='):
+            sig = sig[7:]
+
         expected = hmac.new(secret.encode('utf-8'), raw_body_bytes, hashlib.sha256).hexdigest()
-        return hmac.compare_digest(expected, signature_header)
+        return hmac.compare_digest(expected, sig)
 
     @classmethod
     def process_webhook_payload(cls, data):
         """
         Handles webhook event callback from RocketPay:
-        Events: 'enrolled', 'locked', 'unlocked', 'failed', 'tampered'
+        Matches RocketPay real event action names:
+        LOCKED, UNLOCKED, REGISTERED, DEREGISTERED, TAMPERED, FAILED
         """
         from devices.models import Device, DeviceLockStatus
         from accounts.views import send_system_notification
         from accounts.models import NotificationType
 
-        event = data.get('event', '').lower()
-        imei = data.get('imei')
-        provider_device_id = data.get('device_id') or data.get('provider_device_id')
+        event = str(data.get('event') or data.get('action') or data.get('state') or '').lower()
+        imei = data.get('imei') or data.get('device_info', {}).get('imei_no')
+        provider_device_id = data.get('device_id') or data.get('provider_device_id') or data.get('key_id') or data.get('id')
 
         device = None
         if provider_device_id:
@@ -324,10 +386,11 @@ class RocketPayService:
             details={"event": event, "device_id": device.id, "imei": device.imei, "payload": data}
         )
 
-        if event in ['locked', 'device.locked']:
+        if event in ['locked', 'device.locked', 'key.locked']:
             device.status = DeviceLockStatus.LOCKED
             device.provider_status = "LOCKED"
-            device.save(update_fields=['status', 'provider_status'])
+            device.provider_error = None
+            device.save(update_fields=['status', 'provider_status', 'provider_error'])
             send_system_notification(
                 recipient=device.retailer,
                 title="RocketPay Device Locked",
@@ -335,10 +398,11 @@ class RocketPayService:
                 notification_type=NotificationType.DEVICE_LOCK,
                 reference_id=device.id
             )
-        elif event in ['unlocked', 'device.unlocked']:
+        elif event in ['unlocked', 'device.unlocked', 'key.unlocked']:
             device.status = DeviceLockStatus.ACTIVE
             device.provider_status = "UNLOCKED"
-            device.save(update_fields=['status', 'provider_status'])
+            device.provider_error = None
+            device.save(update_fields=['status', 'provider_status', 'provider_error'])
             send_system_notification(
                 recipient=device.retailer,
                 title="RocketPay Device Unlocked",
@@ -346,13 +410,19 @@ class RocketPayService:
                 notification_type=NotificationType.DEVICE_UNLOCK,
                 reference_id=device.id
             )
-        elif event in ['enrolled', 'device.enrolled']:
+        elif event in ['enrolled', 'registered', 'device.enrolled', 'key.registered']:
             device.provider_status = "ENROLLED"
-            device.save(update_fields=['provider_status'])
-        elif event in ['tampered', 'device.tampered']:
+            device.provider_error = None
+            device.save(update_fields=['provider_status', 'provider_error'])
+        elif event in ['deregistered', 'unregistered', 'released', 'key.deregistered']:
+            device.provider_status = "UNENROLLED"
+            device.status = DeviceLockStatus.UNENROLLED
+            device.save(update_fields=['status', 'provider_status'])
+        elif event in ['tampered', 'device.tampered', 'key.tampered']:
             device.status = DeviceLockStatus.LOCKED
             device.provider_status = "TAMPERED"
-            device.save(update_fields=['status', 'provider_status'])
+            device.provider_error = "Device tamper reported by RocketPay OEM."
+            device.save(update_fields=['status', 'provider_status', 'provider_error'])
             send_system_notification(
                 recipient=device.retailer,
                 title="⚠️ RocketPay Tamper Alert",
@@ -362,9 +432,23 @@ class RocketPayService:
             )
         elif event in ['failed', 'device.failed']:
             device.provider_status = "FAILED"
-            device.save(update_fields=['provider_status'])
+            device.provider_error = data.get('message') or data.get('error') or "RocketPay command failed"
+            device.save(update_fields=['provider_status', 'provider_error'])
 
         return {"status": "processed", "device_id": device.id, "device_status": device.status}
+
+    @staticmethod
+    def _log_audit(action, user, details):
+        from accounts.models import AuditLog
+        try:
+            AuditLog.objects.create(
+                user=user if (user and user.is_authenticated) else None,
+                action=action,
+                details=details
+            )
+        except Exception as e:
+            logger.error(f"Failed to write AuditLog for RocketPay action {action}: {e}")
+
 
     @staticmethod
     def _log_audit(action, user, details):

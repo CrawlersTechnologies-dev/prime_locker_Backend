@@ -76,6 +76,7 @@ class DeviceSerializer(serializers.ModelSerializer):
             'lock_provider',
             'provider_device_id',
             'provider_status',
+            'provider_error',
             'streaming_blocked',
             'locked_packages',
             # Live GPS
@@ -291,3 +292,25 @@ class LockMessageTemplateSerializer(serializers.ModelSerializer):
         model = LockMessageTemplate
         fields = ['id', 'title', 'text', 'is_default', 'created_at', 'updated_at']
         read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class ApprovedDeviceTACSerializer(serializers.ModelSerializer):
+    """
+    Serializer for approved phone models (TAC List).
+    """
+    class Meta:
+        from .models import ApprovedDeviceTAC
+        model = ApprovedDeviceTAC
+        fields = [
+            'id',
+            'tac',
+            'brand',
+            'model_number',
+            'marketing_name',
+            'environment',
+            'active',
+            'created_at',
+            'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+

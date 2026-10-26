@@ -185,7 +185,12 @@ class Device(models.Model):
         max_length=50, 
         blank=True, 
         null=True, 
-        help_text="Status reported by provider (e.g. ENROLLED, LOCKED, UNLOCKED)"
+        help_text="Status reported by provider (e.g. ENROLLED, LOCKED, UNLOCKED, FAILED, TAMPERED)"
+    )
+    provider_error = models.TextField(
+        blank=True, 
+        null=True, 
+        help_text="Last error message reported by lock provider (e.g. RocketPay failure reason)"
     )
 
     # Device Agent Commands & Control Extensions (Section C: M10)
@@ -298,3 +303,37 @@ class LockMessageTemplate(models.Model):
 
     def __str__(self):
         return f"{self.title}{' (Default)' if self.is_default else ''}"
+
+
+class TACEnvironment(models.TextChoices):
+    STAGING = 'STAGING', 'Staging'
+    PRODUCTION = 'PRODUCTION', 'Production'
+    ALL = 'ALL', 'All Environments'
+
+
+class ApprovedDeviceTAC(models.Model):
+    """
+    Approved phone models (TAC List) for OEM / DLC locking.
+    The Type Allocation Code (TAC) is the first 8 digits of the device IMEI.
+    Enrolment rejects phones not in the active approved list.
+    """
+    tac = models.CharField(max_length=8, db_index=True, help_text="First 8 digits of device IMEI")
+    brand = models.CharField(max_length=100)
+    model_number = models.CharField(max_length=100)
+    marketing_name = models.CharField(max_length=100, blank=True, null=True)
+    environment = models.CharField(
+        max_length=20, 
+        choices=TACEnvironment.choices, 
+        default=TACEnvironment.PRODUCTION
+    )
+    active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['brand', 'model_number']
+        unique_together = ('tac', 'environment')
+
+    def __str__(self):
+        return f"{self.brand} {self.marketing_name or self.model_number} (TAC: {self.tac}) [{self.environment}]"
+

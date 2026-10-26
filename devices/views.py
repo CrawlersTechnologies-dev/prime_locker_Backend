@@ -280,6 +280,11 @@ class DeviceViewSet(viewsets.ModelViewSet):
         if denied:
             return denied
         device = self.get_object()
+        if device.lock_provider == LockProvider.ROCKETPAY:
+            return Response(
+                {"error": "Social media switch is not supported on RocketPay OEM DLC devices. Use device hardware controls or own-agent MDM."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
         device.social_media_disabled = not device.social_media_disabled
         device.whatsapp_disabled = device.social_media_disabled
         device.instagram_disabled = device.social_media_disabled
@@ -345,6 +350,14 @@ class DeviceViewSet(viewsets.ModelViewSet):
             return denied
         device = self.get_object()
         data = request.data
+
+        if device.lock_provider == LockProvider.ROCKETPAY:
+            blocked_for_rp = ['social_media_disabled', 'whatsapp_disabled', 'instagram_disabled', 'facebook_disabled', 'streaming_blocked']
+            if any(k in data for k in blocked_for_rp):
+                return Response(
+                    {"error": "App locking, social media switches, and streaming blocks are not supported on RocketPay OEM DLC devices. Use hardware controls (camera, factory reset, etc.) or own-agent MDM."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
 
         control_fields = [
             'camera_disabled', 'block_factory_reset', 'frp_protection_enabled',
@@ -473,6 +486,11 @@ class DeviceViewSet(viewsets.ModelViewSet):
         if denied:
             return denied
         device = self.get_object()
+        if device.lock_provider == LockProvider.ROCKETPAY:
+            return Response(
+                {"error": "App locking is not supported on RocketPay OEM DLC devices. Use device hardware controls or own-agent MDM."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
         package_name = request.data.get('package_name')
         package_names = request.data.get('package_names', [])
         if package_name and package_name not in package_names:
@@ -504,6 +522,11 @@ class DeviceViewSet(viewsets.ModelViewSet):
         if denied:
             return denied
         device = self.get_object()
+        if device.lock_provider == LockProvider.ROCKETPAY:
+            return Response(
+                {"error": "App unlocking is not supported on RocketPay OEM DLC devices."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
         package_name = request.data.get('package_name')
         if not package_name:
             return Response({"detail": "Field 'package_name' is required."}, status=status.HTTP_400_BAD_REQUEST)
@@ -546,6 +569,11 @@ class DeviceViewSet(viewsets.ModelViewSet):
         if denied:
             return denied
         device = self.get_object()
+        if device.lock_provider == LockProvider.ROCKETPAY:
+            return Response(
+                {"error": "Streaming block is not supported on RocketPay OEM DLC devices. Use device hardware controls or own-agent MDM."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
         streaming_blocked = request.data.get('streaming_blocked')
         if streaming_blocked is None:
             streaming_blocked = not device.streaming_blocked
@@ -838,6 +866,192 @@ class DeviceViewSet(viewsets.ModelViewSet):
             }
         }, status=status.HTTP_201_CREATED)
 
+    @action(detail=False, methods=['get'])
+    def alerts(self, request):
+        """
+        Status Board Device Alerts (Item 16: GET /api/devices/alerts/):
+        Surfaces critical operational issues:
+        1. Tamper alerts (from RocketPay webhook)
+        2. Offline devices (no ping/heartbeat for more than X days, default 3)
+        3. Failed RocketPay commands (provider_status='FAILED')
+        """
+        denied = self._block_customer(request)
+        if denied:
+            return denied
+
+        qs = self.get_queryset()
+        days = int(request.query_params.get('days', 3))
+        cutoff = timezone.now() - timedelta(days=days)
+
+        # 1. Tamper alerts
+        tamper_devices = qs.filter(
+            models.Q(provider_status='TAMPERED') |
+            models.Q(provider_error__icontains='tamper')
+        ).select_related('customer', 'retailer')
+
+        # 2. Offline alerts (active devices not seen in > X days)
+        offline_devices = qs.filter(
+            models.Q(last_online_at__lt=cutoff) |
+            models.Q(last_online_at__isnull=True, status=DeviceLockStatus.ACTIVE)
+        ).select_related('customer', 'retailer')
+
+        # 3. Failed RocketPay commands
+        failed_devices = qs.filter(
+            provider_status='FAILED'
+        ).select_related('customer', 'retailer')
+
+        alerts_list = []
+        for d in tamper_devices:
+            c_name = f"{d.customer.first_name} {d.customer.last_name}".strip() or d.customer.username
+            r_name = f"{d.retailer.first_name} {d.retailer.last_name}".strip() or d.retailer.username
+            alerts_list.append({
+                "id": f"tamper_{d.id}",
+                "type": "TAMPER",
+                "severity": "CRITICAL",
+                "device_id": d.id,
+                "imei": d.imei,
+                "brand": d.brand,
+                "model": d.model,
+                "customer_name": c_name,
+                "customer_phone": d.customer.mobile_number,
+                "retailer_name": r_name,
+                "retailer_store": d.retailer.business_name,
+                "message": "Device tamper event reported by RocketPay OEM engine.",
+                "timestamp": d.updated_at,
+                "action_required": "Investigate physical device or call customer."
+            })
+
+        for d in failed_devices:
+            c_name = f"{d.customer.first_name} {d.customer.last_name}".strip() or d.customer.username
+            r_name = f"{d.retailer.first_name} {d.retailer.last_name}".strip() or d.retailer.username
+            alerts_list.append({
+                "id": f"failed_{d.id}",
+                "type": "FAILED_COMMAND",
+                "severity": "HIGH",
+                "device_id": d.id,
+                "imei": d.imei,
+                "brand": d.brand,
+                "model": d.model,
+                "customer_name": c_name,
+                "customer_phone": d.customer.mobile_number,
+                "retailer_name": r_name,
+                "retailer_store": d.retailer.business_name,
+                "message": f"RocketPay command failed: {d.provider_error or 'Unknown provider error'}",
+                "timestamp": d.updated_at,
+                "action_required": "Click retry button or run retry-provider-command."
+            })
+
+        for d in offline_devices:
+            c_name = f"{d.customer.first_name} {d.customer.last_name}".strip() or d.customer.username
+            r_name = f"{d.retailer.first_name} {d.retailer.last_name}".strip() or d.retailer.username
+            alerts_list.append({
+                "id": f"offline_{d.id}",
+                "type": "OFFLINE",
+                "severity": "MEDIUM",
+                "device_id": d.id,
+                "imei": d.imei,
+                "brand": d.brand,
+                "model": d.model,
+                "customer_name": c_name,
+                "customer_phone": d.customer.mobile_number,
+                "retailer_name": r_name,
+                "retailer_store": d.retailer.business_name,
+                "message": f"Device has been offline for more than {days} days.",
+                "timestamp": d.last_online_at or d.created_at,
+                "action_required": "Ask customer to connect device to internet."
+            })
+
+        return Response({
+            "summary": {
+                "total_alerts": len(alerts_list),
+                "tamper_count": tamper_devices.count(),
+                "failed_commands_count": failed_devices.count(),
+                "offline_count": offline_devices.count()
+            },
+            "alerts": alerts_list
+        })
+
+    @action(detail=True, methods=['post'], url_path='send-offline-code')
+    def send_offline_code(self, request, pk=None):
+        """
+        Sends the emergency offline unlock code to the retailer (Item 17).
+        Dispatches via in-app notification and WhatsApp template.
+        """
+        denied = self._block_customer(request)
+        if denied:
+            return denied
+        device = self.get_object()
+        code = device.offline_unlock_code
+        if not code:
+            from .models import generate_offline_code
+            code = generate_offline_code()
+            device.offline_unlock_code = code
+            device.save(update_fields=['offline_unlock_code'])
+
+        from accounts.views import send_system_notification
+        from accounts.models import NotificationType
+        send_system_notification(
+            recipient=device.retailer,
+            title="Emergency Offline Unlock Code",
+            message=f"Offline unlock code for device {device.imei} ({device.brand} {device.model}): {code}",
+            notification_type=NotificationType.DEVICE_UNLOCK,
+            reference_id=device.id,
+            sender=request.user
+        )
+
+        whatsapp_sent = False
+        try:
+            from accounts.whatsapp import WhatsAppService
+            if device.retailer.mobile_number:
+                WhatsAppService.send_template(
+                    phone_number=device.retailer.mobile_number,
+                    template_name='offline_unlock_code',
+                    parameters={'code': code, 'imei': device.imei},
+                    recipient_name=device.retailer.first_name or device.retailer.username
+                )
+                whatsapp_sent = True
+        except Exception:
+            pass
+
+        return Response({
+            "success": True,
+            "message": f"Offline unlock code sent to retailer {device.retailer.username}.",
+            "device_imei": device.imei,
+            "offline_unlock_code": code,
+            "in_app_notification_dispatched": True,
+            "whatsapp_dispatched": whatsapp_sent
+        })
+
+    @action(detail=True, methods=['post'], url_path='retry-provider-command')
+    def retry_provider_command(self, request, pk=None):
+        """
+        Retries a failed RocketPay command on this device (Item 5).
+        """
+        denied = self._block_customer(request)
+        if denied:
+            return denied
+        device = self.get_object()
+        from .services.rocketpay_service import RocketPayService
+
+        if device.status == DeviceLockStatus.LOCKED:
+            res = RocketPayService.lock_device(device=device, reason="Manual retry of failed lock", user=request.user)
+        else:
+            res = RocketPayService.unlock_device(device=device, reason="Manual retry of failed unlock", user=request.user)
+
+        if res.get('success'):
+            return Response({
+                "success": True,
+                "message": "Command retried successfully with lock provider.",
+                "provider_status": device.provider_status
+            })
+        return Response({
+            "success": False,
+            "error": res.get('error', 'Provider retry command failed.'),
+            "provider_status": device.provider_status,
+            "provider_error": device.provider_error
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+
 
 class DeviceHeartbeatView(APIView):
     """
@@ -1005,7 +1219,105 @@ class RocketPayWebhookView(APIView):
         )
         is_valid = RocketPayService.verify_webhook_signature(request.body, signature_header)
         if not is_valid:
-            return Response({"error": "Invalid webhook signature"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"error": "Invalid or missing webhook signature"},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
 
         result = RocketPayService.process_webhook_payload(request.data)
         return Response(result, status=status.HTTP_200_OK)
+
+
+class ApprovedDeviceTACViewSet(viewsets.ModelViewSet):
+    """
+    Approved phone models (TAC List) for OEM / DLC locking (Item 12).
+    GET /api/tac-list/ : list all approved TAC entries
+    POST /api/tac-list/ : add new approved TAC
+    PATCH /api/tac-list/:id/ : update TAC entry
+    DELETE /api/tac-list/:id/ : remove TAC entry
+    GET /api/tac-list/check/?imei=... : checks if device IMEI is approved
+    """
+    from .models import ApprovedDeviceTAC
+    from .serializers import ApprovedDeviceTACSerializer
+    queryset = ApprovedDeviceTAC.objects.all()
+    serializer_class = ApprovedDeviceTACSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        from .models import ApprovedDeviceTAC
+        qs = ApprovedDeviceTAC.objects.all()
+        env = self.request.query_params.get('environment')
+        if env:
+            qs = qs.filter(models.Q(environment=env.upper()) | models.Q(environment='ALL'))
+        brand = self.request.query_params.get('brand')
+        if brand:
+            qs = qs.filter(brand__icontains=brand)
+        active = self.request.query_params.get('active')
+        if active is not None:
+            qs = qs.filter(active=active.lower() == 'true')
+        return qs
+
+    def perform_create(self, serializer):
+        user = self.request.user
+        if user.role not in ['SUPER_ADMIN', 'STAFF_OPERATIONS']:
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("Only Super Admin or Operations Staff can manage approved TAC list.")
+        serializer.save()
+
+    def perform_update(self, serializer):
+        user = self.request.user
+        if user.role not in ['SUPER_ADMIN', 'STAFF_OPERATIONS']:
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("Only Super Admin or Operations Staff can manage approved TAC list.")
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        user = self.request.user
+        if user.role not in ['SUPER_ADMIN', 'STAFF_OPERATIONS']:
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("Only Super Admin or Operations Staff can manage approved TAC list.")
+        instance.delete()
+
+    @action(detail=False, methods=['get'])
+    def check(self, request):
+        """
+        GET /api/tac-list/check/?imei=...
+        Checks if device IMEI (first 8 digits) is on the approved TAC list.
+        """
+        imei = request.query_params.get('imei', '').strip()
+        if len(imei) < 8:
+            return Response(
+                {"eligible": False, "error": "Valid IMEI with at least 8 digits required."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        tac = imei[:8]
+        from accounts.models import PlatformSettings
+        ps = PlatformSettings.get_settings()
+        current_env = 'STAGING' if ('staging' in (ps.rocketpay_base_url or '').lower()) else 'PRODUCTION'
+
+        from .models import ApprovedDeviceTAC
+        tac_entry = ApprovedDeviceTAC.objects.filter(
+            tac=tac,
+            environment__in=[current_env, 'ALL'],
+            active=True
+        ).first()
+
+        if tac_entry:
+            return Response({
+                "eligible": True,
+                "tac": tac,
+                "brand": tac_entry.brand,
+                "model_number": tac_entry.model_number,
+                "marketing_name": tac_entry.marketing_name,
+                "environment": tac_entry.environment,
+                "message": f"Device model {tac_entry.brand} {tac_entry.marketing_name or tac_entry.model_number} is approved for DLC enrollment."
+            })
+        else:
+            return Response({
+                "eligible": False,
+                "tac": tac,
+                "environment": current_env,
+                "message": f"Device with TAC {tac} is not approved for {current_env} enrollment."
+            }, status=status.HTTP_200_OK)
+
