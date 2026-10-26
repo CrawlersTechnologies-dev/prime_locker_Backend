@@ -37,6 +37,7 @@ class User(AbstractUser):
     
     # Common Business & Address Fields
     business_name = models.CharField(max_length=255, null=True, blank=True)
+    logo = models.FileField(upload_to='partner_logos/', null=True, blank=True)
     pan_number = models.CharField(max_length=10, null=True, blank=True)
     gst_number = models.CharField(max_length=15, null=True, blank=True)
     state = models.CharField(max_length=100, null=True, blank=True)

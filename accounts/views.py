@@ -322,39 +322,33 @@ class CustomerViewSet(BaseRoleViewSet):
             if user.role != 'SUPER_ADMIN' and key_obj.current_owner != user:
                 return Response({"detail": "You do not own this activation key."}, status=status.HTTP_403_FORBIDDEN)
 
-        # Section B: Determine Lock Provider and invoke RocketPay DLC enrollment for Android devices
+        # Item 12: Check Approved Phone Models (TAC list)
+        tac = imei[:8]
+        from devices.models import ApprovedDeviceTAC
+        from accounts.models import PlatformSettings
+        ps = PlatformSettings.get_settings()
+        current_env = 'STAGING' if ('staging' in (ps.rocketpay_base_url or '').lower()) else 'PRODUCTION'
+        
+        if ApprovedDeviceTAC.objects.filter(environment__in=[current_env, 'ALL'], active=True).exists():
+            is_approved = ApprovedDeviceTAC.objects.filter(
+                tac=tac,
+                environment__in=[current_env, 'ALL'],
+                active=True
+            ).exists()
+            if not is_approved:
+                return Response(
+                    {"detail": f"Device model with TAC '{tac}' is not in the approved list for {current_env}. Enrolment rejected."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+        # Determine Lock Provider
         lock_provider = data.get('lock_provider')
         if not lock_provider:
             lock_provider = LockProvider.ROCKETPAY if os_type == OSType.ANDROID else (
                 LockProvider.APPLE_MDM if os_type == OSType.IOS else LockProvider.OWN_AGENT
             )
 
-        rp_device_id = None
-        rp_status = None
-        if lock_provider == LockProvider.ROCKETPAY:
-            from devices.services.rocketpay_service import RocketPayService
-            temp_device = Device(
-                imei=imei,
-                secondary_imei=data.get('secondary_imei', ''),
-                brand=brand,
-                model=model,
-                serial_number=data.get('serial_number', '')
-            )
-            rp_result = RocketPayService.enroll_device(
-                device=temp_device,
-                customer_name=full_name,
-                customer_mobile=mobile_number,
-                retailer_name=getattr(user, 'business_name', '') or user.username,
-                user=user
-            )
-            if not rp_result.get('success'):
-                return Response(
-                    {"detail": f"RocketPay DLC enrollment failed: {rp_result.get('error')}. Device was not enrolled and Token Key was not activated."},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            rp_device_id = rp_result.get('provider_device_id')
-            rp_status = rp_result.get('provider_status', 'ENROLLED')
-
+        # Item 9: Enrolment Order - save device first in atomic transaction, then enrol with RocketPay, roll back if fails
         with transaction.atomic():
             # Check/Create Customer
             customer = User.objects.filter(mobile_number=mobile_number).first()
@@ -383,7 +377,7 @@ class CustomerViewSet(BaseRoleViewSet):
                 customer.customer_signature = request.FILES['customer_signature']
             customer.save()
 
-            # Create Device
+            # Create Device in DB first
             device = Device.objects.create(
                 customer=customer,
                 retailer=user,
@@ -401,9 +395,30 @@ class CustomerViewSet(BaseRoleViewSet):
                 activation_key=key_obj,
                 status=DeviceLockStatus.ACTIVE,
                 lock_provider=lock_provider,
-                provider_device_id=rp_device_id,
-                provider_status=rp_status
+                provider_status='PENDING'
             )
+
+            # Enrol with RocketPay if lock_provider is ROCKETPAY
+            rp_device_id = None
+            if lock_provider == LockProvider.ROCKETPAY:
+                from devices.services.rocketpay_service import RocketPayService
+                rp_result = RocketPayService.enroll_device(
+                    device=device,
+                    customer_name=full_name,
+                    customer_mobile=mobile_number,
+                    retailer_name=getattr(user, 'business_name', '') or user.username,
+                    user=user
+                )
+                if not rp_result.get('success'):
+                    transaction.set_rollback(True)
+                    return Response(
+                        {"detail": f"RocketPay DLC enrollment failed: {rp_result.get('error')}. Device and customer registration rolled back."},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                rp_device_id = rp_result.get('provider_device_id')
+                device.provider_device_id = rp_device_id
+                device.provider_status = rp_result.get('provider_status', 'ENROLLED')
+                device.save(update_fields=['provider_device_id', 'provider_status'])
 
             # Activate Key if present
             if key_obj:
@@ -861,6 +876,10 @@ class CurrentUserView(APIView):
             'total': len(subordinates)
         }
 
+        logo_url = None
+        if user.logo:
+            logo_url = request.build_absolute_uri(user.logo.url) if request else user.logo.url
+
         return Response({
             "id": user.id,
             "username": user.username,
@@ -872,6 +891,8 @@ class CurrentUserView(APIView):
             "mobile_number": user.mobile_number,
             "alternate_mobile_number": user.alternate_mobile_number,
             "business_name": user.business_name,
+            "store_phone": user.store_phone,
+            "logo": logo_url,
             "state": user.state,
             "city": user.city,
             "pincode": user.pincode,
@@ -896,6 +917,52 @@ class CurrentUserView(APIView):
             "approval_step": user.approval_step,
             "suspend_reason": user.suspend_reason,
         })
+
+    def patch(self, request):
+        """
+        Partner Business Profile Update (Item 14: PATCH /api/auth/me/).
+        Allows updating name, business_name, address, city, store_phone, and logo.
+        """
+        user = request.user
+        data = request.data
+
+        if 'name' in data:
+            name_val = str(data['name']).strip()
+            parts = name_val.split(' ', 1)
+            user.first_name = parts[0]
+            user.last_name = parts[1] if len(parts) > 1 else ''
+        elif 'first_name' in data:
+            user.first_name = str(data['first_name']).strip()
+        if 'last_name' in data:
+            user.last_name = str(data['last_name']).strip()
+
+        if 'business_name' in data:
+            user.business_name = str(data['business_name']).strip()
+        if 'address' in data:
+            user.address = str(data['address']).strip()
+        if 'city' in data:
+            user.city = str(data['city']).strip()
+        if 'state' in data:
+            user.state = str(data['state']).strip()
+        if 'pincode' in data:
+            user.pincode = str(data['pincode']).strip()
+        if 'store_phone' in data:
+            user.store_phone = str(data['store_phone']).strip()
+
+        if 'logo' in request.FILES:
+            user.logo = request.FILES['logo']
+
+        user.save()
+
+        AuditLog.objects.create(
+            user=user,
+            action="UPDATED_BUSINESS_PROFILE",
+            ip_address=get_client_ip(request),
+            details={"updated_fields": list(data.keys())}
+        )
+
+        return self.get(request)
+
 
 
 class LogoutView(APIView):
