@@ -2,7 +2,7 @@ from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from django.db import transaction
+from django.db import transaction, models
 from django.db.models import Q
 from django.utils import timezone
 from datetime import timedelta
@@ -1017,6 +1017,7 @@ class DeviceViewSet(viewsets.ModelViewSet):
             "success": True,
             "message": f"Offline unlock code sent to retailer {device.retailer.username}.",
             "device_imei": device.imei,
+            "code": code,
             "offline_unlock_code": code,
             "in_app_notification_dispatched": True,
             "whatsapp_dispatched": whatsapp_sent
