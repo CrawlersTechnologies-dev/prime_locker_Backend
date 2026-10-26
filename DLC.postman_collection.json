@@ -1,0 +1,409 @@
+{
+  "info": {
+    "_postman_id": "e6db0aba-4ba9-4869-baa3-405a76989ab5",
+    "name": "DLC",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "30423851"
+  },
+  "item": [
+    {
+      "name": "device catalouge",
+      "item": [
+        {
+          "name": "Get catalogue by imei",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-token",
+                "value": "{{your_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{key_merchant_service}}/keys/device-catalogue?imei={{device_id}}",
+              "host": [
+                "{{key_merchant_service}}"
+              ],
+              "path": [
+                "keys",
+                "device-catalogue"
+              ],
+              "query": [
+                {
+                  "key": "imei",
+                  "value": "{{device_id}}"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "super-key",
+      "item": [
+        {
+          "name": "create DLC super-key",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "x-token",
+                "value": "{{your_token}}",
+                "type": "text"
+              },
+              {
+                "key": "",
+                "value": "{{my_auth_token}}",
+                "type": "text",
+                "disabled": true
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"device_info\": {\n        \"imei_no\": \"358247910634182\",\n        \"imei_no2\": \"358247915320480\",\n        \"manufacturer\": \"INFINIX\",\n        \"model\": \"Infinix X6730\",\n        \"mdm_type\": \"DLC\" // mandatory, otherwise key will created with DPC\n    },\n    \"is_auto_reminder_enabled\": false,\n    \"mobile_number\": \"+919550369999\",\n    \"name\": \"vinay dlc\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{super_key_service}}/v2/only-key",
+              "host": [
+                "{{super_key_service}}"
+              ],
+              "path": [
+                "v2",
+                "only-key"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Refresh super-key",
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          },
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-token",
+                "value": "{{your_token}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{super_key_service}}/v1/{{super_key_id}}/refresh",
+              "host": [
+                "{{super_key_service}}"
+              ],
+              "path": [
+                "v1",
+                "{{super_key_id}}",
+                "refresh"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "list of super-keys",
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          },
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-token",
+                "value": "{{your_token}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{super_key_service}}/v1/list",
+              "host": [
+                "{{super_key_service}}"
+              ],
+              "path": [
+                "v1",
+                "list"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "keys",
+      "item": [
+        {
+          "name": "Get Key by ID",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-token",
+                "value": "{{your_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{key_merchant_service}}/keys/v5/{{key_id}}",
+              "host": [
+                "{{key_merchant_service}}"
+              ],
+              "path": [
+                "keys",
+                "v5",
+                "{{key_id}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Unregister Key",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "x-token",
+                "value": "{{my_auth_token}}",
+                "type": "text"
+              },
+              {
+                "key": "x-token",
+                "value": "{{gautham016_token}}",
+                "type": "text",
+                "disabled": true
+              },
+              {
+                "key": "x-token",
+                "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY1MjAyM2JmNGQzZjcxZWYxZGVjZTRkZSIsIm1vYmlsZV9udW1iZXIiOiIrOTE5NTUwMzY5MDYwIiwibWVyY2hhbnRfaWQiOiIwYTY2Y2JjNS1iODA4LTRhNzgtOTY5NS02MzA4M2NmMDM0YzYiLCJlbnRlcnByaXNlX2lkIjoiYTUyN2Y4YzgtMmY1Yy00ZGMzLWEzMTctZmVkMDMxZjNlMWMzIiwiZW50ZXJwcmlzZV9hY2NvdW50X2tleSI6ImJFOEE5SmtmZTkiLCJlbnRlcnByaXNlX2FjY291bnRfc2VjcmV0Ijoic3JGS1k5ZmJrRVRTUTN4MmI0T0RVUlB3TVc1ZnFuMnAyWXdPWjBhZmNVSnY5bXFVRWRWUWZBeFEzU1AvcnJYSEtNM1hRSDJuN1FEeTN1STZxZ1NEK3BzWGlTYitWN2VCbnVxUDFhYndlc1gvd1IrOWF4dU1QbERQV1JtdHczN2tCSzRLMitpekxJQ1Nkem1KZFNnUkpma0hMbDNRUGtvM0FlWElsSUR0SUNDUEFnNTFzTm5Cb3JjQkZWNm9PdVU5IiwiaWF0IjoxNjk2NjA1MTIwfQ.zSbRmBFV437MpFwo7pI3qBFeLENepGz9w1QPqzZA1Nw",
+                "type": "text",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{key_merchant_service}}/keys/{{key_id}}actions/unregister",
+              "host": [
+                "{{key_merchant_service}}"
+              ],
+              "path": [
+                "keys",
+                "{{key_id}}actions",
+                "unregister"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "key refresh",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-token",
+                "value": "{{gautham862_token}}",
+                "type": "text",
+                "disabled": true
+              },
+              {
+                "key": "x-token",
+                "value": "{{my_auth_token}}",
+                "type": "text"
+              },
+              {
+                "key": "x-token",
+                "value": "{{sattu_token}}",
+                "type": "text",
+                "disabled": true
+              },
+              {
+                "key": "x-token",
+                "value": "{{gautham016_token}}",
+                "type": "text",
+                "disabled": true
+              },
+              {
+                "key": "",
+                "value": "{{my_merchant_id}}",
+                "type": "text",
+                "disabled": true
+              },
+              {
+                "key": "",
+                "value": "{{ga",
+                "type": "text",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{key_merchant_service}}/keys/v5/{{key_id}}/refresh",
+              "host": [
+                "{{key_merchant_service}}"
+              ],
+              "path": [
+                "keys",
+                "v5",
+                "{{key_id}}",
+                "refresh"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Key Actions",
+      "item": [
+        {
+          "name": "apply key control",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "x-token",
+                "value": "{{your_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{key_merchant_service}}/keys/{{key_id}}/control/:control_name/apply/:action_name",
+              "host": [
+                "{{key_merchant_service}}"
+              ],
+              "path": [
+                "keys",
+                "{{key_id}}",
+                "control",
+                ":control_name",
+                "apply",
+                ":action_name"
+              ],
+              "variable": [
+                {
+                  "key": "control_name",
+                  "value": "LOCK"
+                },
+                {
+                  "key": "action_name",
+                  "value": "LOCK"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "actions list",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-token",
+                "value": "{{your_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{key_merchant_service}}/keys/{{key_id}}/actions",
+              "host": [
+                "{{key_merchant_service}}"
+              ],
+              "path": [
+                "keys",
+                "{{key_id}}",
+                "actions"
+              ],
+              "query": [
+                {
+                  "key": "control",
+                  "value": "LIVE_STATUS",
+                  "disabled": true
+                },
+                {
+                  "key": "control",
+                  "value": "UNLOCK_CODE",
+                  "disabled": true
+                },
+                {
+                  "key": "control",
+                  "value": "GET_LOCATION",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "auto-reminder",
+      "item": [
+        {
+          "name": "update auto-reminder",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "x-token",
+                "value": "{{your_token}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"is_enabled\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{key_merchant_service}}/keys/{{key_id}}/auto-reminder",
+              "host": [
+                "{{key_merchant_service}}"
+              ],
+              "path": [
+                "keys",
+                "{{key_id}}",
+                "auto-reminder"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}
