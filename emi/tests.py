@@ -128,6 +128,14 @@ class EMIBackendTests(TestCase):
             amount=Decimal('1000.00'),
             status=InstallmentStatus.OVERDUE
         )
+        # Create second upcoming installment for next month so contract stays ACTIVE
+        EMIInstallment.objects.create(
+            contract=self.contract,
+            installment_number=2,
+            due_date=timezone.localdate() + timedelta(days=25),
+            amount=Decimal('1000.00'),
+            status=InstallmentStatus.UPCOMING
+        )
 
         # Device is currently LOCKED
         self.assertEqual(self.device.status, DeviceLockStatus.LOCKED)
