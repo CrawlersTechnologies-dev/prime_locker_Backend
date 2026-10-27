@@ -28,7 +28,7 @@ from emi.models import (
 User = get_user_model()
 
 
-@override_settings(ROCKETPAY_SIMULATION=True, CASHFREE_SIMULATION=True, RAZORPAY_SIMULATION=True)
+@override_settings(ROCKETPAY_SIMULATION=True, CASHFREE_SIMULATION=True)
 class EMIBackendTests(TestCase):
     def setUp(self):
         # Configure simulation settings

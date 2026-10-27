@@ -176,7 +176,7 @@ APPLE_MDM_CONFIG = {
 }
 
 # -------------------------------------------------------------
-# Third-Party Online Payment Gateway (Razorpay)
+# Third-Party Online Payment Gateway (Cashfree PG v2023-08-01)
 # -------------------------------------------------------------
 CASHFREE_CONFIG = {
     'APP_ID': os.getenv('CASHFREE_APP_ID', ''),
@@ -184,12 +184,11 @@ CASHFREE_CONFIG = {
     'API_VERSION': os.getenv('CASHFREE_API_VERSION', '2023-08-01'),
     'BASE_URL': os.getenv('CASHFREE_BASE_URL', 'https://sandbox.cashfree.com/pg'),
     'ENV': os.getenv('CASHFREE_ENV', 'TEST'),
-}
 
-RAZORPAY_CONFIG = {
-    'KEY_ID': os.getenv('RAZORPAY_KEY_ID', ''),
-    'KEY_SECRET': os.getenv('RAZORPAY_KEY_SECRET', ''),
-    'WEBHOOK_SECRET': os.getenv('RAZORPAY_WEBHOOK_SECRET', ''),
+
+
+
+
 }
 
 

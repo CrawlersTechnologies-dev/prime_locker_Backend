@@ -27,7 +27,6 @@ from .serializers import (
     PaymentItemSerializer,
     PaymentReceiptSerializer
 )
-from .services.razorpay_service import RazorpayService
 from .services.cashfree_service import CashfreeService
 
 from accounts.models import is_company_user
@@ -627,9 +626,9 @@ class EMIInstallmentViewSet(viewsets.GenericViewSet):
     @action(detail=True, methods=['post'], url_path='create-payment-order')
     def create_payment_order(self, request, pk=None):
         """
-        Creates a payment order for online customer payment (Cashfree by default, Razorpay optional via ?gateway=razorpay).
-        Returns Cashfree payment_session_id, order_id, order_amount for Cashfree Mobile SDK / Web checkout.
-        Operates in Simulation Mode if live gateway credentials are not yet configured.
+        Creates a Cashfree Payment Order for online customer payment (Mobile app / Web checkout).
+        Returns Cashfree payment_session_id, order_id, and order_amount.
+        Operates in Simulation Mode if live gateway credentials are not yet configured and DEBUG=True.
         """
         installment = self.get_object()
         contract = installment.contract
@@ -641,12 +640,8 @@ class EMIInstallmentViewSet(viewsets.GenericViewSet):
         if installment.status == InstallmentStatus.PAID:
             return Response({"detail": "This installment has already been paid."}, status=status.HTTP_400_BAD_REQUEST)
 
-        gateway = (request.query_params.get('gateway') or request.data.get('gateway', 'cashfree')).lower()
-        if gateway == 'razorpay':
-            order_data = RazorpayService.create_order(installment)
-        else:
-            return_url = request.data.get('return_url')
-            order_data = CashfreeService.create_order(installment, return_url=return_url)
+        return_url = request.data.get('return_url')
+        order_data = CashfreeService.create_order(installment, return_url=return_url)
 
         if "error" in order_data:
             return Response(order_data, status=status.HTTP_400_BAD_REQUEST)
@@ -656,7 +651,7 @@ class EMIInstallmentViewSet(viewsets.GenericViewSet):
     @action(detail=True, methods=['post'], url_path='verify-online-payment')
     def verify_online_payment(self, request, pk=None):
         """
-        Verifies online payment (Cashfree order verification or Razorpay signature) and marks installment as PAID.
+        Verifies Cashfree online payment order status and marks the installment as PAID.
         """
         installment = self.get_object()
         contract = installment.contract
@@ -672,48 +667,25 @@ class EMIInstallmentViewSet(viewsets.GenericViewSet):
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         cf_order_id = serializer.validated_data.get('order_id') or serializer.validated_data.get('cashfree_order_id')
-        if cf_order_id:
-            status_res = CashfreeService.get_order_status(cf_order_id)
-            if "error" in status_res:
-                return Response(status_res, status=status.HTTP_400_BAD_REQUEST)
-            order_status = status_res.get('order_status')
-            if order_status not in ['PAID', 'SUCCESS']:
-                return Response(
-                    {"detail": f"Cashfree order is not paid (current status: {order_status})"},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            payment_id = status_res.get('payment_id') or str(status_res.get('cf_order_id') or cf_order_id)
-            paid_amt = Decimal(str(status_res.get('order_amount', installment.total_due)))
-            CashfreeService.mark_installment_paid(
-                installment=installment,
-                amount=paid_amt,
-                payment_id=payment_id,
-                notes=f"Online Payment Verified via Cashfree ({payment_id})",
-                user=request.user
+        status_res = CashfreeService.get_order_status(cf_order_id)
+        if "error" in status_res:
+            return Response(status_res, status=status.HTTP_400_BAD_REQUEST)
+
+        order_status = status_res.get('order_status')
+        if order_status not in ['PAID', 'SUCCESS']:
+            return Response(
+                {"detail": f"Cashfree order is not paid (current status: {order_status})"},
+                status=status.HTTP_400_BAD_REQUEST
             )
-            contract.refresh_from_db()
-            installment.refresh_from_db()
-            return Response({
-                "message": f"Payment of ₹{installment.paid_amount} successfully verified via Cashfree and recorded for Installment #{installment.installment_number}.",
-                "order_id": cf_order_id,
-                "payment_id": payment_id,
-                "contract_status": contract.status,
-                "installment_status": installment.status
-            }, status=status.HTTP_200_OK)
 
-        order_id = serializer.validated_data['razorpay_order_id']
-        payment_id = serializer.validated_data['razorpay_payment_id']
-        signature = serializer.validated_data['razorpay_signature']
+        payment_id = status_res.get('payment_id') or str(status_res.get('cf_order_id') or cf_order_id)
+        paid_amt = Decimal(str(status_res.get('order_amount', installment.total_due)))
 
-        is_valid = RazorpayService.verify_signature(order_id, payment_id, signature)
-        if not is_valid:
-            return Response({"detail": "Invalid payment signature verification failed."}, status=status.HTTP_400_BAD_REQUEST)
-
-        RazorpayService.mark_installment_paid(
+        CashfreeService.mark_installment_paid(
             installment=installment,
-            amount=installment.total_due,
+            amount=paid_amt,
             payment_id=payment_id,
-            notes=f"Online Payment Verified via Checkout ({payment_id})",
+            notes=f"Online Payment Verified via Cashfree ({payment_id})",
             user=request.user
         )
 
@@ -721,7 +693,8 @@ class EMIInstallmentViewSet(viewsets.GenericViewSet):
         installment.refresh_from_db()
 
         return Response({
-            "message": f"Payment of ₹{installment.paid_amount} successfully verified and recorded for Installment #{installment.installment_number}.",
+            "message": f"Payment of ₹{installment.paid_amount} successfully verified via Cashfree and recorded for Installment #{installment.installment_number}.",
+            "order_id": cf_order_id,
             "payment_id": payment_id,
             "contract_status": contract.status,
             "installment_status": installment.status
@@ -819,61 +792,7 @@ class OverdueEMIsViewSet(viewsets.ViewSet):
         })
 
 
-class RazorpayWebhookView(APIView):
-    """
-    Webhook handler for asynchronous Razorpay events (e.g. payment.captured, order.paid).
-    Allows external Razorpay servers to notify our backend when an online payment is captured.
-    """
-    permission_classes = [permissions.AllowAny]
 
-    def post(self, request, *args, **kwargs):
-        signature = request.headers.get('X-Razorpay-Signature', '')
-        raw_body = request.body
-
-        # Verify signature
-        if not RazorpayService.verify_webhook_signature(raw_body, signature):
-            logger.warning("Razorpay Webhook: Invalid Signature rejected.")
-            return Response({"detail": "Invalid webhook signature"}, status=status.HTTP_400_BAD_REQUEST)
-
-        try:
-            payload = json.loads(raw_body.decode('utf-8'))
-        except (ValueError, UnicodeDecodeError) as e:
-            logger.error(f"Razorpay Webhook JSON decode error: {e}")
-            return Response({"detail": "Invalid JSON body"}, status=status.HTTP_400_BAD_REQUEST)
-
-        event = payload.get('event')
-        logger.info(f"Razorpay Webhook received event: {event}")
-
-        if event in ['payment.captured', 'order.paid']:
-            entity = {}
-            if event == 'payment.captured':
-                entity = payload.get('payload', {}).get('payment', {}).get('entity', {})
-                payment_id = entity.get('id')
-                amount_paise = entity.get('amount', 0)
-            else:
-                entity = payload.get('payload', {}).get('order', {}).get('entity', {})
-                payment_id = entity.get('id')
-                amount_paise = entity.get('amount_paid', 0)
-
-            notes = entity.get('notes', {})
-            installment_id = notes.get('installment_id')
-
-            if installment_id:
-                try:
-                    installment = EMIInstallment.objects.get(id=installment_id)
-                    if installment.status != InstallmentStatus.PAID:
-                        amount = Decimal(str(amount_paise)) / Decimal('100')
-                        RazorpayService.mark_installment_paid(
-                            installment=installment,
-                            amount=amount,
-                            payment_id=payment_id or f"wh_{timezone.now().timestamp()}",
-                            notes=f"Razorpay Webhook Event: {event} ({payment_id})"
-                        )
-                        logger.info(f"Razorpay Webhook: Installment #{installment_id} marked as PAID.")
-                except EMIInstallment.DoesNotExist:
-                    logger.warning(f"Razorpay Webhook: Installment #{installment_id} not found.")
-
-        return Response({"status": "ok"}, status=status.HTTP_200_OK)
 
 
 class CashfreeWebhookView(APIView):
