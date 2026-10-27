@@ -230,3 +230,99 @@ class EMIBackendTests(TestCase):
 
         self.device.refresh_from_db()
         self.assertEqual(self.device.provider_status, 'UNREGISTERED')
+
+    def test_cashfree_create_payment_order(self):
+        """Tests creating a Cashfree payment order returning payment_session_id"""
+        inst = EMIInstallment.objects.create(
+            contract=self.contract,
+            installment_number=1,
+            due_date=timezone.localdate(),
+            amount=Decimal('1000.00'),
+            status=InstallmentStatus.UPCOMING
+        )
+        url = f'/api/emi-installments/{inst.id}/create-payment-order/'
+        resp = self.client.post(url, {}, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data.get('gateway'), 'CASHFREE')
+        self.assertIn('payment_session_id', resp.data)
+        self.assertIn('order_id', resp.data)
+        self.assertEqual(resp.data.get('order_amount'), '1000.00')
+
+    def test_cashfree_verify_online_payment(self):
+        """Tests online payment verification using Cashfree order_id"""
+        inst = EMIInstallment.objects.create(
+            contract=self.contract,
+            installment_number=1,
+            due_date=timezone.localdate(),
+            amount=Decimal('1000.00'),
+            status=InstallmentStatus.UPCOMING
+        )
+        url = f'/api/emi-installments/{inst.id}/verify-online-payment/'
+        payload = {'order_id': f'cf_sim_{inst.id}'}
+        resp = self.client.post(url, payload, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+        inst.refresh_from_db()
+        self.assertEqual(inst.status, InstallmentStatus.PAID)
+        self.assertEqual(inst.paid_amount, Decimal('1000.00'))
+
+    def test_cashfree_webhook_payment_success(self):
+        """Tests Cashfree webhook asynchronous order fulfillment"""
+        inst = EMIInstallment.objects.create(
+            contract=self.contract,
+            installment_number=1,
+            due_date=timezone.localdate(),
+            amount=Decimal('1000.00'),
+            status=InstallmentStatus.UPCOMING
+        )
+        webhook_url = '/api/emi/webhook/cashfree/'
+        payload = {
+            "type": "PAYMENT_SUCCESS_WEBHOOK",
+            "event_time": timezone.now().isoformat(),
+            "data": {
+                "order": {
+                    "order_id": f"cf_inst_{inst.id}_test123",
+                    "order_amount": 1000.0,
+                    "order_currency": "INR"
+                },
+                "payment": {
+                    "cf_payment_id": "cf_pay_998877",
+                    "payment_status": "SUCCESS",
+                    "payment_amount": 1000.0
+                }
+            }
+        }
+        import json
+        resp = self.client.post(
+            webhook_url,
+            data=json.dumps(payload),
+            content_type='application/json',
+            HTTP_X_WEBHOOK_SIGNATURE='dummy_sim_sig',
+            HTTP_X_WEBHOOK_TIMESTAMP='1690000000'
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+        inst.refresh_from_db()
+        self.assertEqual(inst.status, InstallmentStatus.PAID)
+        self.assertEqual(inst.transaction_ref, 'cf_pay_998877')
+
+    def test_cashfree_webhook_signature_verification(self):
+        """Tests webhook HMAC-SHA256 signature verification with live secret configured"""
+        import hmac
+        import hashlib
+        import base64
+        from emi.services.cashfree_service import CashfreeService
+
+        secret = 'test_cashfree_secret_key_12345'
+        timestamp = '1690000000'
+        raw_body = b'{"type": "TEST_WEBHOOK"}'
+
+        # Compute valid signature
+        ts_payload = timestamp.encode('utf-8') + raw_body
+        valid_sig = base64.b64encode(hmac.new(secret.encode('utf-8'), ts_payload, hashlib.sha256).digest()).decode('utf-8')
+
+        with override_settings(CASHFREE_CONFIG={'APP_ID': 'test_app', 'SECRET_KEY': secret, 'ENV': 'TEST', 'API_VERSION': '2023-08-01'}):
+            # Valid signature check
+            self.assertTrue(CashfreeService.verify_webhook_signature(raw_body, timestamp, valid_sig))
+            # Invalid signature check
+            self.assertFalse(CashfreeService.verify_webhook_signature(raw_body, timestamp, 'invalid_sig'))
