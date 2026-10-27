@@ -41,15 +41,23 @@ class CashfreeService:
         }
 
     @classmethod
+    def is_simulation_allowed(cls):
+        """Simulation mode is strictly restricted to DEBUG=True or test environments."""
+        return bool(getattr(settings, 'DEBUG', False) or getattr(settings, 'CASHFREE_SIMULATION', False))
+
+    @classmethod
     def is_simulation(cls):
         config = cls.get_config()
-        return not bool(config['APP_ID'] and config['SECRET_KEY'])
+        if config['APP_ID'] and config['SECRET_KEY']:
+            return False
+        return cls.is_simulation_allowed()
 
     @classmethod
     def create_order(cls, installment, return_url=None):
         """
         Creates a Cashfree Order for an EMI installment.
         Calls POST /pg/orders.
+        Always charges installment.total_due (including dynamic late fees).
         Returns payload with payment_session_id for Cashfree Web/Mobile Checkout SDK.
         """
         config = cls.get_config()
@@ -60,7 +68,10 @@ class CashfreeService:
 
         contract = installment.contract
         customer = contract.customer
-        amount = float(installment.amount)
+        # Use total_due (installment.amount + late_fee)
+        amount_decimal = installment.total_due
+        amount = float(amount_decimal)
+        order_amount_str = f"{amount_decimal:.2f}"
         order_id = f"cf_inst_{installment.id}_{uuid.uuid4().hex[:8]}"
 
         customer_name = f"{customer.first_name} {customer.last_name}".strip() or customer.username
@@ -79,7 +90,7 @@ class CashfreeService:
                 "cf_order_id": f"cf_{uuid.uuid4().hex[:8]}",
                 "payment_session_id": sim_session,
                 "order_status": "ACTIVE",
-                "order_amount": str(installment.amount),
+                "order_amount": order_amount_str,
                 "order_currency": "INR",
                 "environment": config['ENV'],
                 "customer": {
@@ -112,7 +123,7 @@ class CashfreeService:
             "order_meta": {
                 "return_url": return_url or "https://primelocker.pro/payment-status?order_id={order_id}"
             },
-            "order_note": f"Installment #{installment.installment_number} for IMEI {contract.device_imei}"
+            "order_note": f"Installment #{installment.installment_number} for IMEI {contract.device_imei} (Total Due: ₹{amount})"
         }
 
         try:
@@ -125,7 +136,7 @@ class CashfreeService:
                     "cf_order_id": str(data.get('cf_order_id', '')),
                     "payment_session_id": data.get('payment_session_id'),
                     "order_status": data.get('order_status', 'ACTIVE'),
-                    "order_amount": str(data.get('order_amount', amount)),
+                    "order_amount": f"{Decimal(str(data.get('order_amount', amount))):.2f}",
                     "order_currency": data.get('order_currency', 'INR'),
                     "environment": config['ENV'],
                     "customer": {
@@ -152,8 +163,17 @@ class CashfreeService:
         """
         Queries Cashfree to verify the current payment status of an order.
         Calls GET /pg/orders/{order_id}.
+        Rejects simulation if not in DEBUG mode.
         """
-        if cls.is_simulation() or str(order_id).startswith('cf_sim_') or str(order_id).startswith('order_sim_'):
+        is_sim_order = str(order_id).startswith('cf_sim_') or str(order_id).startswith('order_sim_')
+        
+        if is_sim_order or cls.is_simulation():
+            if not cls.is_simulation_allowed():
+                logger.error(f"[SECURITY] Simulated Cashfree order verification refused for '{order_id}' because DEBUG=False.")
+                return {
+                    "error": "Simulated payment verification is refused when DEBUG mode is disabled.",
+                    "order_status": "FAILED"
+                }
             return {
                 "order_id": order_id,
                 "order_status": "PAID",
@@ -162,6 +182,13 @@ class CashfreeService:
             }
 
         config = cls.get_config()
+        if not (config['APP_ID'] and config['SECRET_KEY']):
+            logger.error("[SECURITY] Cashfree credentials are not configured and DEBUG=False.")
+            return {
+                "error": "Cashfree payment gateway credentials are not configured on server.",
+                "order_status": "FAILED"
+            }
+
         url = f"{config['BASE_URL']}/orders/{order_id}"
         headers = {
             "x-client-id": config['APP_ID'],
@@ -188,12 +215,16 @@ class CashfreeService:
         """
         Verifies Cashfree HMAC-SHA256 signature from webhook header:
         Signature is Base64(HMAC-SHA256(timestamp + raw_body, secret_key)).
+        Refuses unsigned webhooks when not in DEBUG mode.
         """
         config = cls.get_config()
         secret = config['SECRET_KEY']
 
         if not secret:
-            # Allow simulation if secret is not yet configured
+            if not cls.is_simulation_allowed():
+                logger.error("[SECURITY] Cashfree webhook rejected: SECRET_KEY is not configured and DEBUG=False.")
+                return False
+            # Allow simulation if secret is not yet configured and in DEBUG mode
             return True
 
         if not signature or not timestamp:
