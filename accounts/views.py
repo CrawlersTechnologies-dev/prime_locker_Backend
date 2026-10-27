@@ -499,6 +499,132 @@ class CustomerViewSet(BaseRoleViewSet):
             }
         }, status=status.HTTP_201_CREATED)
 
+    @action(detail=True, methods=['post'], url_path='reset-password')
+    def reset_password(self, request, pk=None):
+        """
+        Store / Retailer resets a customer's password (POST /api/customers/{id}/reset-password/).
+        Accessible by Retailer (owner of the customer), upline Distributors, or Super Admin/Staff.
+        """
+        customer = self.get_object()
+        return self._do_customer_password_reset(customer, request)
+
+    @action(detail=False, methods=['post'], url_path='reset-password')
+    def reset_customer_password(self, request):
+        """
+        Store / Retailer resets customer password by mobile or customer_id (POST /api/customers/reset-password/).
+        Accepts: customer_id, mobile_number, or username in request body.
+        """
+        customer_id = request.data.get('customer_id') or request.data.get('id')
+        mobile_number = request.data.get('mobile_number', '').strip()
+        username = request.data.get('username', '').strip()
+
+        customer = None
+        if customer_id:
+            customer = User.objects.filter(id=customer_id, role='CUSTOMER').first()
+        elif mobile_number:
+            customer = User.objects.filter(mobile_number=mobile_number, role='CUSTOMER').first()
+            if not customer and mobile_number.startswith('+91'):
+                customer = User.objects.filter(mobile_number=mobile_number[3:], role='CUSTOMER').first()
+            elif not customer and len(mobile_number) == 10 and mobile_number.isdigit():
+                customer = User.objects.filter(mobile_number=f"+91{mobile_number}", role='CUSTOMER').first()
+        elif username:
+            customer = User.objects.filter(username=username, role='CUSTOMER').first()
+
+        if not customer:
+            return Response(
+                {"error": "Customer account not found. Please provide a valid customer_id, mobile_number, or username."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        return self._do_customer_password_reset(customer, request)
+
+    def _do_customer_password_reset(self, customer, request):
+        user = request.user
+
+        # 1. Role / Hierarchy check
+        if user.role == 'CUSTOMER':
+            return Response(
+                {"detail": "Customers do not have permission to reset passwords for other accounts."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        if user.role == 'STAFF_VIEWER':
+            return Response(
+                {"detail": "Viewer staff accounts have read-only access."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # If user is RETAILER, customer must be enrolled with or owned by this retailer
+        if user.role == 'RETAILER':
+            is_parent = (customer.parent_id == user.id)
+            has_contract = customer.emi_contracts.filter(retailer=user).exists()
+            from devices.models import Device
+            has_device = Device.objects.filter(customer=customer, retailer=user).exists()
+            if not (is_parent or has_contract or has_device):
+                return Response(
+                    {"detail": "You do not have permission to reset the password for this customer (not registered under your store)."},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+        elif not is_company_user(user):
+            # Check downline hierarchy for distributors
+            from accounts.permissions import is_downstream_user
+            if not is_downstream_user(user, customer):
+                return Response(
+                    {"detail": "You do not have permission to manage this customer."},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
+        # 2. Determine new password
+        # If provided in request body, use it; otherwise generate default PL@{mobile[-4:]} or 4-digit PIN
+        new_password = request.data.get('new_password', '').strip()
+        if not new_password:
+            mob = str(customer.mobile_number or '').strip()
+            if len(mob) >= 4:
+                new_password = f"PL@{mob[-4:]}"
+            else:
+                import random
+                new_password = f"PL@{random.randint(1000, 9999)}"
+
+        customer.set_password(new_password)
+        customer.save(update_fields=['password'])
+
+        AuditLog.objects.create(
+            user=user,
+            action="STORE_RESET_CUSTOMER_PASSWORD",
+            ip_address=get_client_ip(request),
+            details={
+                "customer_id": customer.id,
+                "customer_username": customer.username,
+                "customer_mobile": customer.mobile_number,
+                "reset_by": user.username,
+                "reset_by_role": user.role
+            }
+        )
+
+        # Send WhatsApp notification if customer mobile exists
+        try:
+            from accounts.whatsapp import WhatsAppService
+            if customer.mobile_number:
+                WhatsAppService.send_template(
+                    phone_number=customer.mobile_number,
+                    template_name='password_reset_by_store',
+                    parameters={
+                        'customer_name': customer.first_name or customer.username,
+                        'new_password': new_password
+                    },
+                    recipient_name=customer.first_name
+                )
+        except Exception:
+            pass
+
+        return Response({
+            "success": True,
+            "message": f"Password for customer '{customer.first_name or customer.username}' has been successfully reset.",
+            "customer_id": customer.id,
+            "customer_name": f"{customer.first_name} {customer.last_name}".strip() or customer.username,
+            "mobile_number": customer.mobile_number,
+            "temporary_password": new_password
+        }, status=status.HTTP_200_OK)
+
 class PasswordResetRequestView(APIView):
     permission_classes = [permissions.AllowAny]
 
