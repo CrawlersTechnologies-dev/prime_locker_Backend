@@ -222,3 +222,36 @@ class AccountsBackendTests(TestCase):
         customer_client.force_authenticate(user=customer)
         resp_cust = customer_client.post(reset_url, {'new_password': 'HackerPassword@123'}, format='json')
         self.assertIn(resp_cust.status_code, [status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND])
+
+    def test_distributor_resets_downstream_customer_password(self):
+        """Tests that a distributor can reset password for customer in their downline without 500"""
+        distributor = User.objects.create_user(
+            username='test_distributor_up',
+            email='distributor_up@test.com',
+            password='Password@123',
+            role=Role.DISTRIBUTOR,
+            mobile_number='+919876599001'
+        )
+        # Retailer is child of distributor
+        self.retailer.parent = distributor
+        self.retailer.save()
+
+        customer = User.objects.create_user(
+            username='cust_dist_downline',
+            email='cust_downline@test.com',
+            password='OldPassword@123',
+            role=Role.CUSTOMER,
+            mobile_number='+919876599002',
+            parent=self.retailer
+        )
+
+        dist_client = APIClient()
+        dist_client.force_authenticate(user=distributor)
+
+        reset_url = f'/api/customers/{customer.id}/reset-password/'
+        resp = dist_client.post(reset_url, {'new_password': 'DistributorReset@123'}, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertTrue(resp.data['success'])
+
+        customer.refresh_from_db()
+        self.assertTrue(customer.check_password('DistributorReset@123'))

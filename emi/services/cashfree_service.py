@@ -163,52 +163,57 @@ class CashfreeService:
         """
         Queries Cashfree to verify the current payment status of an order.
         Calls GET /pg/orders/{order_id}.
-        Rejects simulation if not in DEBUG mode.
+        Rejects fake/simulated orders when live or sandbox credentials are configured.
         """
-        is_sim_order = str(order_id).startswith('cf_sim_') or str(order_id).startswith('order_sim_')
-        
-        if is_sim_order or cls.is_simulation():
-            if not cls.is_simulation_allowed():
-                logger.error(f"[SECURITY] Simulated Cashfree order verification refused for '{order_id}' because DEBUG=False.")
+        config = cls.get_config()
+        has_credentials = bool(config['APP_ID'] and config['SECRET_KEY'])
+
+        # 1. If credentials are configured, ALWAYS verify against Cashfree API; never accept cf_sim_
+        if has_credentials:
+            if str(order_id).startswith('cf_sim_') or str(order_id).startswith('order_sim_'):
+                logger.warning(f"[SECURITY] Refused simulated order ID '{order_id}' because Cashfree credentials are configured.")
                 return {
-                    "error": "Simulated payment verification is refused when DEBUG mode is disabled.",
+                    "error": "Simulated order IDs are not permitted when Cashfree credentials are configured.",
                     "order_status": "FAILED"
                 }
-            return {
-                "order_id": order_id,
-                "order_status": "PAID",
-                "payment_id": f"cf_pay_{uuid.uuid4().hex[:8]}",
-                "simulation": True
-            }
 
-        config = cls.get_config()
-        if not (config['APP_ID'] and config['SECRET_KEY']):
-            logger.error("[SECURITY] Cashfree credentials are not configured and DEBUG=False.")
+            url = f"{config['BASE_URL']}/orders/{order_id}"
+            headers = {
+                "x-client-id": config['APP_ID'],
+                "x-client-secret": config['SECRET_KEY'],
+                "x-api-version": config['API_VERSION']
+            }
+            try:
+                resp = requests.get(url, headers=headers, timeout=10)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    return {
+                        "order_id": data.get('order_id'),
+                        "cf_order_id": data.get('cf_order_id'),
+                        "order_status": data.get('order_status'),
+                        "order_amount": data.get('order_amount'),
+                        "details": data
+                    }
+                return {"error": f"HTTP {resp.status_code}", "order_status": "FAILED", "details": resp.text}
+            except Exception as e:
+                return {"error": str(e), "order_status": "FAILED"}
+
+        # 2. When credentials are NOT configured:
+        # Simulation is strictly disallowed unless CASHFREE_SIMULATION=True is explicitly set in settings/tests
+        if not getattr(settings, 'CASHFREE_SIMULATION', False):
+            logger.error("[SECURITY] Cashfree credentials are not configured and simulation is disabled.")
             return {
                 "error": "Cashfree payment gateway credentials are not configured on server.",
                 "order_status": "FAILED"
             }
 
-        url = f"{config['BASE_URL']}/orders/{order_id}"
-        headers = {
-            "x-client-id": config['APP_ID'],
-            "x-client-secret": config['SECRET_KEY'],
-            "x-api-version": config['API_VERSION']
+        # 3. Explicit test simulation environment (CASHFREE_SIMULATION=True)
+        return {
+            "order_id": order_id,
+            "order_status": "PAID",
+            "payment_id": f"cf_pay_{uuid.uuid4().hex[:8]}",
+            "simulation": True
         }
-        try:
-            resp = requests.get(url, headers=headers, timeout=10)
-            if resp.status_code == 200:
-                data = resp.json()
-                return {
-                    "order_id": data.get('order_id'),
-                    "cf_order_id": data.get('cf_order_id'),
-                    "order_status": data.get('order_status'),
-                    "order_amount": data.get('order_amount'),
-                    "details": data
-                }
-            return {"error": f"HTTP {resp.status_code}", "details": resp.text}
-        except Exception as e:
-            return {"error": str(e)}
 
     @classmethod
     def verify_webhook_signature(cls, raw_body_bytes, timestamp, signature):

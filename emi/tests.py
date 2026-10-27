@@ -249,7 +249,7 @@ class EMIBackendTests(TestCase):
         self.assertEqual(resp.data.get('order_amount'), '1000.00')
 
     def test_cashfree_verify_online_payment(self):
-        """Tests online payment verification using Cashfree order_id"""
+        """Tests online payment verification using Cashfree order_id in simulation mode"""
         inst = EMIInstallment.objects.create(
             contract=self.contract,
             installment_number=1,
@@ -259,12 +259,13 @@ class EMIBackendTests(TestCase):
         )
         url = f'/api/emi-installments/{inst.id}/verify-online-payment/'
         payload = {'order_id': f'cf_sim_{inst.id}'}
-        resp = self.client.post(url, payload, format='json')
-        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        with override_settings(CASHFREE_CONFIG={'APP_ID': '', 'SECRET_KEY': ''}):
+            resp = self.client.post(url, payload, format='json')
+            self.assertEqual(resp.status_code, status.HTTP_200_OK)
 
-        inst.refresh_from_db()
-        self.assertEqual(inst.status, InstallmentStatus.PAID)
-        self.assertEqual(inst.paid_amount, Decimal('1000.00'))
+            inst.refresh_from_db()
+            self.assertEqual(inst.status, InstallmentStatus.PAID)
+            self.assertEqual(inst.paid_amount, Decimal('1000.00'))
 
     def test_cashfree_webhook_payment_success(self):
         """Tests Cashfree webhook asynchronous order fulfillment"""
@@ -354,11 +355,25 @@ class EMIBackendTests(TestCase):
         with override_settings(DEBUG=False, CASHFREE_SIMULATION=False, CASHFREE_CONFIG={'APP_ID': '', 'SECRET_KEY': '', 'ENV': 'PROD'}):
             resp = self.client.post(url, payload, format='json')
             self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
-            self.assertIn('refused when DEBUG mode is disabled', str(resp.data))
 
             inst.refresh_from_db()
             self.assertNotEqual(inst.status, InstallmentStatus.PAID)
             self.assertEqual(inst.status, InstallmentStatus.UPCOMING)
+
+    def test_simulated_order_id_refused_when_credentials_active(self):
+        """Tests that even with DEBUG=True, cf_sim_ order IDs are refused when Cashfree credentials exist"""
+        inst = EMIInstallment.objects.create(
+            contract=self.contract,
+            installment_number=1,
+            due_date=timezone.localdate(),
+            amount=Decimal('1000.00'),
+            status=InstallmentStatus.UPCOMING
+        )
+        url = f'/api/emi-installments/{inst.id}/verify-online-payment/'
+        with override_settings(DEBUG=True, CASHFREE_CONFIG={'APP_ID': 'live_app', 'SECRET_KEY': 'live_sec', 'ENV': 'TEST'}):
+            resp = self.client.post(url, {'order_id': 'cf_sim_hack_attempt'}, format='json')
+            self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+            self.assertIn('not permitted when Cashfree credentials are configured', str(resp.data))
 
     def test_late_fee_charged_in_online_payment_order(self):
         """Tests that create_payment_order and payment verification charge total_due (amount + late fees)"""
@@ -386,9 +401,10 @@ class EMIBackendTests(TestCase):
 
         # 2. Verify payment: records paid_amount as total_due (₹1,175)
         verify_url = f'/api/emi-installments/{inst.id}/verify-online-payment/'
-        resp_verify = self.client.post(verify_url, {'order_id': f'cf_sim_{inst.id}'}, format='json')
-        self.assertEqual(resp_verify.status_code, status.HTTP_200_OK)
+        with override_settings(CASHFREE_CONFIG={'APP_ID': '', 'SECRET_KEY': ''}):
+            resp_verify = self.client.post(verify_url, {'order_id': f'cf_sim_{inst.id}'}, format='json')
+            self.assertEqual(resp_verify.status_code, status.HTTP_200_OK)
 
-        inst.refresh_from_db()
-        self.assertEqual(inst.status, InstallmentStatus.PAID)
-        self.assertEqual(inst.paid_amount, expected_total)
+            inst.refresh_from_db()
+            self.assertEqual(inst.status, InstallmentStatus.PAID)
+            self.assertEqual(inst.paid_amount, expected_total)

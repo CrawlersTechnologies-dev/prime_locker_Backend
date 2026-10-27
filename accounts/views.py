@@ -21,7 +21,7 @@ from .serializers import (
     PasswordResetConfirmSerializer,
     AuditLogSerializer
 )
-from .models import AuditLog, PasswordResetOTP
+from .models import AuditLog, PasswordResetOTP, is_company_user
 import random
 
 User = get_user_model()
@@ -567,7 +567,7 @@ class CustomerViewSet(BaseRoleViewSet):
         elif not is_company_user(user):
             # Check downline hierarchy for distributors
             from accounts.permissions import is_downstream_user
-            if not is_downstream_user(user, customer):
+            if not (is_downstream_user(user, customer) or customer in user.get_all_subordinates()):
                 return Response(
                     {"detail": "You do not have permission to manage this customer."},
                     status=status.HTTP_403_FORBIDDEN
