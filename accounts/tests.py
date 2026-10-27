@@ -145,3 +145,80 @@ class AccountsBackendTests(TestCase):
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
         self.assertIn('rocketpay_wallet', resp.data)
         self.assertIsNotNone(resp.data['rocketpay_wallet'])
+
+    def test_duplicate_mobile_numbers_login_does_not_crash(self):
+        """Tests that two accounts sharing mobile number identifier authenticate correctly without 500 server crash"""
+        shared_number = '9988112233'
+        user_a = User.objects.create_user(
+            username=shared_number,
+            email='user_a@test.com',
+            password='PasswordA@123',
+            role=Role.CUSTOMER,
+            mobile_number='+919988112233',
+            parent=self.retailer
+        )
+        user_b = User.objects.create_user(
+            username='user_shared_b',
+            email='user_b@test.com',
+            password='PasswordB@123',
+            role=Role.CUSTOMER,
+            mobile_number=shared_number,
+            parent=self.retailer
+        )
+
+        login_client = APIClient()
+
+        # Login with shared mobile and User A's password
+        resp_a = login_client.post('/api/auth/login/', {'username': shared_number, 'password': 'PasswordA@123'}, format='json')
+        self.assertEqual(resp_a.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp_a.data['user']['username'], shared_number)
+
+        # Login with shared mobile and User B's password
+        resp_b = login_client.post('/api/auth/login/', {'username': shared_number, 'password': 'PasswordB@123'}, format='json')
+        self.assertEqual(resp_b.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp_b.data['user']['username'], 'user_shared_b')
+
+        # Login with wrong password returns 401, not 500 crash
+        resp_fail = login_client.post('/api/auth/login/', {'username': shared_number, 'password': 'WrongPassword@999'}, format='json')
+        self.assertEqual(resp_fail.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_store_resets_customer_password(self):
+        """Tests that a store retailer can reset password for their enrolled customer"""
+        customer = User.objects.create_user(
+            username='cust_pwd_reset',
+            email='cust_pwd@test.com',
+            password='OldPassword@123',
+            role=Role.CUSTOMER,
+            mobile_number='+919876500011',
+            parent=self.retailer
+        )
+
+        reset_url = f'/api/customers/{customer.id}/reset-password/'
+        resp = self.client.post(reset_url, {'new_password': 'BrandNewPassword@456'}, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertTrue(resp.data['success'])
+
+        # Verify customer can now log in with the new password
+        login_client = APIClient()
+        resp_login = login_client.post('/api/auth/login/', {'username': customer.username, 'password': 'BrandNewPassword@456'}, format='json')
+        self.assertEqual(resp_login.status_code, status.HTTP_200_OK)
+        self.assertIn('access', resp_login.data)
+
+        # Another retailer cannot reset this customer's password (out of store scope -> 404 or 403)
+        other_retailer = User.objects.create_user(
+            username='other_retailer_pwd',
+            email='other_retailer@test.com',
+            password='Password@123',
+            role=Role.RETAILER,
+            mobile_number='+919876500022'
+        )
+        other_client = APIClient()
+        other_client.force_authenticate(user=other_retailer)
+        resp_other = other_client.post(reset_url, {'new_password': 'HackerPassword@123'}, format='json')
+        self.assertIn(resp_other.status_code, [status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND])
+
+        # A customer cannot reset another customer's password -> 403 Forbidden
+        customer_client = APIClient()
+        customer_client.force_authenticate(user=customer)
+        resp_cust = customer_client.post(reset_url, {'new_password': 'HackerPassword@123'}, format='json')
+        self.assertIn(resp_cust.status_code, [status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND])
