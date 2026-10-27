@@ -683,9 +683,10 @@ class EMIInstallmentViewSet(viewsets.GenericViewSet):
                     status=status.HTTP_400_BAD_REQUEST
                 )
             payment_id = status_res.get('payment_id') or str(status_res.get('cf_order_id') or cf_order_id)
+            paid_amt = Decimal(str(status_res.get('order_amount', installment.total_due)))
             CashfreeService.mark_installment_paid(
                 installment=installment,
-                amount=installment.amount,
+                amount=paid_amt,
                 payment_id=payment_id,
                 notes=f"Online Payment Verified via Cashfree ({payment_id})",
                 user=request.user
@@ -710,7 +711,7 @@ class EMIInstallmentViewSet(viewsets.GenericViewSet):
 
         RazorpayService.mark_installment_paid(
             installment=installment,
-            amount=installment.amount,
+            amount=installment.total_due,
             payment_id=payment_id,
             notes=f"Online Payment Verified via Checkout ({payment_id})",
             user=request.user
@@ -921,9 +922,10 @@ class CashfreeWebhookView(APIView):
                 try:
                     installment = EMIInstallment.objects.get(id=installment_id)
                     if installment.status != InstallmentStatus.PAID:
+                        paid_amt = Decimal(str(amount)) if amount else installment.total_due
                         CashfreeService.mark_installment_paid(
                             installment=installment,
-                            amount=Decimal(str(amount)) if amount else installment.amount,
+                            amount=paid_amt,
                             payment_id=str(cf_payment_id),
                             notes=f"Cashfree Webhook Event: {event_type} ({cf_payment_id})"
                         )
