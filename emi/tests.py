@@ -28,7 +28,7 @@ from emi.models import (
 User = get_user_model()
 
 
-@override_settings(ROCKETPAY_SIMULATION=True)
+@override_settings(ROCKETPAY_SIMULATION=True, CASHFREE_SIMULATION=True, RAZORPAY_SIMULATION=True)
 class EMIBackendTests(TestCase):
     def setUp(self):
         # Configure simulation settings
@@ -293,14 +293,25 @@ class EMIBackendTests(TestCase):
             }
         }
         import json
-        resp = self.client.post(
-            webhook_url,
-            data=json.dumps(payload),
-            content_type='application/json',
-            HTTP_X_WEBHOOK_SIGNATURE='dummy_sim_sig',
-            HTTP_X_WEBHOOK_TIMESTAMP='1690000000'
-        )
-        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        import hmac
+        import hashlib
+        import base64
+
+        secret = 'test_webhook_sec'
+        timestamp = '1690000000'
+        body_bytes = json.dumps(payload).encode('utf-8')
+        ts_payload = timestamp.encode('utf-8') + body_bytes
+        valid_sig = base64.b64encode(hmac.new(secret.encode('utf-8'), ts_payload, hashlib.sha256).digest()).decode('utf-8')
+
+        with override_settings(CASHFREE_CONFIG={'APP_ID': 'test_app', 'SECRET_KEY': secret, 'ENV': 'TEST', 'API_VERSION': '2023-08-01'}):
+            resp = self.client.post(
+                webhook_url,
+                data=body_bytes,
+                content_type='application/json',
+                HTTP_X_WEBHOOK_SIGNATURE=valid_sig,
+                HTTP_X_WEBHOOK_TIMESTAMP=timestamp
+            )
+            self.assertEqual(resp.status_code, status.HTTP_200_OK)
 
         inst.refresh_from_db()
         self.assertEqual(inst.status, InstallmentStatus.PAID)
@@ -326,3 +337,58 @@ class EMIBackendTests(TestCase):
             self.assertTrue(CashfreeService.verify_webhook_signature(raw_body, timestamp, valid_sig))
             # Invalid signature check
             self.assertFalse(CashfreeService.verify_webhook_signature(raw_body, timestamp, 'invalid_sig'))
+
+    def test_online_payment_simulation_refused_when_debug_false(self):
+        """Tests test-mode security hole fix: simulated payment verification is refused when DEBUG=False"""
+        inst = EMIInstallment.objects.create(
+            contract=self.contract,
+            installment_number=1,
+            due_date=timezone.localdate(),
+            amount=Decimal('1000.00'),
+            status=InstallmentStatus.UPCOMING
+        )
+        url = f'/api/emi-installments/{inst.id}/verify-online-payment/'
+        payload = {'order_id': 'cf_sim_fake_hack'}
+
+        # With DEBUG=False and no simulation override
+        with override_settings(DEBUG=False, CASHFREE_SIMULATION=False, CASHFREE_CONFIG={'APP_ID': '', 'SECRET_KEY': '', 'ENV': 'PROD'}):
+            resp = self.client.post(url, payload, format='json')
+            self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+            self.assertIn('refused when DEBUG mode is disabled', str(resp.data))
+
+            inst.refresh_from_db()
+            self.assertNotEqual(inst.status, InstallmentStatus.PAID)
+            self.assertEqual(inst.status, InstallmentStatus.UPCOMING)
+
+    def test_late_fee_charged_in_online_payment_order(self):
+        """Tests that create_payment_order and payment verification charge total_due (amount + late fees)"""
+        # Create an installment 10 days overdue
+        # Grace period is 3 days, late_fee_per_day is ₹25, so 7 chargeable days = ₹175 late fee
+        due_date = timezone.localdate() - timedelta(days=10)
+        inst = EMIInstallment.objects.create(
+            contract=self.contract,
+            installment_number=1,
+            due_date=due_date,
+            amount=Decimal('1000.00'),
+            status=InstallmentStatus.OVERDUE
+        )
+
+        expected_late_fee = Decimal('175.00')
+        expected_total = Decimal('1175.00')
+        self.assertEqual(inst.late_fee, expected_late_fee)
+        self.assertEqual(inst.total_due, expected_total)
+
+        # 1. Create order: Cashfree should charge total_due (₹1,175), not base amount (₹1,000)
+        create_url = f'/api/emi-installments/{inst.id}/create-payment-order/'
+        resp_create = self.client.post(create_url, {}, format='json')
+        self.assertEqual(resp_create.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp_create.data.get('order_amount'), '1175.00')
+
+        # 2. Verify payment: records paid_amount as total_due (₹1,175)
+        verify_url = f'/api/emi-installments/{inst.id}/verify-online-payment/'
+        resp_verify = self.client.post(verify_url, {'order_id': f'cf_sim_{inst.id}'}, format='json')
+        self.assertEqual(resp_verify.status_code, status.HTTP_200_OK)
+
+        inst.refresh_from_db()
+        self.assertEqual(inst.status, InstallmentStatus.PAID)
+        self.assertEqual(inst.paid_amount, expected_total)

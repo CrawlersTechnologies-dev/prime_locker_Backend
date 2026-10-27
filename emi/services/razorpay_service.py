@@ -26,16 +26,23 @@ class RazorpayService:
         })
 
     @classmethod
+    def is_simulation_allowed(cls):
+        """Simulation mode is strictly restricted to DEBUG=True or test environments."""
+        return bool(getattr(settings, 'DEBUG', False) or getattr(settings, 'RAZORPAY_SIMULATION', False))
+
+    @classmethod
     def create_order(cls, installment):
         """
         Creates a Razorpay Order for an EMI installment.
         Returns the order payload required by the mobile app or web checkout modal.
+        Always charges installment.total_due (including dynamic late fees).
         """
         config = cls.get_config()
         key_id = config.get('KEY_ID', '')
         key_secret = config.get('KEY_SECRET', '')
 
-        amount_in_paise = int(installment.amount * 100)
+        # Use total_due (amount + late_fee)
+        amount_in_paise = int(installment.total_due * 100)
         receipt_id = f"inst_{installment.id}"
         contract = installment.contract
         customer = contract.customer
@@ -54,7 +61,7 @@ class RazorpayService:
             return {
                 "order_id": simulated_order_id,
                 "amount": amount_in_paise,
-                "amount_display": str(installment.amount),
+                "amount_display": str(installment.total_due),
                 "currency": "INR",
                 "key_id": "rzp_test_simulation",
                 "receipt": receipt_id,
@@ -84,7 +91,7 @@ class RazorpayService:
                 return {
                     "order_id": order_data.get('id'),
                     "amount": order_data.get('amount'),
-                    "amount_display": str(installment.amount),
+                    "amount_display": str(installment.total_due),
                     "currency": order_data.get('currency', 'INR'),
                     "key_id": key_id,
                     "receipt": receipt_id,
@@ -112,8 +119,12 @@ class RazorpayService:
         config = cls.get_config()
         key_secret = config.get('KEY_SECRET', '')
 
-        # In simulation mode, accept simulated orders
-        if not key_secret or order_id.startswith('order_sim_') or signature == 'simulated_signature':
+        # In simulation mode, accept simulated orders only if DEBUG mode is enabled
+        is_sim = not key_secret or order_id.startswith('order_sim_') or signature == 'simulated_signature'
+        if is_sim:
+            if not cls.is_simulation_allowed():
+                logger.error("[SECURITY] Simulated Razorpay signature verification rejected because DEBUG=False.")
+                return False
             return True
 
         message = f"{order_id}|{payment_id}".encode('utf-8')
@@ -126,8 +137,11 @@ class RazorpayService:
         config = cls.get_config()
         secret = config.get('WEBHOOK_SECRET', '')
 
-        # Allow simulation if secret is not yet configured
+        # Allow simulation if secret is not yet configured only when DEBUG is enabled
         if not secret:
+            if not cls.is_simulation_allowed():
+                logger.error("[SECURITY] Razorpay webhook rejected: WEBHOOK_SECRET is not configured and DEBUG=False.")
+                return False
             return True
 
         if not signature_header:
