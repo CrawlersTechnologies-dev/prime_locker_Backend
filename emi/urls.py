@@ -6,6 +6,7 @@ from .views import (
     EMIInstallmentViewSet,
     OverdueEMIsViewSet,
     RazorpayWebhookView,
+    CashfreeWebhookView,
     PaymentViewSet
 )
 
@@ -19,4 +20,5 @@ router.register(r'payments', PaymentViewSet, basename='payments')
 urlpatterns = [
     path('', include(router.urls)),
     path('emi/webhook/razorpay/', RazorpayWebhookView.as_view(), name='razorpay-webhook'),
+    path('emi/webhook/cashfree/', CashfreeWebhookView.as_view(), name='cashfree-webhook'),
 ]
