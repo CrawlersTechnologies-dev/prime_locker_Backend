@@ -257,11 +257,22 @@ class RecordPaymentSerializer(serializers.Serializer):
 
 class VerifyOnlinePaymentSerializer(serializers.Serializer):
     """
-    Serializer for verifying Razorpay checkout response from mobile or web app.
+    Serializer for verifying payment response (Cashfree or Razorpay) from mobile or web app.
     """
-    razorpay_order_id = serializers.CharField(max_length=150, required=True)
-    razorpay_payment_id = serializers.CharField(max_length=150, required=True)
-    razorpay_signature = serializers.CharField(max_length=255, required=True)
+    order_id = serializers.CharField(max_length=150, required=False, allow_blank=True)
+    cashfree_order_id = serializers.CharField(max_length=150, required=False, allow_blank=True)
+    razorpay_order_id = serializers.CharField(max_length=150, required=False, allow_blank=True)
+    razorpay_payment_id = serializers.CharField(max_length=150, required=False, allow_blank=True)
+    razorpay_signature = serializers.CharField(max_length=255, required=False, allow_blank=True)
+
+    def validate(self, attrs):
+        has_cashfree = bool(attrs.get('order_id') or attrs.get('cashfree_order_id'))
+        has_razorpay = bool(attrs.get('razorpay_order_id') and attrs.get('razorpay_payment_id') and attrs.get('razorpay_signature'))
+        if not (has_cashfree or has_razorpay):
+            raise serializers.ValidationError(
+                "Either 'order_id' (for Cashfree) or 'razorpay_order_id', 'razorpay_payment_id', 'razorpay_signature' must be provided."
+            )
+        return attrs
 
 
 class OverdueCustomerItemSerializer(serializers.ModelSerializer):
