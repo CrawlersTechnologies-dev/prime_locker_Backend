@@ -1,1193 +1,1559 @@
 {
-  "info": {
-    "_postman_id": "f9d5216b-7d13-4c9d-8b43-00768e7430cf",
-    "name": "Prime Locker - Super Admin & Backend API",
-    "description": "Collection for testing Super Admin backend gaps, priority endpoints, and bug fixes.",
-    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
-  },
-  "variable": [
-    {
-      "key": "base_url",
-      "value": "http://127.0.0.1:8000"
+    "info": {
+        "_postman_id": "f9d5216b-7d13-4c9d-8b43-00768e7430cf",
+        "name": "Prime Locker - Super Admin & Backend API",
+        "description": "Collection for testing Super Admin backend gaps, priority endpoints, and bug fixes.",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
     },
-    {
-      "key": "access_token",
-      "value": ""
-    },
-    {
-      "key": "refresh_token",
-      "value": ""
-    }
-  ],
-  "auth": {
-    "type": "bearer",
-    "bearer": [
-      {
-        "key": "token",
-        "value": "{{access_token}}",
-        "type": "string"
-      }
-    ]
-  },
-  "item": [
-    {
-      "name": "1. Auth & Session",
-      "item": [
+    "variable": [
         {
-          "name": "Login (Auto-saves {{access_token}})",
-          "event": [
+            "key": "base_url",
+            "value": "http://127.0.0.1:8000"
+        },
+        {
+            "key": "access_token",
+            "value": ""
+        },
+        {
+            "key": "refresh_token",
+            "value": ""
+        }
+    ],
+    "auth": {
+        "type": "bearer",
+        "bearer": [
             {
-              "listen": "test",
-              "script": {
-                "exec": [
-                  "if (pm.response.code === 200) {",
-                  "    var data = pm.response.json();",
-                  "    pm.collectionVariables.set('access_token', data.access);",
-                  "    pm.collectionVariables.set('refresh_token', data.refresh);",
-                  "    console.log('Access token saved to collection!');",
-                  "}"
-                ],
-                "type": "text/javascript"
-              }
+                "key": "token",
+                "value": "{{access_token}}",
+                "type": "string"
             }
-          ],
-          "request": {
-            "auth": {
-              "type": "noauth"
-            },
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"username\": \"admin\",\n  \"password\": \"admin123\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/api/auth/login/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "auth",
-                "login",
-                ""
-              ]
-            }
-          }
-        },
-        {
-          "name": "Session Restore (GET /api/auth/me/)",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/auth/me/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "auth",
-                "me",
-                ""
-              ]
-            }
-          }
-        },
-        {
-          "name": "Change Password (Screen A-42)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"old_password\": \"admin123\",\n  \"new_password\": \"admin123\",\n  \"confirm_password\": \"admin123\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/api/auth/change-password/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "auth",
-                "change-password",
-                ""
-              ]
-            }
-          }
-        },
-        {
-          "name": "Logout & Token Blacklist",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"refresh\": \"{{refresh_token}}\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/api/auth/logout/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "auth",
-                "logout",
-                ""
-              ]
-            }
-          }
-        }
-      ]
+        ]
     },
-    {
-      "name": "2. Payments & Receipts (P1 Endpoints)",
-      "item": [
+    "item": [
         {
-          "name": "Payments List (Screen A-23)",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/payments/?ordering=-collection_date",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "payments",
-                ""
-              ],
-              "query": [
+            "name": "1. Auth & Session",
+            "item": [
                 {
-                  "key": "ordering",
-                  "value": "-collection_date"
-                }
-              ]
-            }
-          }
-        },
-        {
-          "name": "Export Payments to CSV",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/payments/?export=csv",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "payments",
-                ""
-              ],
-              "query": [
-                {
-                  "key": "export",
-                  "value": "csv"
-                }
-              ]
-            }
-          }
-        },
-        {
-          "name": "Payment Receipt (Screen A-25)",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/payments/1/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "payments",
-                "1",
-                ""
-              ]
-            }
-          }
-        }
-      ]
-    },
-    {
-      "name": "3. Key Management & History",
-      "item": [
-        {
-          "name": "Key History Ledger (Screen N-07)",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/keys/transactions/?ordering=-timestamp",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "keys",
-                "transactions",
-                ""
-              ],
-              "query": [
-                {
-                  "key": "ordering",
-                  "value": "-timestamp"
-                }
-              ]
-            }
-          }
-        },
-        {
-          "name": "Export Key Transactions to CSV",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/keys/transactions/?export=csv",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "keys",
-                "transactions",
-                ""
-              ],
-              "query": [
-                {
-                  "key": "export",
-                  "value": "csv"
-                }
-              ]
-            }
-          }
-        },
-        {
-          "name": "Generate Keys (with Reference Note)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"prefix\": \"MOB\",\n  \"device_type\": \"MOBILE\",\n  \"quantity\": 5,\n  \"reference_note\": \"PO-88772 Hardware Invoice\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/api/keys/generate/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "keys",
-                "generate",
-                ""
-              ]
-            }
-          }
-        },
-        {
-          "name": "Key Requests List (with Balance & Used This Month)",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/key-requests/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "key-requests",
-                ""
-              ]
-            }
-          }
-        },
-        {
-          "name": "Partial Approve Key Request",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"quantity\": 2\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/api/key-requests/1/approve/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "key-requests",
-                "1",
-                "approve",
-                ""
-              ]
-            }
-          }
-        },
-        {
-          "name": "Reject Key Request (with Reason)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"reason\": \"Insufficient quota this week\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/api/key-requests/1/reject/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "key-requests",
-                "1",
-                "reject",
-                ""
-              ]
-            }
-          }
-        }
-      ]
-    },
-    {
-      "name": "4. Partners & Retailers",
-      "item": [
-        {
-          "name": "Super Distributors List (Key balances & child counts)",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/super-distributors/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "super-distributors",
-                ""
-              ]
-            }
-          }
-        },
-        {
-          "name": "Retailers List",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/retailers/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "retailers",
-                ""
-              ]
-            }
-          }
-        },
-        {
-          "name": "Create Retailer (with District, Device Configs, Opening Keys)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"full_name\": \"Postman Retailer\",\n  \"email\": \"postman_ret_sample@example.com\",\n  \"password\": \"Password123!\",\n  \"confirm_password\": \"Password123!\",\n  \"mobile_number\": \"9898000111\",\n  \"business_name\": \"Prime Telecom Store\",\n  \"state\": \"Karnataka\",\n  \"city\": \"Bengaluru\",\n  \"district\": \"Bengaluru Urban\",\n  \"pincode\": \"560001\",\n  \"address\": \"MG Road 101\",\n  \"store_phone\": \"080-44556677\",\n  \"allowed_devices\": [\n    \"ANDROID\",\n    \"IOS\"\n  ],\n  \"grace_period\": 5,\n  \"max_devices\": 100,\n  \"opening_keys\": 1\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/api/retailers/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "retailers",
-                ""
-              ]
-            }
-          }
-        }
-      ]
-    },
-    {
-      "name": "5. Customers & KYC",
-      "item": [
-        {
-          "name": "Customers List (with Masked ID)",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/customers/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "customers",
-                ""
-              ]
-            }
-          }
-        },
-        {
-          "name": "Create Customer with Aadhaar (Masked to XXXXXXXX1234)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"full_name\": \"Ramesh Kumar\",\n  \"email\": \"ramesh_sample@example.com\",\n  \"password\": \"Password123!\",\n  \"mobile_number\": \"9898000112\",\n  \"id_type\": \"AADHAAR\",\n  \"id_number\": \"123456789012\",\n  \"signed_emi_agreement_flag\": true,\n  \"draft_status\": \"COMPLETED\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/api/customers/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "customers",
-                ""
-              ]
-            }
-          }
-        }
-      ]
-    },
-    {
-      "name": "6. Dashboard & Filtering",
-      "item": [
-        {
-          "name": "Dashboard (7 Days Filter)",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/dashboard/?range=7d",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "dashboard",
-                ""
-              ],
-              "query": [
-                {
-                  "key": "range",
-                  "value": "7d"
-                }
-              ]
-            }
-          }
-        },
-        {
-          "name": "Dashboard (Custom Date Range)",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/dashboard/?start_date=2026-10-01&end_date=2026-10-23",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "dashboard",
-                ""
-              ],
-              "query": [
-                {
-                  "key": "start_date",
-                  "value": "2026-10-01"
+                    "name": "Login (Auto-saves {{access_token}})",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "if (pm.response.code === 200) {",
+                                    "    var data = pm.response.json();",
+                                    "    pm.collectionVariables.set('access_token', data.access);",
+                                    "    pm.collectionVariables.set('refresh_token', data.refresh);",
+                                    "    console.log('Access token saved to collection!');",
+                                    "}"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "request": {
+                        "auth": {
+                            "type": "noauth"
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"username\": \"admin\",\n  \"password\": \"admin123\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/auth/login/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "auth",
+                                "login",
+                                ""
+                            ]
+                        }
+                    }
                 },
                 {
-                  "key": "end_date",
-                  "value": "2026-10-23"
+                    "name": "Session Restore (GET /api/auth/me/)",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/api/auth/me/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "auth",
+                                "me",
+                                ""
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Change Password (Screen A-42)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"old_password\": \"admin123\",\n  \"new_password\": \"admin123\",\n  \"confirm_password\": \"admin123\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/auth/change-password/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "auth",
+                                "change-password",
+                                ""
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Logout & Token Blacklist",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"refresh\": \"{{refresh_token}}\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/auth/logout/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "auth",
+                                "logout",
+                                ""
+                            ]
+                        }
+                    }
                 }
-              ]
-            }
-          }
+            ]
+        },
+        {
+            "name": "2. Payments & Receipts (P1 Endpoints)",
+            "item": [
+                {
+                    "name": "Payments List (Screen A-23)",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/api/payments/?ordering=-collection_date",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "payments",
+                                ""
+                            ],
+                            "query": [
+                                {
+                                    "key": "ordering",
+                                    "value": "-collection_date"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Export Payments to CSV",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/api/payments/?export=csv",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "payments",
+                                ""
+                            ],
+                            "query": [
+                                {
+                                    "key": "export",
+                                    "value": "csv"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Payment Receipt (Screen A-25)",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/api/payments/1/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "payments",
+                                "1",
+                                ""
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Cashfree: Create Payment Order",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}",
+                                "type": "text"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json",
+                                "type": "text"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/emi-installments/1/create-payment-order/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "emi-installments",
+                                "1",
+                                "create-payment-order",
+                                ""
+                            ]
+                        },
+                        "description": "Creates Cashfree PG (v2023-08-01) order and returns payment_session_id, order_id, and total_due amount."
+                    }
+                },
+                {
+                    "name": "Cashfree: Verify Online Payment",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}",
+                                "type": "text"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json",
+                                "type": "text"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"order_id\": \"order_demo_12345\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/emi-installments/1/verify-online-payment/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "emi-installments",
+                                "1",
+                                "verify-online-payment",
+                                ""
+                            ]
+                        },
+                        "description": "Verifies Cashfree order status with the gateway and marks installment PAID (auto-unlocks overdue device)."
+                    }
+                },
+                {
+                    "name": "Cashfree: Webhook",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json",
+                                "type": "text"
+                            },
+                            {
+                                "key": "x-webhook-timestamp",
+                                "value": "1730100000",
+                                "type": "text"
+                            },
+                            {
+                                "key": "x-webhook-signature",
+                                "value": "dummy_signature_or_hmac",
+                                "type": "text"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"data\": {\n        \"order\": {\n            \"order_id\": \"order_demo_12345\",\n            \"order_amount\": 1000.00,\n            \"order_status\": \"PAID\"\n        },\n        \"payment\": {\n            \"payment_status\": \"SUCCESS\",\n            \"cf_payment_id\": \"cf_pay_9999\"\n        }\n    },\n    \"type\": \"PAYMENT_SUCCESS_WEBHOOK\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/cashfree/webhook/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "cashfree",
+                                "webhook",
+                                ""
+                            ]
+                        },
+                        "description": "Receives Cashfree PG asynchronous payment notifications."
+                    }
+                }
+            ]
+        },
+        {
+            "name": "3. Key Management & History",
+            "item": [
+                {
+                    "name": "Key History Ledger (Screen N-07)",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/api/keys/transactions/?ordering=-timestamp",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "keys",
+                                "transactions",
+                                ""
+                            ],
+                            "query": [
+                                {
+                                    "key": "ordering",
+                                    "value": "-timestamp"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Export Key Transactions to CSV",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/api/keys/transactions/?export=csv",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "keys",
+                                "transactions",
+                                ""
+                            ],
+                            "query": [
+                                {
+                                    "key": "export",
+                                    "value": "csv"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Generate Keys (with Reference Note)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"prefix\": \"MOB\",\n  \"device_type\": \"MOBILE\",\n  \"quantity\": 5,\n  \"reference_note\": \"PO-88772 Hardware Invoice\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/keys/generate/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "keys",
+                                "generate",
+                                ""
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Key Requests List (with Balance & Used This Month)",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/api/key-requests/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "key-requests",
+                                ""
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Partial Approve Key Request",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"quantity\": 2\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/key-requests/1/approve/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "key-requests",
+                                "1",
+                                "approve",
+                                ""
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Reject Key Request (with Reason)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"reason\": \"Insufficient quota this week\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/key-requests/1/reject/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "key-requests",
+                                "1",
+                                "reject",
+                                ""
+                            ]
+                        }
+                    }
+                }
+            ]
+        },
+        {
+            "name": "4. Partners & Retailers",
+            "item": [
+                {
+                    "name": "Super Distributors List (Key balances & child counts)",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/api/super-distributors/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "super-distributors",
+                                ""
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Retailers List",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/api/retailers/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "retailers",
+                                ""
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Create Retailer (with District, Device Configs, Opening Keys)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"full_name\": \"Postman Retailer\",\n  \"email\": \"postman_ret_sample@example.com\",\n  \"password\": \"Password123!\",\n  \"confirm_password\": \"Password123!\",\n  \"mobile_number\": \"9898000111\",\n  \"business_name\": \"Prime Telecom Store\",\n  \"state\": \"Karnataka\",\n  \"city\": \"Bengaluru\",\n  \"district\": \"Bengaluru Urban\",\n  \"pincode\": \"560001\",\n  \"address\": \"MG Road 101\",\n  \"store_phone\": \"080-44556677\",\n  \"allowed_devices\": [\n    \"ANDROID\",\n    \"IOS\"\n  ],\n  \"grace_period\": 5,\n  \"max_devices\": 100,\n  \"opening_keys\": 1\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/retailers/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "retailers",
+                                ""
+                            ]
+                        }
+                    }
+                }
+            ]
+        },
+        {
+            "name": "5. Customers & KYC",
+            "item": [
+                {
+                    "name": "Customers List (with Masked ID)",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/api/customers/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "customers",
+                                ""
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Create Customer with Aadhaar (Masked to XXXXXXXX1234)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"full_name\": \"Ramesh Kumar\",\n  \"email\": \"ramesh_sample@example.com\",\n  \"password\": \"Password123!\",\n  \"mobile_number\": \"9898000112\",\n  \"id_type\": \"AADHAAR\",\n  \"id_number\": \"123456789012\",\n  \"signed_emi_agreement_flag\": true,\n  \"draft_status\": \"COMPLETED\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/customers/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "customers",
+                                ""
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Reset Customer Password (Store/Retailer)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}",
+                                "type": "text"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json",
+                                "type": "text"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"new_password\": \"Customer@1234\",\n    \"confirm_password\": \"Customer@1234\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/customers/1/reset-password/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "customers",
+                                "1",
+                                "reset-password",
+                                ""
+                            ]
+                        },
+                        "description": "Allows store/retailer or upline to reset forgotten customer passwords with hierarchy checks."
+                    }
+                }
+            ]
+        },
+        {
+            "name": "6. Dashboard & Filtering",
+            "item": [
+                {
+                    "name": "Dashboard (7 Days Filter)",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/api/dashboard/?range=7d",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "dashboard",
+                                ""
+                            ],
+                            "query": [
+                                {
+                                    "key": "range",
+                                    "value": "7d"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Dashboard (Custom Date Range)",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/api/dashboard/?start_date=2026-10-01&end_date=2026-10-23",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "dashboard",
+                                ""
+                            ],
+                            "query": [
+                                {
+                                    "key": "start_date",
+                                    "value": "2026-10-01"
+                                },
+                                {
+                                    "key": "end_date",
+                                    "value": "2026-10-23"
+                                }
+                            ]
+                        }
+                    }
+                }
+            ]
+        },
+        {
+            "name": "7. Bug Checks",
+            "item": [
+                {
+                    "name": "Bug 2 Check: Duplicate Email (Expects 400 Bad Request)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"full_name\": \"Duplicate User\",\n  \"email\": \"admin@example.com\",\n  \"password\": \"Password123!\",\n  \"confirm_password\": \"Password123!\",\n  \"mobile_number\": \"9111111111\",\n  \"business_name\": \"Duplicate Test\",\n  \"state\": \"Karnataka\",\n  \"city\": \"Bengaluru\",\n  \"pincode\": \"560001\",\n  \"address\": \"Test Road\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/super-distributors/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "super-distributors",
+                                ""
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Bug 3 Check: Protected Media Anonymous (Expects 401 Unauthorized)",
+                    "request": {
+                        "auth": {
+                            "type": "noauth"
+                        },
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/media/kyc_documents/test.pdf",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "media",
+                                "kyc_documents",
+                                "test.pdf"
+                            ]
+                        }
+                    }
+                }
+            ]
+        },
+        {
+            "name": "8. Staff Management (RBAC)",
+            "item": [
+                {
+                    "name": "List Staff Members",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/api/staff/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "staff",
+                                ""
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Create Staff Member (Operations / Collections)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"full_name\": \"Kiran Operations\",\n  \"email\": \"kiran_ops@primelocker.pro\",\n  \"password\": \"StaffPassword123!\",\n  \"role\": \"STAFF_OPERATIONS\",\n  \"mobile_number\": \"9801122334\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/staff/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "staff",
+                                ""
+                            ]
+                        }
+                    }
+                }
+            ]
+        },
+        {
+            "name": "9. System & Company Settings (A-39 / A-40)",
+            "item": [
+                {
+                    "name": "Get System Settings",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/api/settings/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "settings",
+                                ""
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Update Settings (Grace Period, Support Phone)",
+                    "request": {
+                        "method": "PATCH",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"company_name\": \"Prime Locker Technologies\",\n  \"support_phone\": \"+91 8000-111-222\",\n  \"default_grace_period_days\": 3,\n  \"auto_lock_enabled\": true\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/settings/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "settings",
+                                ""
+                            ]
+                        }
+                    }
+                }
+            ]
+        },
+        {
+            "name": "10. Notifications (Bell Icon Screen A-41)",
+            "item": [
+                {
+                    "name": "List Notifications (All)",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/api/notifications/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "notifications",
+                                ""
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Get Unread Count (Badge)",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/api/notifications/unread-count/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "notifications",
+                                "unread-count",
+                                ""
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Mark Notification as Read",
+                    "request": {
+                        "method": "POST",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/api/notifications/1/mark-read/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "notifications",
+                                "1",
+                                "mark-read",
+                                ""
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Mark All as Read",
+                    "request": {
+                        "method": "POST",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/api/notifications/mark-all-read/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "notifications",
+                                "mark-all-read",
+                                ""
+                            ]
+                        }
+                    }
+                }
+            ]
+        },
+        {
+            "name": "11. WhatsApp Campaigns & Delivery Logs",
+            "item": [
+                {
+                    "name": "Get Templates & Recent Delivery Logs",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/api/whatsapp/campaigns/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "whatsapp",
+                                "campaigns",
+                                ""
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Send WhatsApp Campaign (Overdue Defaulters)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"template_name\": \"emi_due_reminder\",\n  \"phone_numbers\": [\n    \"919876543210\"\n  ],\n  \"parameters\": {\n    \"amount\": \"4500\",\n    \"device_name\": \"Samsung S23\",\n    \"due_date\": \"2026-10-30\",\n    \"payment_link\": \"https://pay.primelocker.pro/pay/1\"\n  }\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/whatsapp/campaigns/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "whatsapp",
+                                "campaigns",
+                                ""
+                            ]
+                        }
+                    }
+                }
+            ]
+        },
+        {
+            "name": "12. Banners & Lock Messages (M1, M2)",
+            "item": [
+                {
+                    "name": "List Banners (A-42)",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/api/banners/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "banners",
+                                ""
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Create Banner (A-42)",
+                    "request": {
+                        "method": "POST",
+                        "header": [],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"title\": \"Diwali Festive Sale\",\n  \"link\": \"https://primelocker.pro/offers\",\n  \"target_role\": \"ALL\",\n  \"is_active\": true,\n  \"order\": 1\n}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/banners/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "banners",
+                                ""
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "List Lock Message Templates (A-40)",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/api/lock-messages/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "lock-messages",
+                                ""
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Create Lock Message Template (A-40)",
+                    "request": {
+                        "method": "POST",
+                        "header": [],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"title\": \"Overdue Warning Notice\",\n  \"text\": \"Your EMI payment is overdue. Please visit your nearest store to clear dues.\",\n  \"is_default\": true\n}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/lock-messages/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "lock-messages",
+                                ""
+                            ]
+                        }
+                    }
+                }
+            ]
+        },
+        {
+            "name": "13. RocketPay DLC & Device Controls (M4, M5, M7, M10, Webhook)",
+            "item": [
+                {
+                    "name": "Device Command History (M4)",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/api/devices/{{device_id}}/commands/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "devices",
+                                "{{device_id}}",
+                                "commands",
+                                ""
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Set Device Controls (M5)",
+                    "request": {
+                        "method": "POST",
+                        "header": [],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"camera_disabled\": true,\n  \"block_factory_reset\": true,\n  \"frp_protection_enabled\": true,\n  \"social_media_disabled\": false,\n  \"streaming_blocked\": true,\n  \"lock_message\": \"Please pay your pending EMI\"\n}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/devices/{{device_id}}/controls/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "devices",
+                                "{{device_id}}",
+                                "controls",
+                                ""
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Generate Offline Code with Expiry (M7)",
+                    "request": {
+                        "method": "POST",
+                        "header": [],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"expiry_option\": \"24_HOURS\"\n}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/devices/{{device_id}}/generate-offline-code/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "devices",
+                                "{{device_id}}",
+                                "generate-offline-code",
+                                ""
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Get Installed Apps (M10)",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/api/devices/{{device_id}}/apps/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "devices",
+                                "{{device_id}}",
+                                "apps",
+                                ""
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Lock App (M10)",
+                    "request": {
+                        "method": "POST",
+                        "header": [],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"package_name\": \"com.netflix.mediaclient\"\n}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/devices/{{device_id}}/apps/lock/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "devices",
+                                "{{device_id}}",
+                                "apps",
+                                "lock",
+                                ""
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Audio Reminder (M10)",
+                    "request": {
+                        "method": "POST",
+                        "header": [],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"message\": \"Dear Customer, your EMI of Rs. 1500 is due today.\",\n  \"volume\": 100\n}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/devices/{{device_id}}/audio-reminder/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "devices",
+                                "{{device_id}}",
+                                "audio-reminder",
+                                ""
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Block TV Streaming Apps (M10)",
+                    "request": {
+                        "method": "POST",
+                        "header": [],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"streaming_blocked\": true\n}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/devices/{{device_id}}/block-streaming/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "devices",
+                                "{{device_id}}",
+                                "block-streaming",
+                                ""
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Refresh Location Now (M10)",
+                    "request": {
+                        "method": "POST",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/api/devices/{{device_id}}/refresh-location/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "devices",
+                                "{{device_id}}",
+                                "refresh-location",
+                                ""
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "RocketPay Webhook Event (Section B)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "X-RocketPay-Signature",
+                                "value": "simulated_rocketpay_signature"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"event\": \"device.locked\",\n  \"device_id\": \"rp_86000000_abc123\"\n}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/integrations/rocketpay/webhook/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "integrations",
+                                "rocketpay",
+                                "webhook",
+                                ""
+                            ]
+                        }
+                    }
+                }
+            ]
+        },
+        {
+            "name": "14. Installation & Training Videos (Retailers & Admin)",
+            "item": [
+                {
+                    "name": "List Active Installation Videos (Retailer View)",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}",
+                                "type": "text"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/installation-videos/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "installation-videos",
+                                ""
+                            ]
+                        },
+                        "description": "Returns list of active installation and training videos sorted by display order."
+                    }
+                },
+                {
+                    "name": "Filter Videos by DLC Locker Category",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}",
+                                "type": "text"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/installation-videos/?category=DLC_LOCKER",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "installation-videos",
+                                ""
+                            ],
+                            "query": [
+                                {
+                                    "key": "category",
+                                    "value": "DLC_LOCKER"
+                                }
+                            ]
+                        },
+                        "description": "Returns installation guides specifically for Google/OEM DLC hardware locking."
+                    }
+                },
+                {
+                    "name": "Filter Videos by Android DPC Category",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}",
+                                "type": "text"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/installation-videos/?category=ANDROID_DPC",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "installation-videos",
+                                ""
+                            ],
+                            "query": [
+                                {
+                                    "key": "category",
+                                    "value": "ANDROID_DPC"
+                                }
+                            ]
+                        },
+                        "description": "Returns setup guides for standard Android DPC app installation."
+                    }
+                },
+                {
+                    "name": "Filter Videos by iPhone Category",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}",
+                                "type": "text"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/installation-videos/?category=IPHONE",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "installation-videos",
+                                ""
+                            ],
+                            "query": [
+                                {
+                                    "key": "category",
+                                    "value": "IPHONE"
+                                }
+                            ]
+                        },
+                        "description": "Returns guides for Apple iPhone MDM profile enrollment."
+                    }
+                },
+                {
+                    "name": "Admin: Create Video (YouTube / CDN URL)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}",
+                                "type": "text"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json",
+                                "type": "text"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"title\": \"Vivo & Infinix Google DLC Activation Guide\",\n    \"description\": \"Step-by-step video guide for activating DLC on Vivo and Infinix phones.\",\n    \"category\": \"DLC_LOCKER\",\n    \"source_type\": \"URL\",\n    \"video_url\": \"https://www.youtube.com/watch?v=dlc_test_guide\",\n    \"duration\": \"04:30\",\n    \"target_role\": \"ALL\",\n    \"display_order\": 1,\n    \"is_active\": true\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/installation-videos/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "installation-videos",
+                                ""
+                            ]
+                        },
+                        "description": "Super Admin creates or publishes a new installation/training video."
+                    }
+                },
+                {
+                    "name": "Admin: Update Video Metadata / Order",
+                    "request": {
+                        "method": "PATCH",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}",
+                                "type": "text"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json",
+                                "type": "text"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"display_order\": 2,\n    \"is_active\": true\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/installation-videos/1/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "installation-videos",
+                                "1",
+                                ""
+                            ]
+                        },
+                        "description": "Super Admin updates video metadata or reorders display position."
+                    }
+                },
+                {
+                    "name": "Admin: Delete Video",
+                    "request": {
+                        "method": "DELETE",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}",
+                                "type": "text"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/installation-videos/1/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "installation-videos",
+                                "1",
+                                ""
+                            ]
+                        },
+                        "description": "Super Admin deletes an installation video."
+                    }
+                }
+            ]
         }
-      ]
-    },
-    {
-      "name": "7. Bug Checks",
-      "item": [
-        {
-          "name": "Bug 2 Check: Duplicate Email (Expects 400 Bad Request)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"full_name\": \"Duplicate User\",\n  \"email\": \"admin@example.com\",\n  \"password\": \"Password123!\",\n  \"confirm_password\": \"Password123!\",\n  \"mobile_number\": \"9111111111\",\n  \"business_name\": \"Duplicate Test\",\n  \"state\": \"Karnataka\",\n  \"city\": \"Bengaluru\",\n  \"pincode\": \"560001\",\n  \"address\": \"Test Road\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/api/super-distributors/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "super-distributors",
-                ""
-              ]
-            }
-          }
-        },
-        {
-          "name": "Bug 3 Check: Protected Media Anonymous (Expects 401 Unauthorized)",
-          "request": {
-            "auth": {
-              "type": "noauth"
-            },
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/media/kyc_documents/test.pdf",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "media",
-                "kyc_documents",
-                "test.pdf"
-              ]
-            }
-          }
-        }
-      ]
-    },
-    {
-      "name": "8. Staff Management (RBAC)",
-      "item": [
-        {
-          "name": "List Staff Members",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/staff/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "staff",
-                ""
-              ]
-            }
-          }
-        },
-        {
-          "name": "Create Staff Member (Operations / Collections)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"full_name\": \"Kiran Operations\",\n  \"email\": \"kiran_ops@primelocker.pro\",\n  \"password\": \"StaffPassword123!\",\n  \"role\": \"STAFF_OPERATIONS\",\n  \"mobile_number\": \"9801122334\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/api/staff/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "staff",
-                ""
-              ]
-            }
-          }
-        }
-      ]
-    },
-    {
-      "name": "9. System & Company Settings (A-39 / A-40)",
-      "item": [
-        {
-          "name": "Get System Settings",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/settings/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "settings",
-                ""
-              ]
-            }
-          }
-        },
-        {
-          "name": "Update Settings (Grace Period, Support Phone)",
-          "request": {
-            "method": "PATCH",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"company_name\": \"Prime Locker Technologies\",\n  \"support_phone\": \"+91 8000-111-222\",\n  \"default_grace_period_days\": 3,\n  \"auto_lock_enabled\": true\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/api/settings/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "settings",
-                ""
-              ]
-            }
-          }
-        }
-      ]
-    },
-    {
-      "name": "10. Notifications (Bell Icon Screen A-41)",
-      "item": [
-        {
-          "name": "List Notifications (All)",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/notifications/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "notifications",
-                ""
-              ]
-            }
-          }
-        },
-        {
-          "name": "Get Unread Count (Badge)",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/notifications/unread-count/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "notifications",
-                "unread-count",
-                ""
-              ]
-            }
-          }
-        },
-        {
-          "name": "Mark Notification as Read",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/notifications/1/mark-read/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "notifications",
-                "1",
-                "mark-read",
-                ""
-              ]
-            }
-          }
-        },
-        {
-          "name": "Mark All as Read",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/notifications/mark-all-read/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "notifications",
-                "mark-all-read",
-                ""
-              ]
-            }
-          }
-        }
-      ]
-    },
-    {
-      "name": "11. WhatsApp Campaigns & Delivery Logs",
-      "item": [
-        {
-          "name": "Get Templates & Recent Delivery Logs",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/whatsapp/campaigns/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "whatsapp",
-                "campaigns",
-                ""
-              ]
-            }
-          }
-        },
-        {
-          "name": "Send WhatsApp Campaign (Overdue Defaulters)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"template_name\": \"emi_due_reminder\",\n  \"phone_numbers\": [\n    \"919876543210\"\n  ],\n  \"parameters\": {\n    \"amount\": \"4500\",\n    \"device_name\": \"Samsung S23\",\n    \"due_date\": \"2026-10-30\",\n    \"payment_link\": \"https://pay.primelocker.pro/pay/1\"\n  }\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/api/whatsapp/campaigns/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "whatsapp",
-                "campaigns",
-                ""
-              ]
-            }
-          }
-        }
-      ]
-    },
-    {
-      "name": "12. Banners & Lock Messages (M1, M2)",
-      "item": [
-        {
-          "name": "List Banners (A-42)",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/banners/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "banners",
-                ""
-              ]
-            }
-          }
-        },
-        {
-          "name": "Create Banner (A-42)",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"title\": \"Diwali Festive Sale\",\n  \"link\": \"https://primelocker.pro/offers\",\n  \"target_role\": \"ALL\",\n  \"is_active\": true,\n  \"order\": 1\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "url": {
-              "raw": "{{base_url}}/api/banners/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "banners",
-                ""
-              ]
-            }
-          }
-        },
-        {
-          "name": "List Lock Message Templates (A-40)",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/lock-messages/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "lock-messages",
-                ""
-              ]
-            }
-          }
-        },
-        {
-          "name": "Create Lock Message Template (A-40)",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"title\": \"Overdue Warning Notice\",\n  \"text\": \"Your EMI payment is overdue. Please visit your nearest store to clear dues.\",\n  \"is_default\": true\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "url": {
-              "raw": "{{base_url}}/api/lock-messages/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "lock-messages",
-                ""
-              ]
-            }
-          }
-        }
-      ]
-    },
-    {
-      "name": "13. RocketPay DLC & Device Controls (M4, M5, M7, M10, Webhook)",
-      "item": [
-        {
-          "name": "Device Command History (M4)",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/devices/{{device_id}}/commands/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "devices",
-                "{{device_id}}",
-                "commands",
-                ""
-              ]
-            }
-          }
-        },
-        {
-          "name": "Set Device Controls (M5)",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"camera_disabled\": true,\n  \"block_factory_reset\": true,\n  \"frp_protection_enabled\": true,\n  \"social_media_disabled\": false,\n  \"streaming_blocked\": true,\n  \"lock_message\": \"Please pay your pending EMI\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "url": {
-              "raw": "{{base_url}}/api/devices/{{device_id}}/controls/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "devices",
-                "{{device_id}}",
-                "controls",
-                ""
-              ]
-            }
-          }
-        },
-        {
-          "name": "Generate Offline Code with Expiry (M7)",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"expiry_option\": \"24_HOURS\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "url": {
-              "raw": "{{base_url}}/api/devices/{{device_id}}/generate-offline-code/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "devices",
-                "{{device_id}}",
-                "generate-offline-code",
-                ""
-              ]
-            }
-          }
-        },
-        {
-          "name": "Get Installed Apps (M10)",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/devices/{{device_id}}/apps/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "devices",
-                "{{device_id}}",
-                "apps",
-                ""
-              ]
-            }
-          }
-        },
-        {
-          "name": "Lock App (M10)",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"package_name\": \"com.netflix.mediaclient\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "url": {
-              "raw": "{{base_url}}/api/devices/{{device_id}}/apps/lock/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "devices",
-                "{{device_id}}",
-                "apps",
-                "lock",
-                ""
-              ]
-            }
-          }
-        },
-        {
-          "name": "Audio Reminder (M10)",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"message\": \"Dear Customer, your EMI of Rs. 1500 is due today.\",\n  \"volume\": 100\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "url": {
-              "raw": "{{base_url}}/api/devices/{{device_id}}/audio-reminder/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "devices",
-                "{{device_id}}",
-                "audio-reminder",
-                ""
-              ]
-            }
-          }
-        },
-        {
-          "name": "Block TV Streaming Apps (M10)",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"streaming_blocked\": true\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "url": {
-              "raw": "{{base_url}}/api/devices/{{device_id}}/block-streaming/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "devices",
-                "{{device_id}}",
-                "block-streaming",
-                ""
-              ]
-            }
-          }
-        },
-        {
-          "name": "Refresh Location Now (M10)",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/devices/{{device_id}}/refresh-location/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "devices",
-                "{{device_id}}",
-                "refresh-location",
-                ""
-              ]
-            }
-          }
-        },
-        {
-          "name": "RocketPay Webhook Event (Section B)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "X-RocketPay-Signature",
-                "value": "simulated_rocketpay_signature"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"event\": \"device.locked\",\n  \"device_id\": \"rp_86000000_abc123\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "url": {
-              "raw": "{{base_url}}/api/integrations/rocketpay/webhook/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "integrations",
-                "rocketpay",
-                "webhook",
-                ""
-              ]
-            }
-          }
-        }
-      ]
-    }
-  ]
+    ]
 }
