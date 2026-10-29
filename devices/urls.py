@@ -6,7 +6,8 @@ from .views import (
     AppVersionViewSet,
     LockMessageTemplateViewSet,
     RocketPayWebhookView,
-    ApprovedDeviceTACViewSet
+    ApprovedDeviceTACViewSet,
+    InstallationVideoViewSet
 )
 
 router = DefaultRouter()
@@ -14,6 +15,7 @@ router.register(r'devices', DeviceViewSet, basename='devices')
 router.register(r'app-versions', AppVersionViewSet, basename='app-versions')
 router.register(r'lock-messages', LockMessageTemplateViewSet, basename='lock-messages')
 router.register(r'tac-list', ApprovedDeviceTACViewSet, basename='tac-list')
+router.register(r'installation-videos', InstallationVideoViewSet, basename='installation-videos')
 
 urlpatterns = [
     path('devices/ping/', DeviceHeartbeatView.as_view(), name='device-heartbeat'),

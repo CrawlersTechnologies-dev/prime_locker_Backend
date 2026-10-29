@@ -12,7 +12,10 @@ from .models import (
     DeviceLockStatus,
     CommandType,
     CommandStatus,
-    AppType
+    AppType,
+    InstallationVideo,
+    VideoCategory,
+    VideoSourceType
 )
 from .imei_lookup import lookup_imei
 from keys.models import DeviceKey, KeyStatus, KeyAction, KeyTransaction
@@ -313,4 +316,71 @@ class ApprovedDeviceTACSerializer(serializers.ModelSerializer):
             'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class InstallationVideoSerializer(serializers.ModelSerializer):
+    """
+    Serializer for installation and training videos.
+    Supports both uploaded video files and external YouTube/CDN streaming URLs.
+    """
+    created_by_name = serializers.SerializerMethodField(read_only=True)
+    stream_url = serializers.SerializerMethodField(read_only=True)
+    thumbnail_url = serializers.SerializerMethodField(read_only=True)
+
+    class Meta:
+        model = InstallationVideo
+        fields = [
+            'id',
+            'title',
+            'description',
+            'category',
+            'source_type',
+            'video_url',
+            'video_file',
+            'stream_url',
+            'thumbnail',
+            'thumbnail_url',
+            'duration',
+            'target_role',
+            'display_order',
+            'is_active',
+            'created_by',
+            'created_by_name',
+            'created_at',
+            'updated_at'
+        ]
+        read_only_fields = ['id', 'created_by', 'created_at', 'updated_at']
+
+    def get_created_by_name(self, obj):
+        if obj.created_by:
+            name = f"{obj.created_by.first_name} {obj.created_by.last_name}".strip()
+            return name or obj.created_by.username
+        return None
+
+    def get_stream_url(self, obj):
+        request = self.context.get('request')
+        url = obj.stream_url
+        if url and url.startswith('/') and request:
+            return request.build_absolute_uri(url)
+        return url or None
+
+    def get_thumbnail_url(self, obj):
+        request = self.context.get('request')
+        if obj.thumbnail:
+            if request:
+                return request.build_absolute_uri(obj.thumbnail.url)
+            return obj.thumbnail.url
+        return None
+
+    def validate(self, attrs):
+        source_type = attrs.get('source_type', getattr(self.instance, 'source_type', VideoSourceType.URL))
+        video_url = attrs.get('video_url', getattr(self.instance, 'video_url', None))
+        video_file = attrs.get('video_file', getattr(self.instance, 'video_file', None))
+
+        if source_type == VideoSourceType.URL and not video_url:
+            raise serializers.ValidationError({"video_url": "Video URL is required when source type is URL."})
+        if source_type == VideoSourceType.FILE and not video_file and not (self.instance and self.instance.video_file):
+            raise serializers.ValidationError({"video_file": "Video file is required when source type is FILE."})
+        return attrs
+
 

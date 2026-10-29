@@ -337,3 +337,97 @@ class ApprovedDeviceTAC(models.Model):
     def __str__(self):
         return f"{self.brand} {self.marketing_name or self.model_number} (TAC: {self.tac}) [{self.environment}]"
 
+
+class VideoCategory(models.TextChoices):
+    ALL = 'ALL', 'All Categories'
+    GENERAL = 'GENERAL', 'General Training & Setup'
+    ANDROID_DPC = 'ANDROID_DPC', 'Android (MDM / DPC)'
+    DLC_LOCKER = 'DLC_LOCKER', 'DLC Locker (Google / OEM)'
+    IPHONE = 'IPHONE', 'iPhone (Apple iOS)'
+
+
+class VideoSourceType(models.TextChoices):
+    URL = 'URL', 'External URL / YouTube / CDN'
+    FILE = 'FILE', 'Direct File Upload'
+
+
+class InstallationVideo(models.Model):
+    """
+    Installation & Training Videos for Retailers and Distributors.
+    Created and managed by Super Admin; displayed in the Retailer mobile app.
+    Supports both direct video uploads (.mp4) and external streaming links (YouTube/Vimeo/CDN).
+    """
+    title = models.CharField(max_length=255)
+    description = models.TextField(blank=True, null=True)
+    category = models.CharField(
+        max_length=30,
+        choices=VideoCategory.choices,
+        default=VideoCategory.ALL,
+        help_text="Category matching enrollment options (Android, DLC, iPhone, or General)"
+    )
+    source_type = models.CharField(
+        max_length=20,
+        choices=VideoSourceType.choices,
+        default=VideoSourceType.URL
+    )
+    video_url = models.URLField(
+        max_length=500,
+        blank=True,
+        null=True,
+        help_text="Direct link, YouTube URL, Vimeo, or CDN streaming link"
+    )
+    video_file = models.FileField(
+        upload_to='installation_videos/',
+        blank=True,
+        null=True,
+        help_text="Directly uploaded video file (.mp4, .webm, etc.)"
+    )
+    thumbnail = models.ImageField(
+        upload_to='video_thumbnails/',
+        blank=True,
+        null=True,
+        help_text="Cover thumbnail image displayed before playback"
+    )
+    duration = models.CharField(
+        max_length=30,
+        blank=True,
+        null=True,
+        help_text="e.g. 03:45 or 5 mins"
+    )
+    target_role = models.CharField(
+        max_length=50,
+        default='ALL',
+        help_text="Target user role (e.g. ALL, RETAILER, DISTRIBUTOR)"
+    )
+    display_order = models.PositiveIntegerField(
+        default=0,
+        help_text="Ordering position (lower numbers appear first: 1, 2, 3...)"
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Whether this video is visible to retailers"
+    )
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='installation_videos'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['display_order', '-created_at']
+
+    def __str__(self):
+        return f"{self.title} [{self.get_category_display()}] - {'Active' if self.is_active else 'Inactive'}"
+
+    @property
+    def stream_url(self):
+        """Returns the streaming URL: video_file URL if file uploaded, else video_url."""
+        if self.source_type == VideoSourceType.FILE and self.video_file:
+            return self.video_file.url
+        return self.video_url or (self.video_file.url if self.video_file else '')
+
+

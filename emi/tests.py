@@ -241,12 +241,13 @@ class EMIBackendTests(TestCase):
             status=InstallmentStatus.UPCOMING
         )
         url = f'/api/emi-installments/{inst.id}/create-payment-order/'
-        resp = self.client.post(url, {}, format='json')
-        self.assertEqual(resp.status_code, status.HTTP_200_OK)
-        self.assertEqual(resp.data.get('gateway'), 'CASHFREE')
-        self.assertIn('payment_session_id', resp.data)
-        self.assertIn('order_id', resp.data)
-        self.assertEqual(resp.data.get('order_amount'), '1000.00')
+        with override_settings(CASHFREE_CONFIG={'APP_ID': '', 'SECRET_KEY': ''}):
+            resp = self.client.post(url, {}, format='json')
+            self.assertEqual(resp.status_code, status.HTTP_200_OK)
+            self.assertEqual(resp.data.get('gateway'), 'CASHFREE')
+            self.assertIn('payment_session_id', resp.data)
+            self.assertIn('order_id', resp.data)
+            self.assertEqual(resp.data.get('order_amount'), '1000.00')
 
     def test_cashfree_verify_online_payment(self):
         """Tests online payment verification using Cashfree order_id in simulation mode"""
@@ -395,9 +396,10 @@ class EMIBackendTests(TestCase):
 
         # 1. Create order: Cashfree should charge total_due (₹1,175), not base amount (₹1,000)
         create_url = f'/api/emi-installments/{inst.id}/create-payment-order/'
-        resp_create = self.client.post(create_url, {}, format='json')
-        self.assertEqual(resp_create.status_code, status.HTTP_200_OK)
-        self.assertEqual(resp_create.data.get('order_amount'), '1175.00')
+        with override_settings(CASHFREE_CONFIG={'APP_ID': '', 'SECRET_KEY': ''}):
+            resp_create = self.client.post(create_url, {}, format='json')
+            self.assertEqual(resp_create.status_code, status.HTTP_200_OK)
+            self.assertEqual(resp_create.data.get('order_amount'), '1175.00')
 
         # 2. Verify payment: records paid_amount as total_due (₹1,175)
         verify_url = f'/api/emi-installments/{inst.id}/verify-online-payment/'

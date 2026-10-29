@@ -16,7 +16,10 @@ from devices.models import (
     LockProvider,
     OSType,
     ApprovedDeviceTAC,
-    TACEnvironment
+    TACEnvironment,
+    InstallationVideo,
+    VideoCategory,
+    VideoSourceType
 )
 from devices.services.rocketpay_service import RocketPayService
 
@@ -209,3 +212,130 @@ class DevicesBackendTests(TestCase):
         self.assertTrue(resp.data.get('success'))
         self.assertTrue(resp.data.get('code'))
         self.assertTrue(resp.data.get('in_app_notification_dispatched'))
+
+
+class InstallationVideoTests(TestCase):
+    def setUp(self):
+        self.admin = User.objects.create_user(
+            username='admin_video_user',
+            email='admin_video@test.com',
+            password='Password@123',
+            role=Role.SUPER_ADMIN
+        )
+        self.retailer = User.objects.create_user(
+            username='retailer_video_user',
+            email='retailer_video@test.com',
+            password='Password@123',
+            role=Role.RETAILER
+        )
+        self.distributor = User.objects.create_user(
+            username='distributor_video_user',
+            email='distributor_video@test.com',
+            password='Password@123',
+            role=Role.DISTRIBUTOR
+        )
+
+        self.client_admin = APIClient()
+        self.client_admin.force_authenticate(user=self.admin)
+
+        self.client_retailer = APIClient()
+        self.client_retailer.force_authenticate(user=self.retailer)
+
+    def test_admin_can_create_installation_video_with_url(self):
+        """Admin can post an installation video with a YouTube/external URL"""
+        payload = {
+            "title": "Vivo & Infinix DLC Activation Guide",
+            "description": "Step-by-step video guide for activating DLC on Vivo and Infinix phones.",
+            "category": "DLC_LOCKER",
+            "source_type": "URL",
+            "video_url": "https://www.youtube.com/watch?v=dlc_test_guide",
+            "duration": "04:30",
+            "target_role": "ALL",
+            "display_order": 1,
+            "is_active": True
+        }
+        resp = self.client_admin.post('/api/installation-videos/', payload, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(resp.data['title'], payload['title'])
+        self.assertEqual(resp.data['category'], "DLC_LOCKER")
+        self.assertEqual(resp.data['stream_url'], payload['video_url'])
+
+    def test_retailer_can_view_active_installation_videos(self):
+        """Retailer can list active installation videos, but not inactive ones"""
+        # Active video
+        video_active = InstallationVideo.objects.create(
+            title="Android DPC App Setup",
+            category=VideoCategory.ANDROID_DPC,
+            source_type=VideoSourceType.URL,
+            video_url="https://www.youtube.com/watch?v=dpc_setup",
+            display_order=1,
+            is_active=True,
+            created_by=self.admin
+        )
+        # Inactive video (draft)
+        InstallationVideo.objects.create(
+            title="Secret Internal Guide",
+            category=VideoCategory.GENERAL,
+            source_type=VideoSourceType.URL,
+            video_url="https://www.youtube.com/watch?v=secret",
+            is_active=False,
+            created_by=self.admin
+        )
+
+        resp = self.client_retailer.get('/api/installation-videos/')
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        titles = [v['title'] for v in resp.data]
+        self.assertIn("Android DPC App Setup", titles)
+        self.assertNotIn("Secret Internal Guide", titles)
+
+    def test_retailer_can_filter_videos_by_category(self):
+        """Retailer can filter videos by ?category=DLC_LOCKER or ?category=ANDROID_DPC"""
+        InstallationVideo.objects.create(
+            title="DLC Guide",
+            category=VideoCategory.DLC_LOCKER,
+            source_type=VideoSourceType.URL,
+            video_url="https://test.com/dlc",
+            is_active=True
+        )
+        InstallationVideo.objects.create(
+            title="iPhone MDM Guide",
+            category=VideoCategory.IPHONE,
+            source_type=VideoSourceType.URL,
+            video_url="https://test.com/iphone",
+            is_active=True
+        )
+
+        # Filter DLC
+        resp_dlc = self.client_retailer.get('/api/installation-videos/?category=DLC_LOCKER')
+        self.assertEqual(resp_dlc.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(resp_dlc.data), 1)
+        self.assertEqual(resp_dlc.data[0]['category'], "DLC_LOCKER")
+
+        # Filter iPhone
+        resp_iphone = self.client_retailer.get('/api/installation-videos/?category=IPHONE')
+        self.assertEqual(resp_iphone.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(resp_iphone.data), 1)
+        self.assertEqual(resp_iphone.data[0]['category'], "IPHONE")
+
+    def test_retailer_cannot_create_or_delete_videos(self):
+        """Retailer is refused write access (HTTP 403 Forbidden)"""
+        payload = {
+            "title": "Hacked Video",
+            "category": "GENERAL",
+            "source_type": "URL",
+            "video_url": "https://bad.com/video"
+        }
+        resp = self.client_retailer.post('/api/installation-videos/', payload, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+
+        # Attempt delete
+        video = InstallationVideo.objects.create(
+            title="Admin Video",
+            category=VideoCategory.GENERAL,
+            source_type=VideoSourceType.URL,
+            video_url="https://test.com/v",
+            is_active=True
+        )
+        resp_del = self.client_retailer.delete(f'/api/installation-videos/{video.id}/')
+        self.assertEqual(resp_del.status_code, status.HTTP_403_FORBIDDEN)
+

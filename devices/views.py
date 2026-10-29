@@ -19,14 +19,16 @@ from .models import (
     LockProvider,
     CommandType,
     CommandStatus,
-    AppType
+    AppType,
+    InstallationVideo
 )
 from .serializers import (
     DeviceSerializer,
     DeviceCommandSerializer,
     DeviceLocationLogSerializer,
     AppVersionSerializer,
-    DeviceHeartbeatSerializer
+    DeviceHeartbeatSerializer,
+    InstallationVideoSerializer
 )
 from .imei_lookup import lookup_imei
 from accounts.models import User, AuditLog
@@ -1485,4 +1487,67 @@ class ApprovedDeviceTACViewSet(viewsets.ModelViewSet):
                 "environment": current_env,
                 "message": f"Device with TAC {tac} is not approved for {current_env} enrollment."
             }, status=status.HTTP_200_OK)
+
+
+class InstallationVideoViewSet(viewsets.ModelViewSet):
+    """
+    Installation & Training Videos API.
+    - Super-Admin: Full management (Create, Update, Delete, Reorder, Upload video/thumbnail).
+    - Retailers / Distributors: Read-only access to active videos for their role or ALL.
+    Supports filtering by category: ?category=ANDROID_DPC or ?category=DLC_LOCKER or ?category=IPHONE
+    """
+    permission_classes = [IsSuperAdminOrReadOnly]
+    serializer_class = InstallationVideoSerializer
+    pagination_class = None
+
+    def get_queryset(self):
+        user = self.request.user
+        # Super-Admin sees all videos (active and inactive)
+        if getattr(user, 'role', '') == 'SUPER_ADMIN':
+            qs = InstallationVideo.objects.all()
+        else:
+            # Retailers, Distributors, etc. see active videos matching their role or ALL
+            qs = InstallationVideo.objects.filter(is_active=True)
+            if hasattr(user, 'role') and user.role:
+                qs = qs.filter(Q(target_role='ALL') | Q(target_role=user.role))
+
+        # Filter by category if requested (e.g. ANDROID_DPC, DLC_LOCKER, IPHONE)
+        category = self.request.query_params.get('category')
+        if category:
+            qs = qs.filter(category=category.upper())
+
+        return qs.order_by('display_order', '-created_at')
+
+    def perform_create(self, serializer):
+        instance = serializer.save(created_by=self.request.user)
+        AuditLog.objects.create(
+            user=self.request.user,
+            action="CREATED_INSTALLATION_VIDEO",
+            ip_address=get_client_ip(self.request),
+            details={
+                "video_id": instance.id,
+                "title": instance.title,
+                "category": instance.category,
+                "source_type": instance.source_type
+            }
+        )
+
+    def perform_update(self, serializer):
+        instance = serializer.save()
+        AuditLog.objects.create(
+            user=self.request.user,
+            action="UPDATED_INSTALLATION_VIDEO",
+            ip_address=get_client_ip(self.request),
+            details={"video_id": instance.id, "title": instance.title}
+        )
+
+    def perform_destroy(self, instance):
+        AuditLog.objects.create(
+            user=self.request.user,
+            action="DELETED_INSTALLATION_VIDEO",
+            ip_address=get_client_ip(self.request),
+            details={"video_id": instance.id, "title": instance.title}
+        )
+        instance.delete()
+
 
