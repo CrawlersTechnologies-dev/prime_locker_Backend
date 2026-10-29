@@ -82,6 +82,12 @@ A high-performance Django REST Framework (DRF) backend engineered for Mobile Dev
 *   **QR Provisioning & Direct Download:** Automatically produces direct download links and dynamic QR code generation URLs for instant installation on customer devices.
 *   **Mandatory Update Flags:** Enforces mandatory app updates on remote devices.
 
+### 12. Installation & Training Videos Suite
+*   **Retailer Onboarding Tutorials:** Super Admin uploads or links step-by-step video guides for phone activations.
+*   **Category-Aware Filtering:** Filter guides directly by device enrollment options: `ANDROID_DPC` (Android App), `DLC_LOCKER` (Google / OEM Hardware Lock), `IPHONE` (Apple iOS MDM), and `GENERAL`.
+*   **Dual Video Source Engine:** Supports direct MP4 video file uploads as well as high-speed external streaming URLs (YouTube, Vimeo, Cloudflare Stream, AWS S3).
+*   **Role-Based Targeting & Ordering:** Target videos to Retailers, Distributors, or All roles with custom display ordering (`1, 2, 3...`) and instant active/inactive toggles.
+
 ---
 
 ## 🛠️ Tech Stack
@@ -225,9 +231,9 @@ chmod +x deploy.sh
 | `GET` | `/api/payments/` | Paid installments list (Screen A-23) with customer, device, retailer, receipt number, mode, ref (`?date=`, `?start_date=`, `?end_date=`, `?mode=`, `?retailer=`, `?search=`, `?export=csv`) |
 | `GET` | `/api/payments/{id}/` | Payment receipt (Screen A-25) with receipt number (`REC-XXXXXX`), customer/retailer addresses, and contract financial breakdown |
 | `POST` | `/api/emi-installments/{id}/record-payment/` | Record in-store offline payment (Cash/UPI/Card) & auto-unlock device via `transaction.on_commit` if overdue |
-| `POST` | `/api/emi-installments/{id}/create-payment-order/` | Create Razorpay order for online customer payment (returns `order_id`, key, paise amount; includes simulation mode) |
-| `POST` | `/api/emi-installments/{id}/verify-online-payment/` | Verify Razorpay checkout signature & mark installment as `PAID` via `ONLINE_GATEWAY` |
-| `POST` | `/api/emi/webhook/razorpay/` | External webhook for asynchronous gateway notifications (`payment.captured`, `order.paid`) |
+| `POST` | `/api/emi-installments/{id}/create-payment-order/` | Create Cashfree PG (v2023-08-01) payment order (returns `payment_session_id`, `order_id`, and `order_amount` formatted to 2 decimals; charges `total_due` including late fees) |
+| `POST` | `/api/emi-installments/{id}/verify-online-payment/` | Verify Cashfree order status with gateway & mark installment as `PAID` via `ONLINE_GATEWAY` (auto-unlocks overdue device) |
+| `POST` | `/api/cashfree/webhook/` | External Cashfree PG webhook with timestamped HMAC-SHA256 signature verification (`PAYMENT_SUCCESS_WEBHOOK`) |
 | `GET` | `/api/emi-overdue/` | Overdue dashboard with Ageing KPIs (`?bucket=1-7`, `8-15`, `16-30`, `30+`), per-row `late_fee`, and calculated `total_due` |
 
 ### 🎁 Offers & Promotions
@@ -283,6 +289,15 @@ chmod +x deploy.sh
 | :--- | :--- | :--- |
 | `GET`/`POST` | `/api/app-versions/` | Upload and manage Android Locker / Smart TV APK releases |
 | `GET` | `/api/app-versions/latest/?app_type=ANDROID_LOCKER` | Get latest active APK release with download link & QR code |
+
+### 🎬 Installation & Training Videos
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `GET` | `/api/installation-videos/` | List active tutorial & training videos for retailers/distributors (supports category filter `?category=DLC_LOCKER`, `ANDROID_DPC`, `IPHONE`, `GENERAL`) |
+| `POST` | `/api/installation-videos/` | *(Super Admin)* Create/upload installation video (direct MP4 file upload or YouTube/CDN link, thumbnail, category, order) |
+| `GET` | `/api/installation-videos/{id}/` | Retrieve single installation video details & streaming URL |
+| `PATCH`/`PUT` | `/api/installation-videos/{id}/` | *(Super Admin)* Update video metadata, category, active state, or display order |
+| `DELETE` | `/api/installation-videos/{id}/` | *(Super Admin)* Remove installation video |
 
 ### 🔔 Notifications, Staff & Advanced Administration
 | Method | Endpoint | Description |
