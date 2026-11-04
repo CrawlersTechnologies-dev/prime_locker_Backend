@@ -280,18 +280,22 @@ class CashfreeService:
                 from devices.models import LockProvider
                 from django.db.models import Q
                 target_dev = contract.target_lock_device or Device.objects.filter(emi_contract=contract).first() or Device.objects.filter(imei=contract.device_imei).first()
-                if target_dev and target_dev.lock_provider == LockProvider.ROCKETPAY:
+                if target_dev and target_dev.lock_provider in [LockProvider.ROCKETPAY, LockProvider.PARTNER_MDM]:
                     other_active = CustomerEMIContract.objects.filter(
                         Q(lock_device=target_dev) | Q(device_imei=target_dev.imei)
                     ).exclude(id=contract.id).exclude(status=EMIContractStatus.COMPLETED).exists()
                     if not other_active:
                         target_dev_id = target_dev.id
                         def _trigger_on_commit_unregister():
-                            from devices.models import Device
+                            from devices.models import Device, LockProvider
                             from devices.services.rocketpay_service import RocketPayService
+                            from devices.services.partner_mdm_service import PartnerMDMService
                             d = Device.objects.filter(id=target_dev_id).first()
                             if d and d.provider_device_id:
-                                RocketPayService.unregister_key(d)
+                                if d.lock_provider == LockProvider.ROCKETPAY:
+                                    RocketPayService.unregister_key(d)
+                                elif d.lock_provider == LockProvider.PARTNER_MDM:
+                                    PartnerMDMService.remove_device(d)
                         transaction.on_commit(_trigger_on_commit_unregister)
             elif overdue_count == 0 and contract.status == EMIContractStatus.LOCKED:
                 contract.status = EMIContractStatus.ACTIVE
@@ -333,6 +337,13 @@ class CashfreeService:
                         u = User.objects.filter(id=u_id).first() if u_id else None
                         if dev.lock_provider == LockProvider.ROCKETPAY and dev.provider_status != "UNREGISTERED":
                             RocketPayService.unlock_device(
+                                device=dev,
+                                reason="Cashfree payment captured - auto unlock",
+                                user=u
+                            )
+                        elif dev.lock_provider == LockProvider.PARTNER_MDM and dev.provider_status != "UNREGISTERED":
+                            from devices.services.partner_mdm_service import PartnerMDMService
+                            PartnerMDMService.unlock_device(
                                 device=dev,
                                 reason="Cashfree payment captured - auto unlock",
                                 user=u

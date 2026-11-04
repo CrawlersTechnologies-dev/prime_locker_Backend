@@ -201,6 +201,9 @@ class DeviceViewSet(viewsets.ModelViewSet):
         if device.lock_provider == LockProvider.ROCKETPAY:
             from .services.rocketpay_service import RocketPayService
             RocketPayService.lock_device(device=device, reason=reason or "Remote lock from dashboard", user=request.user)
+        elif device.lock_provider == LockProvider.PARTNER_MDM:
+            from .services.partner_mdm_service import PartnerMDMService
+            PartnerMDMService.lock_device(device=device, reason=reason or "Remote lock from dashboard", user=request.user)
 
         # In-app notifications (M9)
         from accounts.views import send_system_notification
@@ -250,6 +253,9 @@ class DeviceViewSet(viewsets.ModelViewSet):
         if device.lock_provider == LockProvider.ROCKETPAY:
             from .services.rocketpay_service import RocketPayService
             RocketPayService.unlock_device(device=device, reason=reason or "Remote unlock from dashboard", user=request.user)
+        elif device.lock_provider == LockProvider.PARTNER_MDM:
+            from .services.partner_mdm_service import PartnerMDMService
+            PartnerMDMService.unlock_device(device=device, reason=reason or "Remote unlock from dashboard", user=request.user)
 
         # In-app notifications (M9)
         from accounts.views import send_system_notification
@@ -285,6 +291,9 @@ class DeviceViewSet(viewsets.ModelViewSet):
         if denied:
             return denied
         device = self.get_object()
+        if device.lock_provider == LockProvider.PARTNER_MDM:
+            from .services.partner_mdm_service import PartnerMDMService
+            PartnerMDMService.reboot_device(device=device, user=request.user)
         self._create_command(device, CommandType.REBOOT)
         return Response({"message": f"Remote reboot command queued for device {device.imei}."})
 
@@ -310,6 +319,9 @@ class DeviceViewSet(viewsets.ModelViewSet):
 
         device.camera_disabled = new_camera_disabled
         device.save(update_fields=['camera_disabled'])
+        if device.lock_provider == LockProvider.PARTNER_MDM:
+            from .services.partner_mdm_service import PartnerMDMService
+            PartnerMDMService.update_policy(device, {"camera_enabled": not new_camera_disabled}, user=request.user)
         self._create_command(device, CommandType.UPDATE_POLICY, {"camera_disabled": device.camera_disabled})
         return Response({
             "message": f"Camera is now {'DISABLED' if device.camera_disabled else 'ENABLED'}.",
@@ -340,6 +352,9 @@ class DeviceViewSet(viewsets.ModelViewSet):
         device.instagram_disabled = device.social_media_disabled
         device.facebook_disabled = device.social_media_disabled
         device.save(update_fields=['social_media_disabled', 'whatsapp_disabled', 'instagram_disabled', 'facebook_disabled'])
+        if device.lock_provider == LockProvider.PARTNER_MDM:
+            from .services.partner_mdm_service import PartnerMDMService
+            PartnerMDMService.update_policy(device, {"social_apps_enabled": not new_state}, user=request.user)
         self._create_command(device, CommandType.UPDATE_POLICY, {"social_media_disabled": device.social_media_disabled})
         return Response({
             "message": f"Social media apps are now {'DISABLED' if device.social_media_disabled else 'ENABLED'}.",
@@ -360,6 +375,9 @@ class DeviceViewSet(viewsets.ModelViewSet):
         if device.lock_provider == LockProvider.ROCKETPAY:
             # RP9: Forward to TEXT_REMINDER
             RocketPayService.apply_control(device, control='TEXT_REMINDER', action='SEND', payload={"message": message}, user=request.user)
+        elif device.lock_provider == LockProvider.PARTNER_MDM:
+            from .services.partner_mdm_service import PartnerMDMService
+            PartnerMDMService.send_notification(device, title="EMI Reminder", message=message, user=request.user)
         self._create_command(device, CommandType.PUSH_MESSAGE, {"message": message})
         return Response({"message": "Screen reminder sent successfully.", "lock_message": device.lock_message})
 
@@ -640,6 +658,9 @@ class DeviceViewSet(viewsets.ModelViewSet):
 
         if device.lock_provider == LockProvider.ROCKETPAY:
             RocketPayService.apply_control(device, control='AUDIO_WARNING', action='SEND', payload={"message": message, "volume": volume}, user=request.user)
+        elif device.lock_provider == LockProvider.PARTNER_MDM:
+            from .services.partner_mdm_service import PartnerMDMService
+            PartnerMDMService.audio_reminder(device, user=request.user)
 
         self._create_command(device, CommandType.PUSH_MESSAGE, {
             "action": "AUDIO_REMINDER",
@@ -694,6 +715,9 @@ class DeviceViewSet(viewsets.ModelViewSet):
         device = self.get_object()
         if device.lock_provider == LockProvider.ROCKETPAY:
             RocketPayService.apply_control(device, control='GET_LOCATION', action='FETCH', user=request.user)
+        elif device.lock_provider == LockProvider.PARTNER_MDM:
+            from .services.partner_mdm_service import PartnerMDMService
+            PartnerMDMService.refresh_location(device, user=request.user)
 
         self._create_command(device, CommandType.SYNC_LOCATION)
         return Response({"message": f"Live GPS location refresh command dispatched to device {device.imei}."})
@@ -759,6 +783,23 @@ class DeviceViewSet(viewsets.ModelViewSet):
             "message": f"Factory reset & FRP protection is now {'ENABLED (BLOCKED)' if device.block_factory_reset else 'DISABLED (ALLOWED)'}.",
             "block_factory_reset": device.block_factory_reset,
             "frp_protection_enabled": device.frp_protection_enabled
+        })
+
+    @action(detail=True, methods=['post'], url_path='toggle-hide-app')
+    def toggle_hide_app(self, request, pk=None):
+        denied = self._block_customer(request)
+        if denied:
+            return denied
+        device = self.get_object()
+        new_val = not device.hide_application
+        device.hide_application = new_val
+        device.save(update_fields=['hide_application'])
+        if device.lock_provider == LockProvider.PARTNER_MDM:
+            from .services.partner_mdm_service import PartnerMDMService
+            PartnerMDMService.update_policy(device, {"hide_application": new_val}, user=request.user)
+        return Response({
+            "message": f"Control app is now {'HIDDEN' if device.hide_application else 'VISIBLE'} on device.",
+            "hide_application": device.hide_application
         })
 
     @action(detail=True, methods=['get'], url_path='controls-status')
@@ -1487,6 +1528,9 @@ class ApprovedDeviceTACViewSet(viewsets.ModelViewSet):
                 "environment": current_env,
                 "message": f"Device with TAC {tac} is not approved for {current_env} enrollment."
             }, status=status.HTTP_200_OK)
+
+
+
 
 
 class InstallationVideoViewSet(viewsets.ModelViewSet):

@@ -8,6 +8,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.views import TokenObtainPairView
 from django.db import transaction, models
+from django.utils import timezone
 from django.contrib.auth import get_user_model
 from .serializers import (
     CustomTokenObtainPairSerializer, 
@@ -344,9 +345,15 @@ class CustomerViewSet(BaseRoleViewSet):
         # Determine Lock Provider
         lock_provider = data.get('lock_provider')
         if not lock_provider:
-            lock_provider = LockProvider.ROCKETPAY if os_type == OSType.ANDROID else (
-                LockProvider.APPLE_MDM if os_type == OSType.IOS else LockProvider.OWN_AGENT
-            )
+            mdm_type = (data.get('mdm_type') or '').upper()
+            if mdm_type == 'DLC':
+                lock_provider = LockProvider.ROCKETPAY
+            elif mdm_type == 'DPC':
+                lock_provider = LockProvider.PARTNER_MDM
+            elif os_type == OSType.IOS:
+                lock_provider = LockProvider.APPLE_MDM
+            else:
+                lock_provider = LockProvider.ROCKETPAY if os_type == OSType.ANDROID else LockProvider.OWN_AGENT
 
         # Item 9: Enrolment Order - save device first in atomic transaction, then enrol with RocketPay, roll back if fails
         with transaction.atomic():
@@ -428,10 +435,39 @@ class CustomerViewSet(BaseRoleViewSet):
                 device.provider_device_id = rp_device_id
                 device.provider_status = rp_result.get('provider_status', 'PENDING')
                 device.save(update_fields=['provider_device_id', 'provider_status'])
+            elif lock_provider == LockProvider.PARTNER_MDM:
+                from devices.services.partner_mdm_service import PartnerMDMService
+                loan_data = {
+                    'device_price': data.get('device_price') or data.get('price', 15000),
+                    'down_payment': data.get('down_payment', 0),
+                    'processing_fee': data.get('processing_fee', 0),
+                    'number_of_emi': data.get('number_of_emi') or data.get('emi_months', 6),
+                    'monthly_emi': data.get('monthly_emi', 2000),
+                    'first_emi_date': data.get('first_emi_date') or str(timezone.localdate())
+                }
+                pm_result = PartnerMDMService.enroll_device(
+                    device=device,
+                    customer_name=full_name,
+                    customer_mobile=mobile_number,
+                    customer_address=data.get('address', ''),
+                    loan_data=loan_data,
+                    user=user
+                )
+                if not pm_result.get('success'):
+                    transaction.set_rollback(True)
+                    return Response(
+                        {"detail": f"Partner MDM enrollment failed: {pm_result.get('error')}. Device and customer registration rolled back."},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                rp_device_id = pm_result.get('provider_device_id')
+                qr_code_data = pm_result.get('qr_code_url')
+                device.provider_device_id = str(rp_device_id)
+                device.provider_status = pm_result.get('provider_status', 'PENDING')
+                device.qr_code_url = qr_code_data
+                device.save(update_fields=['provider_device_id', 'provider_status', 'qr_code_url'])
 
             # Activate Key if present
             if key_obj:
-                from django.utils import timezone
                 key_obj.status = KeyStatus.ACTIVATED
                 key_obj.activated_on_device_id = imei
                 key_obj.activated_for_customer = customer

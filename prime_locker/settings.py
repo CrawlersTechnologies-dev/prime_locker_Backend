@@ -201,5 +201,13 @@ CASHFREE_CONFIG = {
 
 }
 
-
+# -------------------------------------------------------------
+# Third-Party Partner MDM Engine (Android Enterprise 6-Tap QR)
+# -------------------------------------------------------------
+PARTNER_MDM_CONFIG = {
+    'BASE_URL': os.getenv('PARTNER_MDM_BASE_URL', '').rstrip('/'),
+    'USERNAME': os.getenv('PARTNER_MDM_USERNAME', ''),
+    'PASSWORD': os.getenv('PARTNER_MDM_PASSWORD', ''),
+    'SIMULATION': os.getenv('PARTNER_MDM_SIMULATION', 'True').lower() in ('true', '1', 't', 'yes'),
+}
 

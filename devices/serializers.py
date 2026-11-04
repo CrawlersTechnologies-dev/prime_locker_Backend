@@ -80,6 +80,12 @@ class DeviceSerializer(serializers.ModelSerializer):
             'provider_device_id',
             'provider_status',
             'provider_error',
+            'qr_code_url',
+            'hide_application',
+            'calls_disabled',
+            'wifi_disabled',
+            'mobile_data_disabled',
+            'usb_debugging_disabled',
             'streaming_blocked',
             'locked_packages',
             # Live GPS

@@ -59,7 +59,17 @@ A high-performance Django REST Framework (DRF) backend engineered for Mobile Dev
 *   **Device Alerts Status Board:** Real-time visibility into tamper events, offline devices (> 3 days), and provider command failures (`/api/devices/alerts/`).
 *   **Retailer Emergency Offline Code:** In-app and WhatsApp dispatch of offline 8-digit unlock codes to retailers (`/api/devices/{id}/send-offline-code/`).
 
-### 8. RocketPay DLC + OEM Hardware-Level Locking
+### 8. Dual Lock Engines: RocketPay DLC + Partner Android Enterprise (6-Tap QR)
+*   **Dual Lock Engine Architecture:** Clean side-by-side support for multiple device locking technologies:
+    *   **RocketPay (`LockProvider.ROCKETPAY`):** Zero-touch OEM firmware-level locking (Trustonic / Knox Guard) for Vivo, Infinix, Tecno, and Samsung.
+    *   **Partner MDM (`LockProvider.PARTNER_MDM`):** Android Enterprise 6-Tap QR provisioning for brands like Redmi, Realme, Oppo, OnePlus, Motorola, and Xiaomi.
+    *   **Apple MDM (`LockProvider.APPLE_MDM`):** Apple Supervised MDM profile enrollment for iPhones.
+*   **Stealth Mode (Hide Application):** Remotely hides the locker app icon from launcher so customers cannot see or tamper with the locker agent.
+*   **Social App Soft-Lock:** Selective blocking of Instagram, WhatsApp, YouTube, Facebook, Telegram, Snapchat, etc. while keeping phone calls and banking/payment apps working.
+*   **High-Volume Audio Reminder (Siren):** Plays loud audible EMI alerts on customer devices even if silenced.
+*   **Hardware Restrictions:** Remote camera toggle, factory reset block, USB debugging lock, WiFi/Mobile Data disable, incoming/outgoing calls block.
+*   **Emergency Offline Unlock Codes:** Generates 6-digit (Partner MDM) and 8-digit (RocketPay) time-limited unlock codes when offline in rural or low-connectivity zones.
+*   **RBI Compliance & Automatic Release:** Automatic unlocking via `transaction.on_commit` upon EMI clearance, and permanent unenrollment/release upon final EMI settlement.
 *   **Zero-Touch OEM Locking:** Integrates with RocketPay SuperKey API (`/super-key/v2/only-key` and `/superkey/keys/{key_id}/control/LOCK/apply/LOCK|UNLOCK`) for direct Knox/hardware-level device enforcement.
 *   **Strict Security & Signature Verification:** Webhooks require authentic HMAC-SHA256 signatures with timestamp replay protection; simulated bypasses are strictly prevented.
 *   **Database-First Enrollment & Atomic Rollback:** Enrolls the device in the local database first and coordinates with RocketPay; if either step fails, transactions are atomically rolled back.
@@ -264,6 +274,7 @@ chmod +x deploy.sh
 | `POST` | `/api/devices/{id}/unlock/` | Remote unlock device instantly (coordinates with RocketPay DLC if enrolled) |
 | `POST` | `/api/devices/{id}/retry-provider-command/` | Manually retry a failed RocketPay command (`{"command": "LOCK"|"UNLOCK"}`) |
 | `POST` | `/api/devices/{id}/reboot/` | Queue remote reboot command |
+| `POST` | `/api/devices/{id}/toggle-hide-app/` | Stealth Mode: hide / unhide locker app icon on device (`{"hide_application": true|false}`) |
 | `POST` | `/api/devices/{id}/toggle-camera/` | Remotely enable/disable camera (native MDM only; returns 400 on RocketPay) |
 | `POST` | `/api/devices/{id}/toggle-social-media/` | Remotely enable/disable WhatsApp, Instagram, Facebook (native MDM only; returns 400 on RocketPay) |
 | `POST` | `/api/devices/{id}/toggle-reset-block/` | Reset Option Block & FRP Protection (block unauthorized factory reset) |

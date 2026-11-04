@@ -339,3 +339,255 @@ class InstallationVideoTests(TestCase):
         resp_del = self.client_retailer.delete(f'/api/installation-videos/{video.id}/')
         self.assertEqual(resp_del.status_code, status.HTTP_403_FORBIDDEN)
 
+
+
+from devices.services.partner_mdm_service import PartnerMDMService
+from emi.models import CustomerEMIContract, EMIInstallment, InstallmentStatus, EMIContractStatus, PaymentMode
+
+
+@override_settings(ROCKETPAY_SIMULATION=True, PARTNER_MDM_SIMULATION=True, CASHFREE_SIMULATION=True)
+class PartnerMDMBackendTests(TestCase):
+    def setUp(self):
+        self.retailer = User.objects.create_user(
+            username='test_retailer_pm',
+            email='retailer_pm@test.com',
+            password='Password@123',
+            role=Role.RETAILER,
+            mobile_number='+919877711111',
+            business_name='Prime Mobile Hub'
+        )
+        self.customer = User.objects.create_user(
+            username='test_customer_pm',
+            email='customer_pm@test.com',
+            password='Password@123',
+            role=Role.CUSTOMER,
+            mobile_number='+919877722222',
+            parent=self.retailer
+        )
+
+        self.approved_tac = ApprovedDeviceTAC.objects.create(
+            tac='86667107',
+            brand='REDMI',
+            model_number='Note 13',
+            marketing_name='Redmi Note 13',
+            environment=TACEnvironment.ALL,
+            active=True
+        )
+
+        self.pm_device = Device.objects.create(
+            customer=self.customer,
+            retailer=self.retailer,
+            imei='866671070000123',
+            brand='REDMI',
+            model='Note 13',
+            os_type=OSType.ANDROID,
+            status=DeviceLockStatus.ACTIVE,
+            lock_provider=LockProvider.PARTNER_MDM,
+            provider_device_id='mock_pm_dev_123',
+            qr_code_url='https://api.qrserver.com/v1/create-qr-code/?data=simulated_qr_code'
+        )
+
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.retailer)
+
+    def test_partner_mdm_service_direct_methods(self):
+        """Verify all direct simulation methods in PartnerMDMService"""
+        token = PartnerMDMService.get_token()
+        self.assertTrue(token.startswith('mock_jwt_token_'))
+
+        # Token caching check
+        token2 = PartnerMDMService.get_token()
+        self.assertEqual(token, token2)
+
+        # Device enrollment simulation
+        enroll_res = PartnerMDMService.enroll_device(
+            device=self.pm_device,
+            customer_name='Rajesh Kumar',
+            customer_mobile='+919877722222',
+            loan_data={'monthly_emi': 1500, 'number_of_emi': 6}
+        )
+        self.assertTrue(enroll_res['success'])
+        self.assertIn('qr_code_url', enroll_res)
+        self.assertIn('provider_device_id', enroll_res)
+
+        # Policy update (including hide application)
+        policy_res = PartnerMDMService.update_policy(
+            device=self.pm_device,
+            hide_app=True,
+            block_social=True,
+            disable_camera=True,
+            disable_calls=True,
+            disable_wifi=True
+        )
+        self.assertTrue(policy_res['success'])
+
+        # Lock & Unlock
+        lock_res = PartnerMDMService.lock_device(self.pm_device)
+        self.assertTrue(lock_res['success'])
+
+        unlock_res = PartnerMDMService.unlock_device(self.pm_device)
+        self.assertTrue(unlock_res['success'])
+
+        # Audio reminder / Siren
+        audio_res = PartnerMDMService.audio_reminder(self.pm_device)
+        self.assertTrue(audio_res['success'])
+
+        # Push notification
+        notif_res = PartnerMDMService.send_notification(self.pm_device, 'EMI Due', 'Please pay immediately')
+        self.assertTrue(notif_res['success'])
+
+        # Reboot
+        reboot_res = PartnerMDMService.reboot_device(self.pm_device)
+        self.assertTrue(reboot_res['success'])
+
+        # Location
+        loc_res = PartnerMDMService.get_location(self.pm_device)
+        self.assertTrue(loc_res['success'])
+        self.assertIn('latitude', loc_res)
+
+        # Offline code
+        code_res = PartnerMDMService.get_offline_code(self.pm_device)
+        self.assertTrue(code_res['success'])
+        self.assertIn('offline_unlock_code', code_res)
+
+        # Remove / Release device
+        remove_res = PartnerMDMService.remove_device(self.pm_device)
+        self.assertTrue(remove_res['success'])
+
+    def test_api_enrollment_with_partner_mdm(self):
+        """Verify /api/customers/enroll/ with lock_provider=PARTNER_MDM returns qr_code_data"""
+        from keys.models import DeviceKey, KeyStatus
+        key = DeviceKey.objects.create(
+            key_string='AND-TEST-PM-001',
+            device_type='ANDROID',
+            status=KeyStatus.AVAILABLE,
+            current_owner=self.retailer
+        )
+        payload = {
+            'full_name': 'Suresh Patel',
+            'mobile_number': '+919877733333',
+            'imei': '866671070000456',
+            'brand': 'REDMI',
+            'model': 'Note 13',
+            'activation_key_string': key.key_string,
+            'lock_provider': 'PARTNER_MDM',
+            'monthly_emi': 2000,
+            'number_of_emi': 6
+        }
+        resp = self.client.post('/api/customers/enroll/', payload, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        self.assertIn('device', resp.data)
+        device_data = resp.data['device']
+        self.assertEqual(device_data['lock_provider'], 'PARTNER_MDM')
+        self.assertTrue(device_data.get('qr_code_data'))
+
+        # Verify device in DB
+        created_dev = Device.objects.get(imei='866671070000456')
+        self.assertEqual(created_dev.lock_provider, LockProvider.PARTNER_MDM)
+        self.assertTrue(created_dev.qr_code_url)
+
+    def test_api_device_controls_partner_mdm(self):
+        """Verify DeviceViewSet lock, unlock, hide-app, audio reminder, reboot for PARTNER_MDM"""
+        # 1. Lock device
+        resp_lock = self.client.post(f'/api/devices/{self.pm_device.id}/lock/', format='json')
+        self.assertEqual(resp_lock.status_code, status.HTTP_200_OK)
+        self.pm_device.refresh_from_db()
+        self.assertEqual(self.pm_device.status, DeviceLockStatus.LOCKED)
+
+        # 2. Unlock device
+        resp_unlock = self.client.post(f'/api/devices/{self.pm_device.id}/unlock/', format='json')
+        self.assertEqual(resp_unlock.status_code, status.HTTP_200_OK)
+        self.pm_device.refresh_from_db()
+        self.assertEqual(self.pm_device.status, DeviceLockStatus.ACTIVE)
+
+        # 3. Toggle Hide App
+        resp_hide = self.client.post(
+            f'/api/devices/{self.pm_device.id}/toggle-hide-app/',
+            {'hide_application': True},
+            format='json'
+        )
+        self.assertEqual(resp_hide.status_code, status.HTTP_200_OK)
+        self.pm_device.refresh_from_db()
+        self.assertTrue(self.pm_device.hide_application)
+
+        # Toggle Hide App off
+        resp_unhide = self.client.post(
+            f'/api/devices/{self.pm_device.id}/toggle-hide-app/',
+            {'hide_application': False},
+            format='json'
+        )
+        self.assertEqual(resp_unhide.status_code, status.HTTP_200_OK)
+        self.pm_device.refresh_from_db()
+        self.assertFalse(self.pm_device.hide_application)
+
+        # 4. Audio reminder (Siren)
+        resp_audio = self.client.post(f'/api/devices/{self.pm_device.id}/audio-reminder/', format='json')
+        self.assertEqual(resp_audio.status_code, status.HTTP_200_OK)
+
+        # 5. Reboot device
+        resp_reboot = self.client.post(f'/api/devices/{self.pm_device.id}/reboot/', format='json')
+        self.assertEqual(resp_reboot.status_code, status.HTTP_200_OK)
+
+        # 6. Refresh location
+        resp_loc = self.client.post(f'/api/devices/{self.pm_device.id}/refresh-location/', format='json')
+        self.assertEqual(resp_loc.status_code, status.HTTP_200_OK)
+
+    def test_emi_payment_auto_unlock_and_release_partner_mdm(self):
+        """Verify in-store payment auto-unlocks PARTNER_MDM device and final payment releases it"""
+        contract = CustomerEMIContract.objects.create(
+            customer=self.customer,
+            retailer=self.retailer,
+            lock_device=self.pm_device,
+            device_imei=self.pm_device.imei,
+            device_name=f"{self.pm_device.brand} {self.pm_device.model}",
+            total_amount=Decimal('5000.00'),
+            down_payment=Decimal('1000.00'),
+            financed_amount=Decimal('4000.00'),
+            tenure_months=2,
+            monthly_emi_amount=Decimal('2000.00'),
+            first_emi_date=timezone.localdate(),
+            status=EMIContractStatus.ACTIVE
+        )
+        inst1 = EMIInstallment.objects.create(
+            contract=contract,
+            installment_number=1,
+            due_date=timezone.localdate() - timedelta(days=2),
+            amount=Decimal('2000.00'),
+            status=InstallmentStatus.OVERDUE
+        )
+        inst2 = EMIInstallment.objects.create(
+            contract=contract,
+            installment_number=2,
+            due_date=timezone.localdate() + timedelta(days=28),
+            amount=Decimal('2000.00'),
+            status=InstallmentStatus.UPCOMING
+        )
+
+        # Lock the device first
+        self.pm_device.status = DeviceLockStatus.LOCKED
+        self.pm_device.save()
+
+        # Pay Installment 1 -> Should auto-unlock device
+        with self.captureOnCommitCallbacks(execute=True):
+            resp_pay1 = self.client.post(
+                f'/api/emi-installments/{inst1.id}/record-payment/',
+                {'amount': '2000.00', 'payment_mode': PaymentMode.CASH, 'transaction_ref': 'CASH-PM-001'},
+                format='json'
+            )
+        self.assertEqual(resp_pay1.status_code, status.HTTP_200_OK)
+        self.pm_device.refresh_from_db()
+        self.assertEqual(self.pm_device.status, DeviceLockStatus.ACTIVE)
+
+        # Pay Installment 2 (Final) -> Contract completed -> Should release device
+        with self.captureOnCommitCallbacks(execute=True):
+            resp_pay2 = self.client.post(
+                f'/api/emi-installments/{inst2.id}/record-payment/',
+                {'amount': '2000.00', 'payment_mode': PaymentMode.CASH, 'transaction_ref': 'CASH-PM-002'},
+                format='json'
+            )
+        self.assertEqual(resp_pay2.status_code, status.HTTP_200_OK)
+        contract.refresh_from_db()
+        self.assertEqual(contract.status, EMIContractStatus.COMPLETED)
+        self.pm_device.refresh_from_db()
+        self.assertEqual(self.pm_device.status, DeviceLockStatus.UNENROLLED)
+        self.assertEqual(self.pm_device.provider_status, "UNREGISTERED")

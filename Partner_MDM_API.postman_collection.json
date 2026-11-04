@@ -1,0 +1,2595 @@
+{
+  "info": {
+    "name": "Partner API v1",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Partner API \u2014 Postman collection.\n\n1. Collection > Variables: set base_url (https://{DOMAIN}/partner-api), username and password.\n2. Run '3.1 Login' \u2014 the access token (valid 24 hours) is saved and used by every request.\n3. '5.1 Create a customer', '6.1 Register a phone' and '7.1 EMI schedule' save customer_id, device_id and emi_id automatically.\n4. When a request returns 401 TOKEN_EXPIRED, run '3.1 Login' again.\n\nRequest names match the sections of the Partner API Integration Guide (PDF). Every request has a saved real example response."
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{access_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "https://apirenewjss.com/partner-api"
+    },
+    {
+      "key": "username",
+      "value": "admin"
+    },
+    {
+      "key": "password",
+      "value": "123456"
+    },
+    {
+      "key": "access_token",
+      "value": ""
+    },
+    {
+      "key": "token_expires_at",
+      "value": ""
+    },
+    {
+      "key": "customer_id",
+      "value": ""
+    },
+    {
+      "key": "device_id",
+      "value": ""
+    },
+    {
+      "key": "emi_id",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "Login & account",
+      "item": [
+        {
+          "name": "Health check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/health",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "health"
+              ]
+            },
+            "description": "Is the service up? No login needed.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK \u2014 real example",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/v1/health",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "health"
+                  ]
+                },
+                "auth": {
+                  "type": "noauth"
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"request_id\": \"c2a32146454eb726ae3caf9ba1b0dd6d\",\n  \"data\": {\n    \"service\": \"Partner API\",\n    \"version\": \"1.0.0\",\n    \"database\": \"ok\",\n    \"time\": \"2026-11-02T15:44:06+05:30\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "3.1 Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/auth/login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Log in with your username and password. The access token (valid 24 hours) is saved automatically and used by every other request. When a request returns 401 TOKEN_EXPIRED, run Login again.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{username}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "if (j.success) {",
+                  "  pm.collectionVariables.set('access_token', j.data.access_token);",
+                  "  pm.collectionVariables.set('token_expires_at', j.data.expires_at);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": [
+            {
+              "name": "200 OK \u2014 real example",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/v1/auth/login",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "auth",
+                    "login"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"username\": \"{{username}}\",\n  \"password\": \"{{password}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "auth": {
+                  "type": "noauth"
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"request_id\": \"dcb74d1c5c8dd793a98e9a7d231db1d2\",\n  \"data\": {\n    \"token_type\": \"Bearer\",\n    \"access_token\": \"pka_86e545e7\u2026\",\n    \"expires_in\": 86400,\n    \"expires_at\": \"2026-11-03T15:44:07+05:30\",\n    \"user\": {\n      \"id\": 501,\n      \"username\": \"abcfinance\",\n      \"name\": \"ABC Finance\"\n    }\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "3.2 My account",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/auth/me",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "auth",
+                "me"
+              ]
+            },
+            "description": "Your account, available keys and token expiry."
+          },
+          "response": [
+            {
+              "name": "200 OK \u2014 real example",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/v1/auth/me",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "auth",
+                    "me"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"request_id\": \"6b9b6d903f45cd37bcae43e341167884\",\n  \"data\": {\n    \"id\": 501,\n    \"username\": \"abcfinance\",\n    \"name\": \"ABC Finance\",\n    \"email\": \"tech@abcfinance.com\",\n    \"phone\": \"9800000000\",\n    \"available_keys\": 50,\n    \"rate_limit_per_minute\": 120,\n    \"session\": {\n      \"expires_at\": \"2026-11-03T15:44:07+05:30\",\n      \"created_at\": \"2026-11-02T15:44:07+05:30\"\n    }\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "9.1 Dashboard",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/dashboard",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "dashboard"
+              ]
+            },
+            "description": "Totals for your account."
+          },
+          "response": [
+            {
+              "name": "200 OK \u2014 real example",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/v1/dashboard",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "dashboard"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"request_id\": \"9f8abcf5bca356371c48d8ebd861a2d4\",\n  \"data\": {\n    \"total_customers\": 2,\n    \"total_devices\": 2,\n    \"enrolled_devices\": 1,\n    \"locked_devices\": 0,\n    \"online_devices\": 1,\n    \"active_loans\": 2,\n    \"closed_loans\": 0,\n    \"overdue_devices\": 0,\n    \"available_keys\": 48\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Customers",
+      "item": [
+        {
+          "name": "5.3 List customers",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/customers?search=&page=1&limit=20",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "customers"
+              ],
+              "query": [
+                {
+                  "key": "search",
+                  "value": ""
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Your customers. Use search= to find by name or phone. Each data[].id is a customer_id."
+          },
+          "response": [
+            {
+              "name": "200 OK \u2014 real example",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/v1/customers?search=&page=1&limit=20",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "customers"
+                  ],
+                  "query": [
+                    {
+                      "key": "search",
+                      "value": ""
+                    },
+                    {
+                      "key": "page",
+                      "value": "1"
+                    },
+                    {
+                      "key": "limit",
+                      "value": "20"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"request_id\": \"f9cc68414a57af7717dd84a57c6e8c7d\",\n  \"data\": [\n    {\n      \"id\": 1202,\n      \"customer_name\": \"Suresh Patel\",\n      \"phone_number\": \"9988776655\",\n      \"alternate_phone\": null,\n      \"aadhaar_number\": null,\n      \"pan_number\": null,\n      \"passbook_number\": null,\n      \"address_text\": null,\n      \"auto_lock\": true,\n      \"auto_reminder\": false,\n      \"is_active\": true,\n      \"documents\": {\n        \"profile_photo\": \"https://{DOMAIN}/uploads/documents/profile_501_1793614447_ce5bcaf1ee2876a4.png\",\n        \"aadhaar_doc\": \"https://{DOMAIN}/uploads/documents/aadhaar_501_1793614447_c9bc5dfd1f61e19f.png\",\n        \"pan_doc\": null,\n        \"passbook_doc\": null,\n        \"address_doc\": null\n      },\n      \"created_at\": \"2026-11-02T15:44:07+05:30\",\n      \"device_count\": 0\n    },\n    {\n      \"id\": 1201,\n      \"customer_name\": \"Ramesh Kumar\",\n      \"phone_number\": \"9876543210\",\n      \"alternate_phone\": \"9123456789\",\n      \"aadhaar_number\": \"234567890123\",\n      \"pan_number\": \"ABCDE1234F\",\n      \"passbook_number\": null,\n      \"address_text\": \"12, Shanti Nagar, Satellite, Ahmedabad\",\n      \"auto_lock\": true,\n      \"auto_reminder\": true,\n      \"is_active\": true,\n      \"documents\": {\n        \"profile_photo\": null,\n        \"aadhaar_doc\": null,\n        \"pan_doc\": null,\n        \"passbook_doc\": null,\n        \"address_doc\": null\n      },\n      \"created_at\": \"2026-11-02T15:44:07+05:30\",\n      \"device_count\": 0\n    }\n  ],\n  \"meta\": {\n    \"page\": 1,\n    \"limit\": 20,\n    \"total\": 2,\n    \"total_pages\": 1\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "5.1 Create a customer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/customers",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "customers"
+              ]
+            },
+            "description": "Creates a customer. data.id is the customer_id (saved automatically).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_name\": \"Ramesh Kumar\",\n  \"phone_number\": \"9876543210\",\n  \"alternate_phone\": \"9123456789\",\n  \"aadhaar_number\": \"234567890123\",\n  \"pan_number\": \"ABCDE1234F\",\n  \"address_text\": \"Satellite, Ahmedabad\",\n  \"auto_lock\": true,\n  \"auto_reminder\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "if (j.success) pm.collectionVariables.set('customer_id', j.data.id);"
+                ]
+              }
+            }
+          ],
+          "response": [
+            {
+              "name": "201 Created \u2014 real example",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/v1/customers",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "customers"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"customer_name\": \"Ramesh Kumar\",\n  \"phone_number\": \"9876543210\",\n  \"alternate_phone\": \"9123456789\",\n  \"aadhaar_number\": \"234567890123\",\n  \"pan_number\": \"ABCDE1234F\",\n  \"address_text\": \"Satellite, Ahmedabad\",\n  \"auto_lock\": true,\n  \"auto_reminder\": false\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"request_id\": \"d32bc55bec720c70542de4465a10c2e3\",\n  \"data\": {\n    \"id\": 1201,\n    \"customer_name\": \"Ramesh Kumar\",\n    \"phone_number\": \"9876543210\",\n    \"alternate_phone\": \"9123456789\",\n    \"aadhaar_number\": \"234567890123\",\n    \"pan_number\": \"ABCDE1234F\",\n    \"passbook_number\": null,\n    \"address_text\": \"12, Shanti Nagar, Satellite, Ahmedabad\",\n    \"auto_lock\": true,\n    \"auto_reminder\": true,\n    \"is_active\": true,\n    \"documents\": {\n      \"profile_photo\": null,\n      \"aadhaar_doc\": null,\n      \"pan_doc\": null,\n      \"passbook_doc\": null,\n      \"address_doc\": null\n    },\n    \"created_at\": \"2026-11-02T15:44:07+05:30\",\n    \"device_count\": 0\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "5.2 Create a customer with documents",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/customers",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "customers"
+              ]
+            },
+            "description": "Same as 5.1 as multipart/form-data with photo/document files. Choose the files before sending.",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "customer_name",
+                  "value": "Suresh Patel",
+                  "type": "text"
+                },
+                {
+                  "key": "phone_number",
+                  "value": "9988776655",
+                  "type": "text"
+                },
+                {
+                  "key": "auto_lock",
+                  "value": "true",
+                  "type": "text"
+                },
+                {
+                  "key": "profile_photo",
+                  "type": "file",
+                  "src": []
+                },
+                {
+                  "key": "aadhaar_doc",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "if (j.success) pm.collectionVariables.set('customer_id', j.data.id);"
+                ]
+              }
+            }
+          ],
+          "response": [
+            {
+              "name": "201 Created \u2014 real example",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/v1/customers",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "customers"
+                  ]
+                },
+                "body": {
+                  "mode": "formdata",
+                  "formdata": [
+                    {
+                      "key": "customer_name",
+                      "value": "Suresh Patel",
+                      "type": "text"
+                    },
+                    {
+                      "key": "phone_number",
+                      "value": "9988776655",
+                      "type": "text"
+                    },
+                    {
+                      "key": "auto_lock",
+                      "value": "true",
+                      "type": "text"
+                    },
+                    {
+                      "key": "profile_photo",
+                      "type": "file",
+                      "src": []
+                    },
+                    {
+                      "key": "aadhaar_doc",
+                      "type": "file",
+                      "src": []
+                    }
+                  ]
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"request_id\": \"1987b2c7984a2b2a3afd1268f8b9a774\",\n  \"data\": {\n    \"id\": 1202,\n    \"customer_name\": \"Suresh Patel\",\n    \"phone_number\": \"9988776655\",\n    \"alternate_phone\": null,\n    \"aadhaar_number\": null,\n    \"pan_number\": null,\n    \"passbook_number\": null,\n    \"address_text\": null,\n    \"auto_lock\": true,\n    \"auto_reminder\": false,\n    \"is_active\": true,\n    \"documents\": {\n      \"profile_photo\": \"https://{DOMAIN}/uploads/documents/profile_501_1793614447_ce5bcaf1ee2876a4.png\",\n      \"aadhaar_doc\": \"https://{DOMAIN}/uploads/documents/aadhaar_501_1793614447_c9bc5dfd1f61e19f.png\",\n      \"pan_doc\": null,\n      \"passbook_doc\": null,\n      \"address_doc\": null\n    },\n    \"created_at\": \"2026-11-02T15:44:07+05:30\",\n    \"device_count\": 0\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "5.4 Get one customer",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/customers/{{customer_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "customers",
+                "{{customer_id}}"
+              ]
+            },
+            "description": "You need: customer_id (from 5.1 or 5.3)."
+          },
+          "response": [
+            {
+              "name": "200 OK \u2014 real example",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/v1/customers/{{customer_id}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "customers",
+                    "{{customer_id}}"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"request_id\": \"e87bf9af762a8e0f2c1bde2ef2aa859d\",\n  \"data\": {\n    \"id\": 1201,\n    \"customer_name\": \"Ramesh Kumar\",\n    \"phone_number\": \"9876543210\",\n    \"alternate_phone\": \"9123456789\",\n    \"aadhaar_number\": \"234567890123\",\n    \"pan_number\": \"ABCDE1234F\",\n    \"passbook_number\": null,\n    \"address_text\": \"12, Shanti Nagar, Satellite, Ahmedabad\",\n    \"auto_lock\": true,\n    \"auto_reminder\": true,\n    \"is_active\": true,\n    \"documents\": {\n      \"profile_photo\": null,\n      \"aadhaar_doc\": null,\n      \"pan_doc\": null,\n      \"passbook_doc\": null,\n      \"address_doc\": null\n    },\n    \"created_at\": \"2026-11-02T15:44:07+05:30\",\n    \"device_count\": 0\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "5.5 Update a customer",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/customers/{{customer_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "customers",
+                "{{customer_id}}"
+              ]
+            },
+            "description": "Send only the fields to change. You need: customer_id.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_name\": \"Ramesh K. Patel\",\n  \"auto_lock\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK \u2014 real example",
+              "originalRequest": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/v1/customers/{{customer_id}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "customers",
+                    "{{customer_id}}"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"customer_name\": \"Ramesh K. Patel\",\n  \"auto_lock\": false\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"request_id\": \"e65671ec545904bb42f42f52b732b1b5\",\n  \"data\": {\n    \"id\": 1201,\n    \"customer_name\": \"Ramesh K. Patel\",\n    \"phone_number\": \"9876543210\",\n    \"alternate_phone\": \"9123400000\",\n    \"aadhaar_number\": \"234567890123\",\n    \"pan_number\": \"ABCDE1234F\",\n    \"passbook_number\": null,\n    \"address_text\": \"12, Shanti Nagar, Satellite, Ahmedabad\",\n    \"auto_lock\": true,\n    \"auto_reminder\": false,\n    \"is_active\": true,\n    \"documents\": {\n      \"profile_photo\": null,\n      \"aadhaar_doc\": null,\n      \"pan_doc\": null,\n      \"passbook_doc\": null,\n      \"address_doc\": null\n    },\n    \"created_at\": \"2026-11-02T15:44:07+05:30\",\n    \"updated_fields\": [\n      \"customer_name\",\n      \"alternate_phone\",\n      \"auto_reminder\"\n    ]\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "5.6 Upload or replace documents",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/customers/{{customer_id}}/documents",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "customers",
+                "{{customer_id}}",
+                "documents"
+              ]
+            },
+            "description": "multipart/form-data \u2014 choose a file before sending. You need: customer_id.",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "pan_doc",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK \u2014 real example",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/v1/customers/{{customer_id}}/documents",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "customers",
+                    "{{customer_id}}",
+                    "documents"
+                  ]
+                },
+                "body": {
+                  "mode": "formdata",
+                  "formdata": [
+                    {
+                      "key": "pan_doc",
+                      "type": "file",
+                      "src": []
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"request_id\": \"28cffd8438a776220f67105ad4402f61\",\n  \"data\": {\n    \"id\": 1201,\n    \"customer_name\": \"Ramesh K. Patel\",\n    \"phone_number\": \"9876543210\",\n    \"alternate_phone\": \"9123400000\",\n    \"aadhaar_number\": \"234567890123\",\n    \"pan_number\": \"ABCDE1234F\",\n    \"passbook_number\": null,\n    \"address_text\": \"12, Shanti Nagar, Satellite, Ahmedabad\",\n    \"auto_lock\": true,\n    \"auto_reminder\": false,\n    \"is_active\": true,\n    \"documents\": {\n      \"profile_photo\": null,\n      \"aadhaar_doc\": null,\n      \"pan_doc\": \"https://{DOMAIN}/uploads/documents/pan_501_1793614447_ad08cffea1ec7f81.png\",\n      \"passbook_doc\": null,\n      \"address_doc\": null\n    },\n    \"created_at\": \"2026-11-02T15:44:07+05:30\",\n    \"uploaded\": [\n      \"pan_doc\"\n    ]\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "5.7 Phones of a customer",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/customers/{{customer_id}}/devices",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "customers",
+                "{{customer_id}}",
+                "devices"
+              ]
+            },
+            "description": "You need: customer_id."
+          },
+          "response": [
+            {
+              "name": "200 OK \u2014 real example",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/v1/customers/{{customer_id}}/devices",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "customers",
+                    "{{customer_id}}",
+                    "devices"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"request_id\": \"ecb5fb065df9cc9860c61633ebb0dc7c\",\n  \"data\": [\n    {\n      \"id\": 3501,\n      \"customer_id\": 1201,\n      \"customer_name\": \"Ramesh K. Patel\",\n      \"phone_number\": \"9876543210\",\n      \"brand\": \"Samsung\",\n      \"model\": \"Galaxy A15 5G\",\n      \"manufacturer\": null,\n      \"imei1\": \"356938035643809\",\n      \"imei2\": \"356938035643817\",\n      \"sim1\": null,\n      \"sim2\": null,\n      \"device_type\": \"new\",\n      \"finance\": \"In-house\",\n      \"status\": {\n        \"is_enrolled\": false,\n        \"enrolled_at\": null,\n        \"is_online\": false,\n        \"is_locked\": false,\n        \"is_removed\": false\n      },\n      \"loan\": {\n        \"device_price\": 15999,\n        \"processing_fee\": 499,\n        \"down_payment\": 3999,\n        \"number_of_emi\": 6,\n        \"interest_rate\": 0,\n        \"monthly_emi\": 2100,\n        \"first_emi_date\": \"2026-12-05\",\n        \"payment_type\": \"manual\",\n        \"pending_emis\": 6,\n        \"is_loan_active\": true\n      },\n      \"policy\": {\n        \"lock_device\": false,\n        \"camera_enabled\": false,\n        \"calls_enabled\": false,\n        \"social_apps_enabled\": false,\n        \"wifi_enabled\": false,\n        \"mobile_data_enabled\": false,\n        \"usb_debugging_enabled\": false,\n        \"offline_lock\": false,\n        \"factory_reset_enabled\": true,\n        \"get_sim_info\": false,\n        \"get_location\": false,\n        \"set_wallpaper\": false,\n        \"hide_application\": false,\n        \"screen_lock_enabled\": false\n      },\n      \"location\": null,\n      \"created_at\": \"2026-11-02T15:44:07+05:30\",\n      \"updated_at\": \"2026-11-02T15:44:07+05:30\"\n    }\n  ],\n  \"meta\": {\n    \"page\": 1,\n    \"limit\": 20,\n    \"total\": 1,\n    \"total_pages\": 1\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Devices (customer phones)",
+      "item": [
+        {
+          "name": "6.5 List phones",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/devices?status=active&search=&page=1&limit=20",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "devices"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "active"
+                },
+                {
+                  "key": "search",
+                  "value": ""
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Your phones. Each data[].id is a device_id."
+          },
+          "response": [
+            {
+              "name": "200 OK \u2014 real example",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/v1/devices?status=active&search=&page=1&limit=20",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "devices"
+                  ],
+                  "query": [
+                    {
+                      "key": "status",
+                      "value": "active"
+                    },
+                    {
+                      "key": "search",
+                      "value": ""
+                    },
+                    {
+                      "key": "page",
+                      "value": "1"
+                    },
+                    {
+                      "key": "limit",
+                      "value": "20"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"request_id\": \"507d936f9694135f3ae0378248b4f026\",\n  \"data\": [\n    {\n      \"id\": 3502,\n      \"customer_id\": 1202,\n      \"customer_name\": \"Suresh Patel\",\n      \"phone_number\": \"9988776655\",\n      \"brand\": \"Vivo\",\n      \"model\": \"Y28\",\n      \"manufacturer\": null,\n      \"imei1\": \"490154203237518\",\n      \"imei2\": null,\n      \"sim1\": null,\n      \"sim2\": null,\n      \"device_type\": \"new\",\n      \"finance\": \"In-house\",\n      \"status\": {\n        \"is_enrolled\": false,\n        \"enrolled_at\": null,\n        \"is_online\": false,\n        \"is_locked\": false,\n        \"is_removed\": false\n      },\n      \"loan\": {\n        \"device_price\": 12999,\n        \"processing_fee\": 499,\n        \"down_payment\": 2999,\n        \"number_of_emi\": 6,\n        \"interest_rate\": 0,\n        \"monthly_emi\": 1700,\n        \"first_emi_date\": \"2026-12-05\",\n        \"payment_type\": \"manual\",\n        \"pending_emis\": 6,\n        \"is_loan_active\": true\n      },\n      \"policy\": {\n        \"lock_device\": false,\n        \"camera_enabled\": false,\n        \"calls_enabled\": false,\n        \"social_apps_enabled\": false,\n        \"wifi_enabled\": false,\n        \"mobile_data_enabled\": false,\n        \"usb_debugging_enabled\": false,\n        \"offline_lock\": false,\n        \"factory_reset_enabled\": true,\n        \"get_sim_info\": false,\n        \"get_location\": false,\n        \"set_wallpaper\": false,\n        \"hide_application\": false,\n        \"screen_lock_enabled\": false\n      },\n      \"location\": null,\n      \"created_at\": \"2026-11-02T15:44:07+05:30\",\n      \"updated_at\": \"2026-11-02T15:44:07+05:30\"\n    },\n    {\n      \"id\": 3501,\n      \"customer_id\": 1201,\n      \"customer_name\": \"Ramesh K. Patel\",\n      \"phone_number\": \"9876543210\",\n      \"brand\": \"Samsung\",\n      \"model\": \"Galaxy A15\",\n      \"manufacturer\": null,\n      \"imei1\": \"356938035643809\",\n      \"imei2\": \"356938035643817\",\n      \"sim1\": null,\n      \"sim2\": null,\n      \"device_type\": \"new\",\n      \"finance\": \"In-house\",\n      \"status\": {\n        \"is_enrolled\": false,\n        \"enrolled_at\": null,\n        \"is_online\": false,\n        \"is_locked\": false,\n        \"is_removed\": false\n      },\n      \"loan\": {\n        \"device_price\": 15999,\n        \"processing_fee\": 499,\n        \"down_payment\": 3999,\n        \"number_of_emi\": 6,\n        \"interest_rate\": 0,\n        \"monthly_emi\": 2000,\n        \"first_emi_date\": \"2026-12-05\",\n        \"payment_type\": \"manual\",\n        \"pending_emis\": 6,\n        \"is_loan_active\": true\n      },\n      \"policy\": {\n        \"lock_device\": false,\n        \"camera_enabled\": false,\n        \"calls_enabled\": false,\n        \"social_apps_enabled\": false,\n        \"wifi_enabled\": false,\n        \"mobile_data_enabled\": false,\n        \"usb_debugging_enabled\": false,\n        \"offline_lock\": false,\n        \"factory_reset_enabled\": true,\n        \"get_sim_info\": false,\n        \"get_location\": false,\n        \"set_wallpaper\": false,\n        \"hide_application\": false,\n        \"screen_lock_enabled\": false\n      },\n      \"location\": null,\n      \"created_at\": \"2026-11-02T15:44:07+05:30\",\n      \"updated_at\": \"2026-11-02T15:44:07+05:30\"\n    }\n  ],\n  \"meta\": {\n    \"page\": 1,\n    \"limit\": 20,\n    \"total\": 2,\n    \"total_pages\": 1\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "6.1 Register a phone (EMI loan)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/devices",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "devices"
+              ]
+            },
+            "description": "Registers the customer's phone and creates the EMI schedule (uses 1 key). data.device.id is the device_id (saved automatically). You need: customer_id in the body.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_id\": \"{{customer_id}}\",\n  \"brand\": \"Samsung\",\n  \"model\": \"Galaxy A15\",\n  \"imei1\": \"356938035643809\",\n  \"imei2\": \"356938035643817\",\n  \"device_type\": \"new\",\n  \"finance\": \"In-house\",\n  \"device_price\": 15999,\n  \"processing_fee\": 499,\n  \"down_payment\": 3999,\n  \"number_of_emi\": 6,\n  \"interest_rate\": 0,\n  \"monthly_emi\": 2000,\n  \"first_emi_date\": \"2026-12-05\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "if (j.success) pm.collectionVariables.set('device_id', j.data.device.id);"
+                ]
+              }
+            }
+          ],
+          "response": [
+            {
+              "name": "201 Created \u2014 real example",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/v1/devices",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "devices"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"customer_id\": \"{{customer_id}}\",\n  \"brand\": \"Samsung\",\n  \"model\": \"Galaxy A15\",\n  \"imei1\": \"356938035643809\",\n  \"imei2\": \"356938035643817\",\n  \"device_type\": \"new\",\n  \"finance\": \"In-house\",\n  \"device_price\": 15999,\n  \"processing_fee\": 499,\n  \"down_payment\": 3999,\n  \"number_of_emi\": 6,\n  \"interest_rate\": 0,\n  \"monthly_emi\": 2000,\n  \"first_emi_date\": \"2026-12-05\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"request_id\": \"b1217af68d9cc930a19abd07465264db\",\n  \"data\": {\n    \"device\": {\n      \"id\": 3501,\n      \"customer_id\": 1201,\n      \"customer_name\": \"Ramesh K. Patel\",\n      \"phone_number\": \"9876543210\",\n      \"brand\": \"Samsung\",\n      \"model\": \"Galaxy A15\",\n      \"manufacturer\": null,\n      \"imei1\": \"356938035643809\",\n      \"imei2\": \"356938035643817\",\n      \"sim1\": null,\n      \"sim2\": null,\n      \"device_type\": \"new\",\n      \"finance\": \"In-house\",\n      \"status\": {\n        \"is_enrolled\": false,\n        \"enrolled_at\": null,\n        \"is_online\": false,\n        \"is_locked\": false,\n        \"is_removed\": false\n      },\n      \"loan\": {\n        \"device_price\": 15999,\n        \"processing_fee\": 499,\n        \"down_payment\": 3999,\n        \"number_of_emi\": 6,\n        \"interest_rate\": 0,\n        \"monthly_emi\": 2000,\n        \"first_emi_date\": \"2026-12-05\",\n        \"payment_type\": \"manual\",\n        \"pending_emis\": 6,\n        \"is_loan_active\": true\n      },\n      \"policy\": {\n        \"lock_device\": false,\n        \"camera_enabled\": false,\n        \"calls_enabled\": false,\n        \"social_apps_enabled\": false,\n        \"wifi_enabled\": false,\n        \"mobile_data_enabled\": false,\n        \"usb_debugging_enabled\": false,\n        \"offline_lock\": false,\n        \"factory_reset_enabled\": true,\n        \"get_sim_info\": false,\n        \"get_location\": false,\n        \"set_wallpaper\": false,\n        \"hide_application\": false,\n        \"screen_lock_enabled\": false\n      },\n      \"location\": null,\n      \"created_at\": \"2026-11-02T15:44:07+05:30\",\n      \"updated_at\": \"2026-11-02T15:44:07+05:30\"\n    },\n    \"keys_used\": 1,\n    \"enrollment\": {\n      \"qr_url\": \"https://{DOMAIN}/QR/image.png\",\n      \"instructions\": \"Provision the phone by scanning this QR code during device setup. The device becomes \\\"enrolled\\\" (status.is_enrolled = true) automatically once the app registers with the server.\"\n    }\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "6.4 Find a phone by IMEI",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/devices/lookup?imei=356938035643809",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "devices",
+                "lookup"
+              ],
+              "query": [
+                {
+                  "key": "imei",
+                  "value": "356938035643809"
+                }
+              ]
+            },
+            "description": "When you only know the IMEI. data.id is the device_id."
+          },
+          "response": [
+            {
+              "name": "200 OK \u2014 real example",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/v1/devices/lookup?imei=356938035643809",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "devices",
+                    "lookup"
+                  ],
+                  "query": [
+                    {
+                      "key": "imei",
+                      "value": "356938035643809"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"request_id\": \"7bd3ad5f3d881a6e0a5c3dd140bf2a55\",\n  \"data\": {\n    \"id\": 3501,\n    \"customer_id\": 1201,\n    \"customer_name\": \"Ramesh K. Patel\",\n    \"phone_number\": \"9876543210\",\n    \"brand\": \"Samsung\",\n    \"model\": \"Galaxy A15\",\n    \"manufacturer\": null,\n    \"imei1\": \"356938035643809\",\n    \"imei2\": \"356938035643817\",\n    \"sim1\": null,\n    \"sim2\": null,\n    \"device_type\": \"new\",\n    \"finance\": \"In-house\",\n    \"status\": {\n      \"is_enrolled\": false,\n      \"enrolled_at\": null,\n      \"is_online\": false,\n      \"is_locked\": false,\n      \"is_removed\": false\n    },\n    \"loan\": {\n      \"device_price\": 15999,\n      \"processing_fee\": 499,\n      \"down_payment\": 3999,\n      \"number_of_emi\": 6,\n      \"interest_rate\": 0,\n      \"monthly_emi\": 2000,\n      \"first_emi_date\": \"2026-12-05\",\n      \"payment_type\": \"manual\",\n      \"pending_emis\": 6,\n      \"is_loan_active\": true\n    },\n    \"policy\": {\n      \"lock_device\": false,\n      \"camera_enabled\": false,\n      \"calls_enabled\": false,\n      \"social_apps_enabled\": false,\n      \"wifi_enabled\": false,\n      \"mobile_data_enabled\": false,\n      \"usb_debugging_enabled\": false,\n      \"offline_lock\": false,\n      \"factory_reset_enabled\": true,\n      \"get_sim_info\": false,\n      \"get_location\": false,\n      \"set_wallpaper\": false,\n      \"hide_application\": false,\n      \"screen_lock_enabled\": false\n    },\n    \"location\": null,\n    \"created_at\": \"2026-11-02T15:44:07+05:30\",\n    \"updated_at\": \"2026-11-02T15:44:07+05:30\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "6.3 Get one phone",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/devices/{{device_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "devices",
+                "{{device_id}}"
+              ]
+            },
+            "description": "You need: device_id (from 6.1, 6.4 or 6.5)."
+          },
+          "response": [
+            {
+              "name": "200 OK \u2014 real example",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/v1/devices/{{device_id}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "devices",
+                    "{{device_id}}"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"request_id\": \"5d501732e265f6218b8fc127ca66c352\",\n  \"data\": {\n    \"id\": 3501,\n    \"customer_id\": 1201,\n    \"customer_name\": \"Ramesh K. Patel\",\n    \"phone_number\": \"9876543210\",\n    \"brand\": \"Samsung\",\n    \"model\": \"Galaxy A15 5G\",\n    \"manufacturer\": \"samsung\",\n    \"imei1\": \"356938035643809\",\n    \"imei2\": \"356938035643817\",\n    \"sim1\": \"9876543210\",\n    \"sim2\": null,\n    \"device_type\": \"new\",\n    \"finance\": \"In-house\",\n    \"status\": {\n      \"is_enrolled\": true,\n      \"enrolled_at\": \"2026-11-02T10:14:07+05:30\",\n      \"is_online\": true,\n      \"is_locked\": false,\n      \"is_removed\": false\n    },\n    \"loan\": {\n      \"device_price\": 15999,\n      \"processing_fee\": 499,\n      \"down_payment\": 3999,\n      \"number_of_emi\": 6,\n      \"interest_rate\": 0,\n      \"monthly_emi\": 2100,\n      \"first_emi_date\": \"2026-12-05\",\n      \"payment_type\": \"manual\",\n      \"pending_emis\": 5,\n      \"is_loan_active\": true\n    },\n    \"policy\": {\n      \"lock_device\": false,\n      \"camera_enabled\": false,\n      \"calls_enabled\": false,\n      \"social_apps_enabled\": false,\n      \"wifi_enabled\": false,\n      \"mobile_data_enabled\": false,\n      \"usb_debugging_enabled\": false,\n      \"offline_lock\": false,\n      \"factory_reset_enabled\": true,\n      \"get_sim_info\": false,\n      \"get_location\": false,\n      \"set_wallpaper\": false,\n      \"hide_application\": false,\n      \"screen_lock_enabled\": false\n    },\n    \"location\": null,\n    \"created_at\": \"2026-11-02T15:44:07+05:30\",\n    \"updated_at\": \"2026-11-02T15:44:07+05:30\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "6.6 Update a phone / EMI plan",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/devices/{{device_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "devices",
+                "{{device_id}}"
+              ]
+            },
+            "description": "Send only the fields to change. EMI changes are only allowed before any EMI is paid. You need: device_id.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"model\": \"Galaxy A15 5G\",\n  \"monthly_emi\": 2100\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK \u2014 real example",
+              "originalRequest": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/v1/devices/{{device_id}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "devices",
+                    "{{device_id}}"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"model\": \"Galaxy A15 5G\",\n  \"monthly_emi\": 2100\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"request_id\": \"4b588adeaf5ff94aa160d95e4480ded3\",\n  \"data\": {\n    \"device\": {\n      \"id\": 3501,\n      \"customer_id\": 1201,\n      \"customer_name\": \"Ramesh K. Patel\",\n      \"phone_number\": \"9876543210\",\n      \"brand\": \"Samsung\",\n      \"model\": \"Galaxy A15 5G\",\n      \"manufacturer\": null,\n      \"imei1\": \"356938035643809\",\n      \"imei2\": \"356938035643817\",\n      \"sim1\": null,\n      \"sim2\": null,\n      \"device_type\": \"new\",\n      \"finance\": \"In-house\",\n      \"status\": {\n        \"is_enrolled\": false,\n        \"enrolled_at\": null,\n        \"is_online\": false,\n        \"is_locked\": false,\n        \"is_removed\": false\n      },\n      \"loan\": {\n        \"device_price\": 15999,\n        \"processing_fee\": 499,\n        \"down_payment\": 3999,\n        \"number_of_emi\": 6,\n        \"interest_rate\": 0,\n        \"monthly_emi\": 2100,\n        \"first_emi_date\": \"2026-12-05\",\n        \"payment_type\": \"manual\",\n        \"pending_emis\": 6,\n        \"is_loan_active\": true\n      },\n      \"policy\": {\n        \"lock_device\": false,\n        \"camera_enabled\": false,\n        \"calls_enabled\": false,\n        \"social_apps_enabled\": false,\n        \"wifi_enabled\": false,\n        \"mobile_data_enabled\": false,\n        \"usb_debugging_enabled\": false,\n        \"offline_lock\": false,\n        \"factory_reset_enabled\": true,\n        \"get_sim_info\": false,\n        \"get_location\": false,\n        \"set_wallpaper\": false,\n        \"hide_application\": false,\n        \"screen_lock_enabled\": false\n      },\n      \"location\": null,\n      \"created_at\": \"2026-11-02T15:44:07+05:30\",\n      \"updated_at\": \"2026-11-02T15:44:07+05:30\"\n    },\n    \"updated_fields\": [\n      \"model\",\n      \"monthly_emi\"\n    ],\n    \"emi_schedule_regenerated\": true\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "EMI",
+      "item": [
+        {
+          "name": "7.1 EMI schedule",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/devices/{{device_id}}/emis",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "devices",
+                "{{device_id}}",
+                "emis"
+              ]
+            },
+            "description": "All EMIs of the phone. data.summary.next_due.emi_id (saved automatically) is the next EMI to pay. You need: device_id."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j = pm.response.json();",
+                  "if (j.success && j.data.summary.next_due) pm.collectionVariables.set('emi_id', j.data.summary.next_due.emi_id);"
+                ]
+              }
+            }
+          ],
+          "response": [
+            {
+              "name": "200 OK \u2014 real example",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/v1/devices/{{device_id}}/emis",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "devices",
+                    "{{device_id}}",
+                    "emis"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"request_id\": \"db8833d4ea0ccea5f1de7214a5528ee9\",\n  \"data\": {\n    \"device_id\": 3501,\n    \"summary\": {\n      \"total_emis\": 6,\n      \"paid_emis\": 0,\n      \"pending_emis\": 6,\n      \"overdue_emis\": 0,\n      \"total_amount\": 12600,\n      \"paid_amount\": 0,\n      \"pending_amount\": 12600,\n      \"next_due\": {\n        \"emi_id\": 90013,\n        \"emi_no\": 1,\n        \"due_date\": \"2026-12-05\",\n        \"amount\": 2100\n      }\n    },\n    \"emis\": [\n      {\n        \"id\": 90013,\n        \"emi_no\": 1,\n        \"due_date\": \"2026-12-05\",\n        \"amount\": 2100,\n        \"status\": \"pending\",\n        \"paid_date\": null,\n        \"mode\": null\n      },\n      {\n        \"id\": 90014,\n        \"emi_no\": 2,\n        \"due_date\": \"2027-01-05\",\n        \"amount\": 2100,\n        \"status\": \"pending\",\n        \"paid_date\": null,\n        \"mode\": null\n      },\n      {\n        \"id\": 90015,\n        \"emi_no\": 3,\n        \"due_date\": \"2027-02-05\",\n        \"amount\": 2100,\n        \"status\": \"pending\",\n        \"paid_date\": null,\n        \"mode\": null\n      },\n      {\n        \"id\": 90016,\n        \"emi_no\": 4,\n        \"due_date\": \"2027-03-05\",\n        \"amount\": 2100,\n        \"status\": \"pending\",\n        \"paid_date\": null,\n        \"mode\": null\n      },\n      {\n        \"id\": 90017,\n        \"emi_no\": 5,\n        \"due_date\": \"2027-04-05\",\n        \"amount\": 2100,\n        \"status\": \"pending\",\n        \"paid_date\": null,\n        \"mode\": null\n      },\n      {\n        \"id\": 90018,\n        \"emi_no\": 6,\n        \"due_date\": \"2027-05-05\",\n        \"amount\": 2100,\n        \"status\": \"pending\",\n        \"paid_date\": null,\n        \"mode\": null\n      }\n    ]\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "7.2 Mark an EMI as paid",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/devices/{{device_id}}/emis/{{emi_id}}/pay",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "devices",
+                "{{device_id}}",
+                "emis",
+                "{{emi_id}}",
+                "pay"
+              ]
+            },
+            "description": "EMIs must be paid in order. You need: device_id and emi_id (from 7.1).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mode\": \"upi\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK \u2014 real example",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/v1/devices/{{device_id}}/emis/{{emi_id}}/pay",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "devices",
+                    "{{device_id}}",
+                    "emis",
+                    "{{emi_id}}",
+                    "pay"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"mode\": \"upi\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"request_id\": \"1582b0ecc084ac7df0b09643b07ba361\",\n  \"data\": {\n    \"emi_id\": 90013,\n    \"emi_no\": 1,\n    \"amount\": 2100,\n    \"status\": \"paid\",\n    \"paid_date\": \"2026-11-02\",\n    \"mode\": \"upi\",\n    \"remaining_emis\": 5,\n    \"loan_closed\": false,\n    \"device_locked\": false\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Control a phone",
+      "item": [
+        {
+          "name": "8.1 Current restrictions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/devices/{{device_id}}/policy",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "devices",
+                "{{device_id}}",
+                "policy"
+              ]
+            },
+            "description": "You need: device_id."
+          },
+          "response": [
+            {
+              "name": "200 OK \u2014 real example",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/v1/devices/{{device_id}}/policy",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "devices",
+                    "{{device_id}}",
+                    "policy"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"request_id\": \"578258e9dd18aa25f9efa2465b78d098\",\n  \"data\": {\n    \"device_id\": 3501,\n    \"imei\": \"356938035643809\",\n    \"policy\": {\n      \"lock_device\": false,\n      \"camera_enabled\": false,\n      \"calls_enabled\": false,\n      \"social_apps_enabled\": false,\n      \"wifi_enabled\": false,\n      \"mobile_data_enabled\": false,\n      \"usb_debugging_enabled\": false,\n      \"offline_lock\": false,\n      \"factory_reset_enabled\": true,\n      \"get_sim_info\": false,\n      \"get_location\": false,\n      \"set_wallpaper\": false,\n      \"hide_application\": false,\n      \"screen_lock_enabled\": false\n    }\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "8.2 Lock the phone",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/devices/{{device_id}}/lock",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "devices",
+                "{{device_id}}",
+                "lock"
+              ]
+            },
+            "description": "You need: device_id. Follow the confirmation with 8.15 (command_id)."
+          },
+          "response": [
+            {
+              "name": "202 Accepted \u2014 real example",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/v1/devices/{{device_id}}/lock",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "devices",
+                    "{{device_id}}",
+                    "lock"
+                  ]
+                }
+              },
+              "status": "Accepted",
+              "code": 202,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"request_id\": \"301ad89625554d769eac12e5a81769cb\",\n  \"data\": {\n    \"device_id\": 3501,\n    \"imei\": \"356938035643809\",\n    \"action\": \"device.lock\",\n    \"command_id\": 23001,\n    \"command_status\": \"pending\",\n    \"delivery\": {\n      \"delivered_live\": null,\n      \"push_sent\": true,\n      \"queued_until_online\": true\n    },\n    \"policy\": {\n      \"lock_device\": true,\n      \"camera_enabled\": false,\n      \"calls_enabled\": false,\n      \"social_apps_enabled\": false,\n      \"wifi_enabled\": false,\n      \"mobile_data_enabled\": false,\n      \"usb_debugging_enabled\": false,\n      \"offline_lock\": false,\n      \"factory_reset_enabled\": true,\n      \"get_sim_info\": false,\n      \"get_location\": false,\n      \"set_wallpaper\": false,\n      \"hide_application\": false,\n      \"screen_lock_enabled\": false\n    },\n    \"message\": \"Command accepted. The device applies it instantly if online, otherwise as soon as it reconnects. Track it with GET /v1/devices/3501/commands.\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "8.3 Unlock the phone",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/devices/{{device_id}}/unlock",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "devices",
+                "{{device_id}}",
+                "unlock"
+              ]
+            },
+            "description": "You need: device_id."
+          },
+          "response": [
+            {
+              "name": "202 Accepted \u2014 real example",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/v1/devices/{{device_id}}/unlock",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "devices",
+                    "{{device_id}}",
+                    "unlock"
+                  ]
+                }
+              },
+              "status": "Accepted",
+              "code": 202,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"request_id\": \"d2582a61ab8609d6a856ebadcd77a404\",\n  \"data\": {\n    \"device_id\": 3501,\n    \"imei\": \"356938035643809\",\n    \"action\": \"device.unlock\",\n    \"command_id\": 23002,\n    \"command_status\": \"pending\",\n    \"delivery\": {\n      \"delivered_live\": null,\n      \"push_sent\": true,\n      \"queued_until_online\": true\n    },\n    \"policy\": {\n      \"lock_device\": false,\n      \"camera_enabled\": false,\n      \"calls_enabled\": false,\n      \"social_apps_enabled\": false,\n      \"wifi_enabled\": false,\n      \"mobile_data_enabled\": false,\n      \"usb_debugging_enabled\": false,\n      \"offline_lock\": false,\n      \"factory_reset_enabled\": true,\n      \"get_sim_info\": false,\n      \"get_location\": false,\n      \"set_wallpaper\": false,\n      \"hide_application\": false,\n      \"screen_lock_enabled\": false\n    },\n    \"message\": \"Command accepted. The device applies it instantly if online, otherwise as soon as it reconnects. Track it with GET /v1/devices/3501/commands.\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "8.4 Change restrictions",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/devices/{{device_id}}/policy",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "devices",
+                "{{device_id}}",
+                "policy"
+              ]
+            },
+            "description": "Send only the flags to change. You need: device_id.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"camera_enabled\": false,\n  \"social_apps_enabled\": false,\n  \"get_location\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "202 Accepted \u2014 real example",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/v1/devices/{{device_id}}/policy",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "devices",
+                    "{{device_id}}",
+                    "policy"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"camera_enabled\": false,\n  \"social_apps_enabled\": false,\n  \"get_location\": true\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Accepted",
+              "code": 202,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"request_id\": \"49b27abeb663b98941e3b35db1f78226\",\n  \"data\": {\n    \"device_id\": 3501,\n    \"imei\": \"356938035643809\",\n    \"action\": \"device.policy\",\n    \"command_id\": 23003,\n    \"command_status\": \"pending\",\n    \"delivery\": {\n      \"delivered_live\": null,\n      \"push_sent\": true,\n      \"queued_until_online\": true\n    },\n    \"policy\": {\n      \"lock_device\": false,\n      \"camera_enabled\": false,\n      \"calls_enabled\": false,\n      \"social_apps_enabled\": false,\n      \"wifi_enabled\": false,\n      \"mobile_data_enabled\": false,\n      \"usb_debugging_enabled\": false,\n      \"offline_lock\": false,\n      \"factory_reset_enabled\": true,\n      \"get_sim_info\": false,\n      \"get_location\": true,\n      \"set_wallpaper\": false,\n      \"hide_application\": false,\n      \"screen_lock_enabled\": false\n    },\n    \"message\": \"Command accepted. The device applies it instantly if online, otherwise as soon as it reconnects. Track it with GET /v1/devices/3501/commands.\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "8.5 Ask for the current location",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/devices/{{device_id}}/location/refresh",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "devices",
+                "{{device_id}}",
+                "location",
+                "refresh"
+              ]
+            },
+            "description": "Then read it with 8.6 after 30-60 seconds. You need: device_id."
+          },
+          "response": [
+            {
+              "name": "202 Accepted \u2014 real example",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/v1/devices/{{device_id}}/location/refresh",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "devices",
+                    "{{device_id}}",
+                    "location",
+                    "refresh"
+                  ]
+                }
+              },
+              "status": "Accepted",
+              "code": 202,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"request_id\": \"ef15d905ad69b8e58c7a70d06dc65e42\",\n  \"data\": {\n    \"device_id\": 3501,\n    \"imei\": \"356938035643809\",\n    \"action\": \"device.location.refresh\",\n    \"delivery\": {\n      \"delivered_live\": false,\n      \"push_sent\": true\n    },\n    \"message\": \"Location request sent. Poll GET /v1/devices/3501/location in 30-60 seconds.\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "8.6 Last known location",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/devices/{{device_id}}/location",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "devices",
+                "{{device_id}}",
+                "location"
+              ]
+            },
+            "description": "You need: device_id."
+          },
+          "response": [
+            {
+              "name": "200 OK \u2014 real example",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/v1/devices/{{device_id}}/location",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "devices",
+                    "{{device_id}}",
+                    "location"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"request_id\": \"fbca1fff0cb25a0724e4b025a86123d5\",\n  \"data\": {\n    \"device_id\": 3501,\n    \"available\": true,\n    \"latitude\": 23.0225,\n    \"longitude\": 72.5714,\n    \"location_timestamp\": \"1793614447394\",\n    \"location_permission\": true,\n    \"maps_url\": \"https://maps.google.com/?q=23.022500,72.571400\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "8.7 Reboot",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/devices/{{device_id}}/reboot",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "devices",
+                "{{device_id}}",
+                "reboot"
+              ]
+            },
+            "description": "You need: device_id."
+          },
+          "response": [
+            {
+              "name": "202 Accepted \u2014 real example",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/v1/devices/{{device_id}}/reboot",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "devices",
+                    "{{device_id}}",
+                    "reboot"
+                  ]
+                }
+              },
+              "status": "Accepted",
+              "code": 202,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"request_id\": \"05a0d8469f7b19ecd7d63f038696bf96\",\n  \"data\": {\n    \"device_id\": 3501,\n    \"imei\": \"356938035643809\",\n    \"action\": \"device.reboot\",\n    \"delivery\": {\n      \"delivered_live\": false,\n      \"push_sent\": true\n    },\n    \"message\": \"Reboot command sent.\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "8.8 EMI audio reminder",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/devices/{{device_id}}/audio-reminder",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "devices",
+                "{{device_id}}",
+                "audio-reminder"
+              ]
+            },
+            "description": "You need: device_id."
+          },
+          "response": [
+            {
+              "name": "202 Accepted \u2014 real example",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/v1/devices/{{device_id}}/audio-reminder",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "devices",
+                    "{{device_id}}",
+                    "audio-reminder"
+                  ]
+                }
+              },
+              "status": "Accepted",
+              "code": 202,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"request_id\": \"f1dde5a5b34564c09bd06cad31e3d9ec\",\n  \"data\": {\n    \"device_id\": 3501,\n    \"imei\": \"356938035643809\",\n    \"action\": \"device.audio_reminder\",\n    \"delivery\": {\n      \"delivered_live\": false,\n      \"push_sent\": true\n    },\n    \"message\": \"EMI audio reminder sent.\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "8.9 Send a notification",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/devices/{{device_id}}/notification",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "devices",
+                "{{device_id}}",
+                "notification"
+              ]
+            },
+            "description": "You need: device_id.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"EMI Reminder\",\n  \"message\": \"Your EMI is due. Please pay to avoid lock.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK \u2014 real example",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/v1/devices/{{device_id}}/notification",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "devices",
+                    "{{device_id}}",
+                    "notification"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"title\": \"EMI Reminder\",\n  \"message\": \"Your EMI is due. Please pay to avoid lock.\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"request_id\": \"aafb634e8294f2be0ead0b680ddf8a15\",\n  \"data\": {\n    \"device_id\": 3501,\n    \"imei\": \"356938035643809\",\n    \"action\": \"device.notification\",\n    \"delivery\": {\n      \"delivered_live\": null,\n      \"push_sent\": true\n    },\n    \"message\": \"Notification delivered to the device.\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "8.10 Set the screen-lock PIN",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/devices/{{device_id}}/set-pin",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "devices",
+                "{{device_id}}",
+                "set-pin"
+              ]
+            },
+            "description": "4 to 8 digits. You need: device_id.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pin\": \"4821\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "202 Accepted \u2014 real example",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/v1/devices/{{device_id}}/set-pin",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "devices",
+                    "{{device_id}}",
+                    "set-pin"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"pin\": \"4821\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Accepted",
+              "code": 202,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"request_id\": \"2b69e2d08851d152c5455d9e910b0d9c\",\n  \"data\": {\n    \"device_id\": 3501,\n    \"imei\": \"356938035643809\",\n    \"action\": \"device.set_pin\",\n    \"delivery\": {\n      \"delivered_live\": null,\n      \"push_sent\": true\n    },\n    \"message\": \"Screen-lock PIN command sent.\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "8.11 Accessibility service on / off",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/devices/{{device_id}}/accessibility",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "devices",
+                "{{device_id}}",
+                "accessibility"
+              ]
+            },
+            "description": "You need: device_id.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"enabled\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "202 Accepted \u2014 real example",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/v1/devices/{{device_id}}/accessibility",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "devices",
+                    "{{device_id}}",
+                    "accessibility"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"enabled\": true\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Accepted",
+              "code": 202,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"request_id\": \"69dbdf42a257505116bf3fb850e0241e\",\n  \"data\": {\n    \"device_id\": 3501,\n    \"imei\": \"356938035643809\",\n    \"action\": \"device.accessibility.enable\",\n    \"delivery\": {\n      \"delivered_live\": false,\n      \"push_sent\": true\n    },\n    \"message\": \"Accessibility command sent.\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "8.12 Ping the phone",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/devices/{{device_id}}/ping",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "devices",
+                "{{device_id}}",
+                "ping"
+              ]
+            },
+            "description": "Then check 8.13 after 5-10 seconds. You need: device_id."
+          },
+          "response": [
+            {
+              "name": "202 Accepted \u2014 real example",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/v1/devices/{{device_id}}/ping",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "devices",
+                    "{{device_id}}",
+                    "ping"
+                  ]
+                }
+              },
+              "status": "Accepted",
+              "code": 202,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"request_id\": \"09b61bf6c58da3dee8da85a1492221a3\",\n  \"data\": {\n    \"device_id\": 3501,\n    \"imei\": \"356938035643809\",\n    \"action\": \"device.ping\",\n    \"delivery\": {\n      \"delivered_live\": null,\n      \"push_sent\": true\n    },\n    \"message\": \"Ping sent. Call GET /v1/devices/3501/status after ~5-10 seconds.\",\n    \"ping_sent_at\": \"2026-11-02T15:44:07+05:30\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "8.13 Is the phone reachable?",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/devices/{{device_id}}/status",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "devices",
+                "{{device_id}}",
+                "status"
+              ]
+            },
+            "description": "You need: device_id."
+          },
+          "response": [
+            {
+              "name": "200 OK \u2014 real example",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/v1/devices/{{device_id}}/status",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "devices",
+                    "{{device_id}}",
+                    "status"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"request_id\": \"f6d77648fbb925ef3572bc0b89dbc034\",\n  \"data\": {\n    \"device_id\": 3501,\n    \"imei\": \"356938035643809\",\n    \"is_enrolled\": true,\n    \"is_removed\": false,\n    \"is_locked\": false,\n    \"is_connected\": true,\n    \"last_ping_response\": \"2026-11-02T15:44:07+05:30\",\n    \"responded_to_ping\": true,\n    \"ping_window_seconds\": 30\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "8.14 Offline unlock code",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/devices/{{device_id}}/offline-unlock-code",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "devices",
+                "{{device_id}}",
+                "offline-unlock-code"
+              ]
+            },
+            "description": "6-digit code for a locked phone without internet; changes every 10 minutes. You need: device_id."
+          },
+          "response": [
+            {
+              "name": "200 OK \u2014 real example",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/v1/devices/{{device_id}}/offline-unlock-code",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "devices",
+                    "{{device_id}}",
+                    "offline-unlock-code"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"request_id\": \"aa0fb532b81402450d1c3508ba4efe4f\",\n  \"data\": {\n    \"device_id\": 3501,\n    \"imei\": \"356938035643809\",\n    \"unlock_code\": \"235165\",\n    \"valid_until\": \"2026-11-02T15:50:00+05:30\",\n    \"message\": \"Enter this code on the locked device. It changes every 10 minutes.\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "8.15 Command history",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/devices/{{device_id}}/commands",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "devices",
+                "{{device_id}}",
+                "commands"
+              ]
+            },
+            "description": "Lock / unlock / policy commands and the phone's confirmation. You need: device_id."
+          },
+          "response": [
+            {
+              "name": "200 OK \u2014 real example",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/v1/devices/{{device_id}}/commands",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "devices",
+                    "{{device_id}}",
+                    "commands"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"request_id\": \"9793d54e69c1dcb57c303de6c6ee14ee\",\n  \"data\": [\n    {\n      \"command_id\": 23003,\n      \"command\": {\n        \"camera_enabled\": false,\n        \"social_apps_enabled\": false,\n        \"get_location\": true\n      },\n      \"status\": \"completed\",\n      \"created_at\": \"2026-11-02T15:44:07+05:30\",\n      \"updated_at\": \"2026-11-02T15:44:09+05:30\"\n    },\n    {\n      \"command_id\": 23002,\n      \"command\": {\n        \"lock_device\": false\n      },\n      \"status\": \"completed\",\n      \"created_at\": \"2026-11-02T15:44:07+05:30\",\n      \"updated_at\": \"2026-11-02T15:44:09+05:30\"\n    },\n    {\n      \"command_id\": 23001,\n      \"command\": {\n        \"lock_device\": true\n      },\n      \"status\": \"completed\",\n      \"created_at\": \"2026-11-02T15:44:07+05:30\",\n      \"updated_at\": \"2026-11-02T15:44:09+05:30\"\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "8.16 Activity history",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/devices/{{device_id}}/actions",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "devices",
+                "{{device_id}}",
+                "actions"
+              ]
+            },
+            "description": "Everything done to this phone through the API. You need: device_id."
+          },
+          "response": [
+            {
+              "name": "200 OK \u2014 real example",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/v1/devices/{{device_id}}/actions",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "devices",
+                    "{{device_id}}",
+                    "actions"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"request_id\": \"49cde7c3ef4d5d7f9b53fd0ea1e13d0c\",\n  \"data\": [\n    {\n      \"id\": 15,\n      \"request_id\": \"aa0fb532b81402450d1c3508ba4efe4f\",\n      \"action\": \"device.offline_code\",\n      \"payload\": null,\n      \"result\": \"success\",\n      \"message\": null,\n      \"command_id\": null,\n      \"created_at\": \"2026-11-02T15:44:07+05:30\"\n    },\n    {\n      \"id\": 14,\n      \"request_id\": \"09b61bf6c58da3dee8da85a1492221a3\",\n      \"action\": \"device.ping\",\n      \"payload\": null,\n      \"result\": \"success\",\n      \"message\": null,\n      \"command_id\": null,\n      \"created_at\": \"2026-11-02T15:44:07+05:30\"\n    },\n    {\n      \"id\": 13,\n      \"request_id\": \"69dbdf42a257505116bf3fb850e0241e\",\n      \"action\": \"device.accessibility.enable\",\n      \"payload\": null,\n      \"result\": \"success\",\n      \"message\": null,\n      \"command_id\": null,\n      \"created_at\": \"2026-11-02T15:44:07+05:30\"\n    },\n    {\n      \"id\": 12,\n      \"request_id\": \"2b69e2d08851d152c5455d9e910b0d9c\",\n      \"action\": \"device.set_pin\",\n      \"payload\": {\n        \"type\": \"SET_PIN\",\n        \"pin\": \"***\"\n      },\n      \"result\": \"success\",\n      \"message\": null,\n      \"command_id\": null,\n      \"created_at\": \"2026-11-02T15:44:07+05:30\"\n    },\n    {\n      \"id\": 11,\n      \"request_id\": \"aafb634e8294f2be0ead0b680ddf8a15\",\n      \"action\": \"device.notification\",\n      \"payload\": {\n        \"title\": \"EMI Reminder\",\n        \"message\": \"Your EMI of Rs 2100 is due on 05-Dec. Please pay to avoid a lock.\"\n      },\n      \"result\": \"success\",\n      \"message\": null,\n      \"command_id\": null,\n      \"created_at\": \"2026-11-02T15:44:07+05:30\"\n    },\n    {\n      \"id\": 10,\n      \"request_id\": \"f1dde5a5b34564c09bd06cad31e3d9ec\",\n      \"action\": \"device.audio_reminder\",\n      \"payload\": null,\n      \"result\": \"success\",\n      \"message\": null,\n      \"command_id\": null,\n      \"created_at\": \"2026-11-02T15:44:07+05:30\"\n    },\n    {\n      \"id\": 9,\n      \"request_id\": \"05a0d8469f7b19ecd7d63f038696bf96\",\n      \"action\": \"device.reboot\",\n      \"payload\": null,\n      \"result\": \"success\",\n      \"message\": null,\n      \"command_id\": null,\n      \"created_at\": \"2026-11-02T15:44:07+05:30\"\n    },\n    {\n      \"id\": 8,\n      \"request_id\": \"ef15d905ad69b8e58c7a70d06dc65e42\",\n      \"action\": \"device.location.refresh\",\n      \"payload\": null,\n      \"result\": \"success\",\n      \"message\": null,\n      \"command_id\": null,\n      \"created_at\": \"2026-11-02T15:44:07+05:30\"\n    },\n    {\n      \"id\": 7,\n      \"request_id\": \"49b27abeb663b98941e3b35db1f78226\",\n      \"action\": \"device.policy\",\n      \"payload\": {\n        \"camera_enabled\": false,\n        \"social_apps_enabled\": false,\n        \"get_location\": true\n      },\n      \"result\": \"success\",\n      \"message\": null,\n      \"command_id\": 23003,\n      \"created_at\": \"2026-11-02T15:44:07+05:30\"\n    },\n    {\n      \"id\": 6,\n      \"request_id\": \"d2582a61ab8609d6a856ebadcd77a404\",\n      \"action\": \"device.unlock\",\n      \"payload\": {\n        \"lock_device\": false\n      },\n      \"result\": \"success\",\n      \"message\": null,\n      \"command_id\": 23002,\n      \"created_at\": \"2026-11-02T15:44:07+05:30\"\n    },\n    {\n      \"id\": 5,\n      \"request_id\": \"301ad89625554d769eac12e5a81769cb\",\n      \"action\": \"device.lock\",\n      \"payload\": {\n        \"lock_device\": true\n      },\n      \"result\": \"success\",\n      \"message\": null,\n      \"command_id\": 23001,\n      \"created_at\": \"2026-11-02T15:44:07+05:30\"\n    },\n    {\n      \"id\": 4,\n      \"request_id\": \"1582b0ecc084ac7df0b09643b07ba361\",\n      \"action\": \"emi.pay\",\n      \"payload\": {\n        \"emi_id\": 90013,\n        \"emi_no\": 1,\n        \"mode\": \"upi\"\n      },\n      \"result\": \"success\",\n      \"message\": null,\n      \"command_id\": null,\n      \"created_at\": \"2026-11-02T15:44:07+05:30\"\n    },\n    {\n      \"id\": 3,\n      \"request_id\": \"4b588adeaf5ff94aa160d95e4480ded3\",\n      \"action\": \"device.update\",\n      \"payload\": {\n        \"model\": \"Galaxy A15 5G\",\n        \"monthly_emi\": 2100\n      },\n      \"result\": \"success\",\n      \"message\": null,\n      \"command_id\": null,\n      \"created_at\": \"2026-11-02T15:44:07+05:30\"\n    },\n    {\n      \"id\": 1,\n      \"request_id\": \"b1217af68d9cc930a19abd07465264db\",\n      \"action\": \"device.create\",\n      \"payload\": {\n        \"brand\": \"Samsung\",\n        \"model\": \"Galaxy A15\",\n        \"imei1\": \"356938035643809\",\n        \"imei2\": \"356938035643817\",\n        \"device_type\": \"new\",\n        \"finance\": \"In-house\",\n        \"device_price\": 15999,\n        \"processing_fee\": 499,\n        \"down_payment\": 3999,\n        \"number_of_emi\": 6,\n        \"interest_rate\": 0,\n        \"monthly_emi\": 2000,\n        \"first_emi_date\": \"2026-12-05\"\n      },\n      \"result\": \"success\",\n      \"message\": null,\n      \"command_id\": null,\n      \"created_at\": \"2026-11-02T15:44:07+05:30\"\n    }\n  ]\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Remove, delete & logout (run last)",
+      "item": [
+        {
+          "name": "8.17 Remove the phone (loan closed) \u2014 cannot be undone",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/devices/{{device_id}}/remove",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "devices",
+                "{{device_id}}",
+                "remove"
+              ]
+            },
+            "description": "Releases the phone from control. You need: device_id.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"confirm\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "202 Accepted \u2014 real example",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/v1/devices/{{device_id}}/remove",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "devices",
+                    "{{device_id}}",
+                    "remove"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"confirm\": true\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "Accepted",
+              "code": 202,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"request_id\": \"f237dd11eaaa9a88160e0c122749c592\",\n  \"data\": {\n    \"device_id\": 3501,\n    \"imei\": \"356938035643809\",\n    \"action\": \"device.remove\",\n    \"delivery\": {\n      \"delivered_live\": false,\n      \"push_sent\": null\n    },\n    \"message\": \"Removal requested. When the device confirms, it is released from device management and marked as removed (is_removed = true).\",\n    \"already_pending\": false\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "6.7 Delete a phone (wrong entry)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/devices/{{device_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "devices",
+                "{{device_id}}"
+              ]
+            },
+            "description": "Only before the phone is enrolled; the key is returned. You need: device_id."
+          },
+          "response": [
+            {
+              "name": "200 OK \u2014 real example",
+              "originalRequest": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/v1/devices/{{device_id}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "devices",
+                    "{{device_id}}"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"request_id\": \"11a3113aeaead0e724bd427b7888ddba\",\n  \"data\": {\n    \"id\": 3503,\n    \"deleted\": true,\n    \"keys_refunded\": 1\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "5.8 Delete a customer",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/customers/{{customer_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "customers",
+                "{{customer_id}}"
+              ]
+            },
+            "description": "Not allowed while the customer has an enrolled phone. You need: customer_id."
+          },
+          "response": [
+            {
+              "name": "200 OK \u2014 real example",
+              "originalRequest": {
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/v1/customers/{{customer_id}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "customers",
+                    "{{customer_id}}"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"request_id\": \"9757850fcb5b38687dc3afc202ba25b8\",\n  \"data\": {\n    \"id\": 1202,\n    \"deleted\": true,\n    \"deleted_device_ids\": [\n      3502\n    ],\n    \"keys_refunded\": 1\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "3.3 Logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/auth/logout",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "auth",
+                "logout"
+              ]
+            },
+            "description": "Ends the current token (all_sessions: true ends every login).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"all_sessions\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK \u2014 real example",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/v1/auth/logout",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "auth",
+                    "logout"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"all_sessions\": false\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json; charset=utf-8"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"request_id\": \"b501b396196127e18c0ffd32421c1e45\",\n  \"data\": {\n    \"revoked_sessions\": 1\n  }\n}"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "event": [
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "pm.test('JSON envelope with request_id', function () { const j = pm.response.json(); pm.expect(j).to.have.property('request_id'); pm.expect(j).to.have.property('success'); });"
+        ]
+      }
+    }
+  ]
+}

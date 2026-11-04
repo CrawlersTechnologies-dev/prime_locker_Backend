@@ -32,6 +32,7 @@ class DeviceLockStatus(models.TextChoices):
 
 class LockProvider(models.TextChoices):
     ROCKETPAY = 'ROCKETPAY', 'RocketPay DLC'
+    PARTNER_MDM = 'PARTNER_MDM', 'Partner MDM (6-Tap QR)'
     OWN_AGENT = 'OWN_AGENT', 'Prime Locker Agent'
     APPLE_MDM = 'APPLE_MDM', 'Apple MDM'
     NONE = 'NONE', 'None / Uncontrolled'
@@ -155,6 +156,14 @@ class Device(models.Model):
     instagram_disabled = models.BooleanField(default=False)
     facebook_disabled = models.BooleanField(default=False)
     
+    # Extended MDM Policies (Android Enterprise 6-Tap QR)
+    hide_application = models.BooleanField(default=False, help_text="Hide the control app icon from launcher")
+    calls_disabled = models.BooleanField(default=False, help_text="Block phone calls")
+    wifi_disabled = models.BooleanField(default=False, help_text="Block Wi-Fi")
+    mobile_data_disabled = models.BooleanField(default=False, help_text="Block mobile data")
+    usb_debugging_disabled = models.BooleanField(default=False, help_text="Block USB debugging")
+    qr_code_url = models.URLField(max_length=500, blank=True, null=True, help_text="QR Code URL for 6-tap Android Enterprise setup")
+
     # Wallpaper & Screen Reminders
     wallpaper_locked = models.BooleanField(default=False)
     custom_wallpaper = models.FileField(upload_to='device_wallpapers/', null=True, blank=True)
