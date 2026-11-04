@@ -17,15 +17,15 @@
   "variable": [
     {
       "key": "base_url",
-      "value": "https://apirenewjss.com/partner-api"
+      "value": "https://{DOMAIN}/partner-api"
     },
     {
       "key": "username",
-      "value": "admin"
+      "value": ""
     },
     {
       "key": "password",
-      "value": "123456"
+      "value": ""
     },
     {
       "key": "access_token",

@@ -148,10 +148,10 @@ ALLOWED_HOSTS=*
 # DB_PORT=5432
 
 # Partner MDM Integration (Android Enterprise 6-Tap QR Setup)
-PARTNER_MDM_BASE_URL=https://apirenewjss.com/partner-api
-PARTNER_MDM_USERNAME=admin
-PARTNER_MDM_PASSWORD=123456
-PARTNER_MDM_SIMULATION=false
+PARTNER_MDM_BASE_URL=https://your-mdm-domain.com/partner-api
+PARTNER_MDM_USERNAME=your_username
+PARTNER_MDM_PASSWORD=your_password
+PARTNER_MDM_SIMULATION=true
 
 # Cashfree Online Payment Gateway (v2023-08-01)
 CASHFREE_APP_ID=your_cashfree_app_id
@@ -361,9 +361,9 @@ python manage.py test accounts.tests emi.tests devices.tests
 Two pre-configured Postman collections are included directly in the repository root directory:
 
 1. **`Partner_MDM_API.postman_collection.json`**
-   * Direct testing of the third-party Partner MDM server (`https://apirenewjss.com/partner-api`).
+   * Direct testing of the third-party Partner MDM server.
    * Includes all 27 direct API requests (Authentication, Customer creation, Device registration, Policy updates, Lock, Unlock, Audio siren, GPS location, Offline codes).
-   * Pre-configured with live credentials (`admin / 123456`).
+   * Uses collection variables (`{{base_url}}`, `{{username}}`, `{{password}}`) for secure local testing.
 
 2. **`Prime_Locker_Super_Admin_API.postman_collection.json`**
    * Primary collection for testing the complete Prime Locker platform.
