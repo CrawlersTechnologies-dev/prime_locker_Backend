@@ -18,6 +18,7 @@ from .views import (
     NotificationViewSet,
     StaffViewSet,
     PlatformSettingsView,
+    RetailerTermsAndConditionsView,
     WhatsAppCampaignView,
     BannerViewSet
 )
@@ -43,6 +44,7 @@ urlpatterns = [
     path('auth/password-reset-confirm/', PasswordResetConfirmView.as_view(), name='password_reset_confirm'),
     path('dashboard/', DashboardView.as_view(), name='main-dashboard'),
     path('settings/', PlatformSettingsView.as_view(), name='platform_settings'),
+    path('settings/terms-and-conditions/', RetailerTermsAndConditionsView.as_view(), name='retailer_terms_and_conditions'),
     path('whatsapp/campaigns/', WhatsAppCampaignView.as_view(), name='whatsapp_campaigns'),
     path('', include(router.urls)),
 ]

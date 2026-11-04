@@ -240,7 +240,54 @@ class CustomerViewSet(BaseRoleViewSet):
                 clean_active_ids = set(active_cust_ids) - set(overdue_cust_ids)
                 queryset = queryset.filter(id__in=clean_active_ids)
 
+        status_param = self.request.query_params.get('status')
+        if status_param:
+            from devices.models import DeviceLockStatus
+            s = status_param.lower()
+            if s in ['uninstalled', 'uninstall']:
+                queryset = queryset.filter(
+                    models.Q(registered_devices__status=DeviceLockStatus.UNENROLLED) |
+                    models.Q(registered_devices__provider_status='UNREGISTERED') |
+                    models.Q(emi_contracts__status='COMPLETED')
+                ).distinct()
+            elif s == 'inactive':
+                queryset = queryset.filter(
+                    models.Q(registered_devices__status=DeviceLockStatus.INACTIVE) |
+                    models.Q(registered_devices__isnull=True)
+                ).exclude(
+                    registered_devices__is_activated=True
+                ).distinct()
+            elif s == 'active':
+                queryset = queryset.filter(
+                    models.Q(registered_devices__is_activated=True) |
+                    models.Q(registered_devices__status__in=[DeviceLockStatus.ACTIVE, DeviceLockStatus.LOCKED])
+                ).distinct()
+
         return queryset
+
+    def partial_update(self, request, *args, **kwargs):
+        customer = self.get_object()
+        if request.user.role == 'RETAILER':
+            from devices.models import DeviceLockStatus
+            device = customer.registered_devices.first()
+            if device and (getattr(device, 'is_activated', False) or device.status in [DeviceLockStatus.ACTIVE, DeviceLockStatus.LOCKED]):
+                return Response(
+                    {"detail": "Customer information cannot be modified once the device is activated."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        return super().partial_update(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        customer = self.get_object()
+        if request.user.role == 'RETAILER':
+            from devices.models import DeviceLockStatus
+            device = customer.registered_devices.first()
+            if device and (getattr(device, 'is_activated', False) or device.status in [DeviceLockStatus.ACTIVE, DeviceLockStatus.LOCKED]):
+                return Response(
+                    {"detail": "Customer information cannot be modified once the device is activated."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        return super().update(request, *args, **kwargs)
 
     @action(detail=False, methods=['get'], url_path='loan-providers')
     def loan_providers(self, request):
@@ -400,7 +447,8 @@ class CustomerViewSet(BaseRoleViewSet):
                 loan_provider_other=loan_provider_other,
                 loan_account_number=loan_account_number,
                 activation_key=key_obj,
-                status=DeviceLockStatus.ACTIVE,
+                status=DeviceLockStatus.INACTIVE,
+                is_activated=False,
                 lock_provider=lock_provider,
                 provider_status='PENDING'
             )
@@ -771,6 +819,10 @@ class DashboardView(APIView):
             "customers": downline_qs.filter(role='CUSTOMER').count(),
             "active_users": downline_qs.filter(is_active=True).count(),
             "inactive_users": downline_qs.filter(is_active=False).count(),
+            "uninstalled_customers": downline_qs.filter(
+                role='CUSTOMER',
+                registered_devices__status='UNENROLLED'
+            ).distinct().count(),
         }
 
         # 2. Device & EMI Status KPIs
@@ -780,11 +832,23 @@ class DashboardView(APIView):
         locked_devices = contracts_qs.filter(status=EMIContractStatus.LOCKED).count()
         completed_contracts = contracts_qs.filter(status=EMIContractStatus.COMPLETED).count()
 
+        from devices.models import Device, DeviceLockStatus
+        uninstalled_dev_count = Device.objects.filter(
+            retailer_id__in=retailer_ids,
+            status=DeviceLockStatus.UNENROLLED
+        ).count()
+        uninstalled_cust_count = downline_qs.filter(
+            role='CUSTOMER',
+            registered_devices__status=DeviceLockStatus.UNENROLLED
+        ).distinct().count()
+
         device_and_emi_kpis = {
             "total_registered_devices": total_devices,
             "active_unlocked_devices": active_devices,
             "locked_devices": locked_devices,
             "completed_emi_contracts": completed_contracts,
+            "uninstalled_devices": uninstalled_dev_count,
+            "uninstalled_customers": uninstalled_cust_count,
         }
 
         # 3. Financial & Collection KPIs
@@ -870,6 +934,14 @@ class DashboardView(APIView):
         activated_keys = owned_keys.filter(status=KeyStatus.ACTIVATED).count()
         revoked_keys = owned_keys.filter(status=KeyStatus.REVOKED).count()
 
+        avail_owned = owned_keys.filter(status=KeyStatus.AVAILABLE)
+        dlc_keys_left = avail_owned.filter(Q(key_string__istartswith='DLC-') | Q(device_type__iexact='DLC')).count()
+        android_keys_left = avail_owned.filter(
+            (Q(key_string__istartswith='AND-') | Q(device_type__iexact='ANDROID')) &
+            ~Q(key_string__istartswith='DLC-') & ~Q(key_string__istartswith='IOS-')
+        ).count()
+        ios_keys_left = avail_owned.filter(Q(key_string__istartswith='IOS-') | Q(device_type__iexact='IOS')).count()
+
         by_type = list(
             owned_keys.values('device_type', 'status')
             .annotate(count=Count('id'))
@@ -881,6 +953,16 @@ class DashboardView(APIView):
             "available_keys": available_keys,
             "activated_keys": activated_keys,
             "revoked_keys": revoked_keys,
+            "dlc_keys_left": dlc_keys_left,
+            "android_keys_left": android_keys_left,
+            "ios_keys_left": ios_keys_left,
+            "total_keys_left": dlc_keys_left + android_keys_left + ios_keys_left,
+            "keys_left": {
+                "dlc_keys_left": dlc_keys_left,
+                "android_keys_left": android_keys_left,
+                "ios_keys_left": ios_keys_left,
+                "total_keys_left": dlc_keys_left + android_keys_left + ios_keys_left
+            },
             "pending_key_requests_received": pending_requests,
             "by_device_type": by_type
         }
@@ -1505,4 +1587,17 @@ class BannerViewSet(viewsets.ModelViewSet):
             raise PermissionDenied("Only Super Admin or Operations Staff can manage banners.")
         instance.delete()
 
+class RetailerTermsAndConditionsView(APIView):
+    """
+    Returns Retailer Agreement Terms & Conditions for the Account section.
+    """
+    permission_classes = [permissions.IsAuthenticated]
 
+    def get(self, request):
+        from .models import PlatformSettings
+        ps = PlatformSettings.get_settings()
+        return Response({
+            "company_name": ps.company_name,
+            "terms_and_conditions": ps.retailer_terms_and_conditions,
+            "updated_at": ps.updated_at
+        })

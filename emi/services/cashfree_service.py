@@ -384,3 +384,128 @@ class CashfreeService:
             )
 
         return True
+
+    @classmethod
+    def create_upi_mandate(cls, contract, auth_mode="UPI", return_url=None):
+        """
+        Point 10: Cashfree UPI Auto-Pay / e-Mandate registration for automated monthly EMI deduction.
+        Calls Cashfree Subscriptions API or generates simulation token for checkout SDK.
+        """
+        config = cls.get_config()
+        app_id = config['APP_ID']
+        secret_key = config['SECRET_KEY']
+        base_url = config['BASE_URL']
+        api_version = config['API_VERSION']
+
+        customer = contract.customer
+        customer_name = f"{customer.first_name} {customer.last_name}".strip() or customer.username
+        customer_phone = str(customer.mobile_number or "+919999999999")
+        if not customer_phone.startswith('+'):
+            customer_phone = f"+91{customer_phone[-10:]}"
+        customer_email = customer.email or f"{customer.mobile_number}@customer.primelocker.com"
+
+        mandate_id = f"cf_mandate_{contract.id}_{uuid.uuid4().hex[:8]}"
+
+        # Simulation Mode fallback
+        if cls.is_simulation():
+            sim_auth_url = f"https://sandbox.cashfree.com/pg/orders/mandate/{mandate_id}?auth_mode={auth_mode}"
+            sim_umrn = f"UMRN{uuid.uuid4().hex[:10].upper()}"
+            logger.info(f"[SIMULATION] Cashfree UPI Mandate created: {mandate_id} (UMRN: {sim_umrn})")
+            return {
+                "success": True,
+                "gateway": "CASHFREE",
+                "mandate_id": mandate_id,
+                "mandate_status": "PENDING_AUTH",
+                "mandate_auth_url": sim_auth_url,
+                "mandate_umrn": sim_umrn,
+                "auth_mode": auth_mode,
+                "max_amount": str(contract.monthly_emi_amount),
+                "frequency": "MONTHLY",
+                "simulation": True,
+                "message": "UPI Auto-Pay mandate generated in Cashfree simulation mode. Open auth URL to approve."
+            }
+
+        url = f"{base_url}/subscriptions"
+        headers = {
+            "x-client-id": app_id,
+            "x-client-secret": secret_key,
+            "x-api-version": api_version,
+            "Content-Type": "application/json"
+        }
+        plan_id = f"plan_{contract.plan_template_id or contract.id}"
+        payload = {
+            "subscription_id": mandate_id,
+            "plan_id": plan_id,
+            "customer_details": {
+                "customer_id": f"cust_{customer.id}",
+                "customer_name": customer_name,
+                "customer_email": customer_email,
+                "customer_phone": customer_phone
+            },
+            "auth_mode": auth_mode,
+            "notification_channels": ["SMS", "EMAIL"]
+        }
+        if return_url:
+            payload["return_url"] = return_url
+
+        try:
+            resp = requests.post(url, json=payload, headers=headers, timeout=15)
+            data = resp.json()
+            if resp.status_code in [200, 201]:
+                auth_link = data.get('auth_link') or data.get('payment_session_id') or data.get('sub_auth_url') or ""
+                return {
+                    "success": True,
+                    "gateway": "CASHFREE",
+                    "mandate_id": data.get('subscription_id', mandate_id),
+                    "mandate_status": "PENDING_AUTH",
+                    "mandate_auth_url": auth_link,
+                    "auth_mode": auth_mode,
+                    "max_amount": str(contract.monthly_emi_amount),
+                    "simulation": False,
+                    "data": data
+                }
+            else:
+                logger.error(f"Cashfree Mandate API error: {resp.status_code} - {data}")
+                return {
+                    "success": False,
+                    "error": data.get('message', 'Failed to create Cashfree mandate'),
+                    "status_code": resp.status_code,
+                    "details": data
+                }
+        except Exception as e:
+            logger.error(f"Cashfree Mandate Connection exception: {e}")
+            return {"success": False, "error": str(e)}
+
+    @classmethod
+    def get_mandate_status(cls, mandate_id):
+        """Fetches status of a Cashfree mandate / subscription."""
+        if cls.is_simulation() or mandate_id.startswith('cf_mandate_') or mandate_id.startswith('sub_sim_'):
+            return {
+                "success": True,
+                "mandate_id": mandate_id,
+                "status": "ACTIVE",
+                "umrn": f"UMRN{uuid.uuid4().hex[:10].upper()}",
+                "simulation": True
+            }
+
+        config = cls.get_config()
+        url = f"{config['BASE_URL']}/subscriptions/{mandate_id}"
+        headers = {
+            "x-client-id": config['APP_ID'],
+            "x-client-secret": config['SECRET_KEY'],
+            "x-api-version": config['API_VERSION']
+        }
+        try:
+            resp = requests.get(url, headers=headers, timeout=10)
+            if resp.status_code == 200:
+                data = resp.json()
+                return {
+                    "success": True,
+                    "mandate_id": mandate_id,
+                    "status": data.get('subscription_status', 'PENDING_AUTH'),
+                    "umrn": data.get('umrn'),
+                    "data": data
+                }
+            return {"success": False, "status_code": resp.status_code, "error": resp.text}
+        except Exception as e:
+            return {"success": False, "error": str(e)}

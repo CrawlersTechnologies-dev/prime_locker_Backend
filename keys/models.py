@@ -9,6 +9,13 @@ class KeyStatus(models.TextChoices):
     ACTIVATED = 'ACTIVATED', 'Activated'
     REVOKED = 'REVOKED', 'Revoked'
 
+class KeyDeviceType(models.TextChoices):
+    DLC = 'DLC', 'DLC Locker'
+    ANDROID = 'ANDROID', 'Android'
+    IOS = 'IOS', 'iOS'
+    TV = 'TV', 'Smart TV'
+    MOBILE = 'MOBILE', 'Mobile'
+
 class DeviceKey(models.Model):
     key_string = models.CharField(max_length=50, unique=True, db_index=True)
     device_type = models.CharField(max_length=50) # e.g., 'MOBILE', 'TV'

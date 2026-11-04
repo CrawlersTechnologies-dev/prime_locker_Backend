@@ -136,6 +136,23 @@ class CustomerEMIContract(models.Model):
     grace_period_days = models.PositiveIntegerField(default=3)
     whatsapp_reminders = models.BooleanField(default=True)
     
+    # Cashfree UPI Auto-Pay / e-Mandate
+    mandate_id = models.CharField(max_length=150, blank=True, null=True, help_text="Cashfree UPI Mandate / Subscription ID")
+    mandate_status = models.CharField(
+        max_length=50, 
+        default='NOT_CREATED', 
+        choices=[
+            ('NOT_CREATED', 'Not Created'),
+            ('PENDING_AUTH', 'Pending Authorization'),
+            ('ACTIVE', 'Active (Authorized)'),
+            ('FAILED', 'Failed'),
+            ('CANCELLED', 'Cancelled')
+        ],
+        help_text="Mandate authorization status"
+    )
+    mandate_umrn = models.CharField(max_length=100, blank=True, null=True, help_text="Unique Mandate Reference Number")
+    mandate_auth_url = models.URLField(max_length=500, blank=True, null=True, help_text="Link for customer to authorize UPI AutoPay")
+    
     status = models.CharField(max_length=20, choices=EMIContractStatus.choices, default=EMIContractStatus.ACTIVE)
     
     created_at = models.DateTimeField(auto_now_add=True)

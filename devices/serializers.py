@@ -57,6 +57,8 @@ class DeviceSerializer(serializers.ModelSerializer):
             'loan_account_number',
             'status',
             'is_online',
+            'is_activated',
+            'activated_at',
             'last_online_at',
             'ip_address',
             'app_version',
@@ -111,14 +113,37 @@ class DeviceSerializer(serializers.ModelSerializer):
             request = self.context.get('request')
             photo_url = request.build_absolute_uri(c.customer_photo.url) if (request and c.customer_photo) else (c.customer_photo.url if c.customer_photo else None)
             sig_url = request.build_absolute_uri(c.customer_signature.url) if (request and c.customer_signature) else (c.customer_signature.url if c.customer_signature else None)
+            from devices.models import DeviceLockStatus
+            if obj.status == DeviceLockStatus.UNENROLLED or obj.provider_status == 'UNREGISTERED':
+                c_status = "UNINSTALL"
+            elif getattr(obj, 'is_activated', False) or obj.status in [DeviceLockStatus.ACTIVE, DeviceLockStatus.LOCKED]:
+                c_status = "ACTIVE"
+            else:
+                c_status = "INACTIVE"
+
+            raw_id = str(c.id_number).strip() if c.id_number else ""
+            masked_id = (('X' * (len(raw_id) - 4)) + raw_id[-4:]) if len(raw_id) > 4 else (raw_id or None)
+
             return {
                 'id': c.id,
                 'name': name,
+                'first_name': c.first_name or '',
+                'last_name': c.last_name or '',
                 'username': c.username,
+                'email': c.email,
                 'mobile_number': c.mobile_number,
                 'alternate_mobile_number': c.alternate_mobile_number,
+                'address': c.address,
+                'city': c.city,
+                'state': c.state,
+                'pincode': c.pincode,
+                'id_type': c.id_type,
+                'id_number': c.id_number,
+                'masked_id_number': masked_id,
                 'customer_photo': photo_url,
-                'customer_signature': sig_url
+                'customer_signature': sig_url,
+                'status': c_status,
+                'customer_status': c_status
             }
         return None
 

@@ -285,6 +285,68 @@ class DeviceViewSet(viewsets.ModelViewSet):
         )
         return Response({"message": f"Device {device.imei} unlocked.", "status": device.status})
 
+    @action(detail=True, methods=['post'], url_path='activate')
+    def activate(self, request, pk=None):
+        """
+        Marks device as activated on physical customer handset after QR scan.
+        Transitions status from INACTIVE -> ACTIVE, locks customer editing.
+        """
+        device = self.get_object()
+        device.is_activated = True
+        device.activated_at = timezone.now()
+        if device.status == DeviceLockStatus.INACTIVE:
+            device.status = DeviceLockStatus.ACTIVE
+        device.save(update_fields=['is_activated', 'activated_at', 'status'])
+
+        AuditLog.objects.create(
+            user=request.user,
+            action="ACTIVATE_DEVICE",
+            ip_address=get_client_ip(request),
+            details={"device_id": device.id, "imei": device.imei}
+        )
+        return Response({
+            "message": f"Device {device.imei} activated successfully.",
+            "status": device.status,
+            "is_activated": device.is_activated,
+            "activated_at": device.activated_at
+        })
+
+    @action(detail=True, methods=['post'], url_path='uninstall')
+    def uninstall(self, request, pk=None):
+        """
+        Retailer or Admin uninstalls/releases device after EMI completion.
+        Releases remote MDM locks, marks status UNENROLLED / UNREGISTERED.
+        Customer details will then display UNINSTALL.
+        """
+        denied = self._block_customer(request)
+        if denied:
+            return denied
+        device = self.get_object()
+
+        # Call provider unregister/remove if applicable
+        if device.lock_provider == LockProvider.PARTNER_MDM:
+            from .services.partner_mdm_service import PartnerMDMService
+            PartnerMDMService.remove_device(device=device, user=request.user)
+        elif device.lock_provider == LockProvider.ROCKETPAY:
+            from .services.rocketpay_service import RocketPayService
+            RocketPayService.unregister_key(device=device, user=request.user)
+
+        device.status = DeviceLockStatus.UNENROLLED
+        device.provider_status = 'UNREGISTERED'
+        device.save(update_fields=['status', 'provider_status'])
+
+        AuditLog.objects.create(
+            user=request.user,
+            action="UNINSTALL_DEVICE",
+            ip_address=get_client_ip(request),
+            details={"device_id": device.id, "imei": device.imei, "reason": request.data.get('reason', 'Retailer uninstalled')}
+        )
+        return Response({
+            "message": f"Device {device.imei} uninstalled successfully.",
+            "status": device.status,
+            "customer_status": "UNINSTALL"
+        })
+
     @action(detail=True, methods=['post'])
     def reboot(self, request, pk=None):
         denied = self._block_customer(request)
@@ -1261,6 +1323,11 @@ class DeviceHeartbeatView(APIView):
         # Update telemetry
         device.last_online_at = timezone.now()
         device.ip_address = get_client_ip(request)
+        if not getattr(device, 'is_activated', False):
+            device.is_activated = True
+            device.activated_at = timezone.now()
+            if device.status == DeviceLockStatus.INACTIVE:
+                device.status = DeviceLockStatus.ACTIVE
 
         if 'battery_level' in serializer.validated_data:
             device.battery_level = serializer.validated_data['battery_level']

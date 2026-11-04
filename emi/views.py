@@ -29,7 +29,8 @@ from .serializers import (
 )
 from .services.cashfree_service import CashfreeService
 
-from accounts.models import is_company_user
+from accounts.models import is_company_user, AuditLog
+from accounts.views import get_client_ip
 
 logger = logging.getLogger(__name__)
 
@@ -374,6 +375,60 @@ class CustomerEMIContractViewSet(viewsets.ModelViewSet):
             "message": f"Device {contract.device_imei} has been unlocked manually by {request.user.role}.",
             "device_imei": contract.device_imei,
             "status": contract.status
+        })
+
+    @action(detail=True, methods=['post'], url_path='create-mandate')
+    def create_mandate(self, request, pk=None):
+        """
+        Point 10: Create Cashfree UPI Auto-Pay / e-Mandate for automatic monthly EMI deduction.
+        Accessible by Customer of this contract, Retailer, or Admin.
+        """
+        contract = self.get_object()
+        if request.user.role == 'CUSTOMER' and contract.customer != request.user:
+            return Response({"detail": "You do not have permission to setup mandate for this contract."}, status=status.HTTP_403_FORBIDDEN)
+        
+        auth_mode = request.data.get('auth_mode', 'UPI').upper()
+        return_url = request.data.get('return_url')
+        res = CashfreeService.create_upi_mandate(contract, auth_mode=auth_mode, return_url=return_url)
+        if not res.get('success'):
+            return Response(res, status=status.HTTP_400_BAD_REQUEST)
+
+        contract.mandate_id = res['mandate_id']
+        contract.mandate_status = res['mandate_status']
+        contract.mandate_auth_url = res.get('mandate_auth_url')
+        if res.get('mandate_umrn') and res['mandate_status'] == 'ACTIVE':
+            contract.mandate_umrn = res.get('mandate_umrn')
+        contract.save(update_fields=['mandate_id', 'mandate_status', 'mandate_auth_url', 'mandate_umrn'])
+
+        AuditLog.objects.create(
+            user=request.user,
+            action="CREATE_UPI_MANDATE",
+            ip_address=get_client_ip(request),
+            details={"contract_id": contract.id, "mandate_id": res['mandate_id'], "auth_mode": auth_mode}
+        )
+        return Response(res, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['get', 'post'], url_path='mandate-status')
+    def mandate_status(self, request, pk=None):
+        """
+        Point 10: Query or verify status of Cashfree UPI mandate for this contract.
+        """
+        contract = self.get_object()
+        if not contract.mandate_id:
+            return Response({"detail": "No mandate has been created for this contract yet."}, status=status.HTTP_404_NOT_FOUND)
+        res = CashfreeService.get_mandate_status(contract.mandate_id)
+        if res.get('status') == 'ACTIVE':
+            contract.mandate_status = 'ACTIVE'
+            if res.get('umrn'):
+                contract.mandate_umrn = res['umrn']
+            contract.save(update_fields=['mandate_status', 'mandate_umrn'])
+        return Response({
+            "contract_id": contract.id,
+            "mandate_id": contract.mandate_id,
+            "mandate_status": contract.mandate_status,
+            "mandate_umrn": contract.mandate_umrn,
+            "mandate_auth_url": contract.mandate_auth_url,
+            "details": res
         })
 
     @action(detail=True, methods=['post'], url_path='swap-lock-device')
@@ -862,6 +917,18 @@ class CashfreeWebhookView(APIView):
                         logger.info(f"Cashfree Webhook: Installment #{installment_id} marked as PAID.")
                 except EMIInstallment.DoesNotExist:
                     logger.warning(f"Cashfree Webhook: Installment #{installment_id} not found.")
+
+        elif event_type in ['MANDATE_SUCCESS', 'SUBSCRIPTION_ACTIVATED', 'MANDATE_REGISTERED', 'SUBSCRIPTION_AUTHENTICATED']:
+            data = payload.get('data', {})
+            sub_info = data.get('subscription', {})
+            sub_id = sub_info.get('subscription_id') or payload.get('subscription_id') or payload.get('mandate_id')
+            umrn = sub_info.get('umrn') or data.get('umrn') or f"UMRN{uuid.uuid4().hex[:10].upper()}"
+            if sub_id:
+                CustomerEMIContract.objects.filter(mandate_id=sub_id).update(
+                    mandate_status='ACTIVE',
+                    mandate_umrn=umrn
+                )
+                logger.info(f"Cashfree Webhook: Mandate {sub_id} activated with UMRN {umrn}")
 
         return Response({"status": "ok"}, status=status.HTTP_200_OK)
 

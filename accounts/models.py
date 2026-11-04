@@ -190,6 +190,13 @@ class PlatformSettings(models.Model):
     rocketpay_webhook_secret = models.TextField(null=True, blank=True)
     rocketpay_enabled = models.BooleanField(default=True)
     
+    # Retailer Agreement & Terms and Conditions
+    retailer_terms_and_conditions = models.TextField(
+        null=True,
+        blank=True,
+        default="Prime Locker Retailer Agreement: Terms & Conditions apply. Retailers must comply with RBI regulations on customer privacy, loan disclosures, and device unlocking policies upon EMI settlement."
+    )
+    
     updated_at = models.DateTimeField(auto_now=True)
 
     @classmethod

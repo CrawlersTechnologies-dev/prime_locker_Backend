@@ -292,6 +292,8 @@ class CustomerSerializer(serializers.ModelSerializer):
     device_summary = serializers.SerializerMethodField(read_only=True)
     contract_summary = serializers.SerializerMethodField(read_only=True)
     emi_status = serializers.SerializerMethodField(read_only=True)
+    status = serializers.SerializerMethodField(read_only=True)
+    customer_status = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = User
@@ -302,11 +304,13 @@ class CustomerSerializer(serializers.ModelSerializer):
             'id_type', 'id_number', 'masked_id_number', 'id_front_image', 'id_back_image',
             'signed_emi_agreement_flag', 'draft_status',
             'password', 'parent', 'role', 'is_active', 'date_joined',
-            'device_summary', 'contract_summary', 'emi_status'
+            'device_summary', 'contract_summary', 'emi_status',
+            'status', 'customer_status'
         ]
         read_only_fields = [
             'id', 'date_joined', 'role', 'parent', 'is_active', 'masked_id_number',
-            'device_summary', 'contract_summary', 'emi_status'
+            'device_summary', 'contract_summary', 'emi_status',
+            'status', 'customer_status'
         ]
 
     def get_name(self, obj):
@@ -321,6 +325,20 @@ class CustomerSerializer(serializers.ModelSerializer):
             return raw
         return None
 
+    def get_status(self, obj):
+        from devices.models import DeviceLockStatus
+        device = obj.registered_devices.first()
+        if not device:
+            return "INACTIVE"
+        if device.status == DeviceLockStatus.UNENROLLED or device.provider_status == 'UNREGISTERED':
+            return "UNINSTALL"
+        if getattr(device, 'is_activated', False) or device.status in [DeviceLockStatus.ACTIVE, DeviceLockStatus.LOCKED]:
+            return "ACTIVE"
+        return "INACTIVE"
+
+    def get_customer_status(self, obj):
+        return self.get_status(obj)
+
     def get_device_summary(self, obj):
         device = obj.registered_devices.first()
         if not device:
@@ -328,15 +346,21 @@ class CustomerSerializer(serializers.ModelSerializer):
         return {
             "id": device.id,
             "imei": device.imei,
+            "secondary_imei": device.secondary_imei,
+            "serial_number": device.serial_number,
             "brand": device.brand,
             "model": device.model,
             "device_name": device.device_name,
             "device_category": device.device_category,
             "status": device.status,
             "is_online": device.is_online,
+            "is_activated": getattr(device, 'is_activated', False),
             "lock_provider": device.lock_provider,
             "provider_device_id": device.provider_device_id,
-            "provider_status": device.provider_status
+            "provider_status": device.provider_status,
+            "qr_code_url": device.qr_code_url,
+            "loan_provider": device.loan_provider,
+            "loan_account_number": device.loan_account_number
         }
 
     def get_contract_summary(self, obj):
@@ -399,6 +423,10 @@ class CustomerSerializer(serializers.ModelSerializer):
                 'role': parent.role,
                 'business_name': parent.business_name
             }
+        
+        c_status = self.get_status(instance)
+        representation['status'] = c_status
+        representation['customer_status'] = c_status
             
         return representation
 

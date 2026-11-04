@@ -65,7 +65,9 @@ class KeyViewSet(viewsets.GenericViewSet, viewsets.mixins.ListModelMixin, viewse
                 prefix += '-'
                 
             device_type = serializer.validated_data['device_type']
-            if prefix.startswith('AND'):
+            if prefix.startswith('DLC'):
+                device_type = 'DLC'
+            elif prefix.startswith('AND'):
                 device_type = 'ANDROID'
             elif prefix.startswith('IOS'):
                 device_type = 'IOS'
@@ -134,16 +136,18 @@ class KeyViewSet(viewsets.GenericViewSet, viewsets.mixins.ListModelMixin, viewse
         """Get summary of owned keys grouped by device type/prefix and status (B5 Fix)"""
         from django.db.models import Count, Case, When, Value, CharField
         
-        # Group by platform prefix to cleanly distinguish Android vs iOS stock
+        # Group by platform prefix to cleanly distinguish DLC, Android vs iOS stock
         inventory_annotated = DeviceKey.objects.filter(current_owner=request.user).annotate(
             platform=Case(
+                When(key_string__istartswith='DLC-', then=Value('DLC')),
+                When(device_type__iexact='DLC', then=Value('DLC')),
                 When(key_string__istartswith='IOS-', then=Value('IOS')),
                 When(device_type__iexact='IOS', then=Value('IOS')),
                 When(key_string__istartswith='AND-', then=Value('ANDROID')),
                 When(device_type__iexact='ANDROID', then=Value('ANDROID')),
                 When(key_string__istartswith='TV-', then=Value('TV')),
                 When(device_type__iexact='TV', then=Value('TV')),
-                default=Value('ANDROID'),
+                default=Value('DLC'),
                 output_field=CharField()
             )
         ).values('platform', 'status').annotate(count=Count('id')).order_by('platform', 'status')
@@ -156,8 +160,30 @@ class KeyViewSet(viewsets.GenericViewSet, viewsets.mixins.ListModelMixin, viewse
             }
             for item in inventory_annotated
         ]
+
+        from django.db.models import Q
+        user_avail = DeviceKey.objects.filter(current_owner=request.user, status=KeyStatus.AVAILABLE)
+        dlc_keys_left = user_avail.filter(Q(key_string__istartswith='DLC-') | Q(device_type__iexact='DLC')).count()
+        android_keys_left = user_avail.filter(
+            (Q(key_string__istartswith='AND-') | Q(device_type__iexact='ANDROID')) &
+            ~Q(key_string__istartswith='DLC-') & ~Q(key_string__istartswith='IOS-') & ~Q(key_string__istartswith='TV-')
+        ).count()
+        ios_keys_left = user_avail.filter(Q(key_string__istartswith='IOS-') | Q(device_type__iexact='IOS')).count()
+        total_keys_left = dlc_keys_left + android_keys_left + ios_keys_left
             
-        return Response({"inventory": summary})
+        return Response({
+            "inventory": summary,
+            "dlc_keys_left": dlc_keys_left,
+            "android_keys_left": android_keys_left,
+            "ios_keys_left": ios_keys_left,
+            "total_keys_left": total_keys_left,
+            "keys_left": {
+                "dlc_keys_left": dlc_keys_left,
+                "android_keys_left": android_keys_left,
+                "ios_keys_left": ios_keys_left,
+                "total_keys_left": total_keys_left
+            }
+        })
 
     @action(detail=False, methods=['get'])
     def recipients(self, request):
@@ -201,13 +227,40 @@ class KeyViewSet(viewsets.GenericViewSet, viewsets.mixins.ListModelMixin, viewse
             users_qs = User.objects.filter(id__in=sub_ids, role=selected_role, is_active=True)
 
         device_type = request.query_params.get('device_type')
+        from django.db.models import Q
+
+        my_avail = DeviceKey.objects.filter(current_owner=user, status=KeyStatus.AVAILABLE)
+        my_dlc = my_avail.filter(Q(key_string__istartswith='DLC-') | Q(device_type__iexact='DLC')).count()
+        my_and = my_avail.filter(
+            (Q(key_string__istartswith='AND-') | Q(device_type__iexact='ANDROID')) &
+            ~Q(key_string__istartswith='DLC-') & ~Q(key_string__istartswith='IOS-') & ~Q(key_string__istartswith='TV-')
+        ).count()
+        my_ios = my_avail.filter(Q(key_string__istartswith='IOS-') | Q(device_type__iexact='IOS')).count()
 
         data = []
         for u in users_qs:
             keys_qs = DeviceKey.objects.filter(current_owner=u, status=KeyStatus.AVAILABLE)
             if device_type:
-                keys_qs = keys_qs.filter(device_type=device_type)
+                if device_type.upper() == 'DLC':
+                    keys_qs = keys_qs.filter(Q(device_type__iexact='DLC') | Q(key_string__istartswith='DLC-'))
+                elif device_type.upper() == 'IOS':
+                    keys_qs = keys_qs.filter(Q(device_type__iexact='IOS') | Q(key_string__istartswith='IOS-'))
+                elif device_type.upper() == 'ANDROID':
+                    keys_qs = keys_qs.filter(
+                        (Q(device_type__iexact='ANDROID') | Q(key_string__istartswith='AND-')) &
+                        ~Q(key_string__istartswith='DLC-') & ~Q(key_string__istartswith='IOS-')
+                    )
+                else:
+                    keys_qs = keys_qs.filter(device_type=device_type)
             keys_count = keys_qs.count()
+
+            u_avail = DeviceKey.objects.filter(current_owner=u, status=KeyStatus.AVAILABLE)
+            u_dlc = u_avail.filter(Q(key_string__istartswith='DLC-') | Q(device_type__iexact='DLC')).count()
+            u_and = u_avail.filter(
+                (Q(key_string__istartswith='AND-') | Q(device_type__iexact='ANDROID')) &
+                ~Q(key_string__istartswith='DLC-') & ~Q(key_string__istartswith='IOS-') & ~Q(key_string__istartswith='TV-')
+            ).count()
+            u_ios = u_avail.filter(Q(key_string__istartswith='IOS-') | Q(device_type__iexact='IOS')).count()
 
             name = f"{u.first_name} {u.last_name}".strip() or u.username
             data.append({
@@ -219,12 +272,21 @@ class KeyViewSet(viewsets.GenericViewSet, viewsets.mixins.ListModelMixin, viewse
                 "mobile_number": u.mobile_number,
                 "city": u.city,
                 "state": u.state,
-                "current_available_keys": keys_count
+                "current_available_keys": keys_count,
+                "dlc_keys": u_dlc,
+                "android_keys": u_and,
+                "ios_keys": u_ios
             })
 
         return Response({
             "selected_role": selected_role,
             "count": len(data),
+            "my_keys_available": {
+                "dlc_keys_left": my_dlc,
+                "android_keys_left": my_and,
+                "ios_keys_left": my_ios,
+                "total_keys_left": my_dlc + my_and + my_ios
+            },
             "users": data
         })
 
@@ -272,11 +334,20 @@ class KeyViewSet(viewsets.GenericViewSet, viewsets.mixins.ListModelMixin, viewse
                 
             target_name = f"{target_user.first_name} {target_user.last_name}".strip() or target_user.username
             with transaction.atomic():
-                available_keys = DeviceKey.objects.filter(
-                    current_owner=request.user,
-                    device_type=device_type,
-                    status=KeyStatus.AVAILABLE
-                )[:quantity]
+                from django.db.models import Q
+                dev_type_upper = device_type.upper()
+                q_filter = models.Q(current_owner=request.user, status=KeyStatus.AVAILABLE)
+                if dev_type_upper in ['DLC', 'DLC_LOCKER']:
+                    q_filter &= (models.Q(device_type__iexact='DLC') | models.Q(key_string__istartswith='DLC-'))
+                elif dev_type_upper in ['IOS', 'IPHONE', 'MOBILE_IOS']:
+                    q_filter &= (models.Q(device_type__iexact='IOS') | models.Q(key_string__istartswith='IOS-'))
+                elif dev_type_upper in ['ANDROID', 'MOBILE_ANDROID']:
+                    q_filter &= (models.Q(device_type__iexact='ANDROID') | models.Q(key_string__istartswith='AND-'))
+                    q_filter &= ~models.Q(key_string__istartswith='DLC-') & ~models.Q(key_string__istartswith='IOS-')
+                else:
+                    q_filter &= models.Q(device_type__iexact=device_type)
+
+                available_keys = DeviceKey.objects.filter(q_filter)[:quantity]
                 
                 if len(available_keys) < quantity:
                     return Response({
@@ -584,7 +655,9 @@ class KeyRequestViewSet(viewsets.ModelViewSet):
         device_type = serializer.validated_data.get('device_type', '').upper()
         os_type = serializer.validated_data.get('os_type')
         if not os_type:
-            if device_type in ['ANDROID', 'MOBILE_ANDROID']:
+            if device_type in ['DLC', 'DLC_LOCKER']:
+                os_type = 'DLC'
+            elif device_type in ['ANDROID', 'MOBILE_ANDROID']:
                 os_type = 'ANDROID'
             elif device_type in ['IOS', 'IPHONE', 'MOBILE_IOS']:
                 os_type = 'IOS'
@@ -648,12 +721,13 @@ class KeyRequestViewSet(viewsets.ModelViewSet):
 
             # Bug B5: Match based on requested platform and key prefix/device_type strictly
             keys_filter = models.Q(current_owner=request.user, status=KeyStatus.AVAILABLE)
-            if requested_target in ['IOS', 'IPHONE', 'MOBILE_IOS']:
+            if requested_target in ['DLC', 'DLC_LOCKER']:
+                keys_filter &= (models.Q(device_type__iexact='DLC') | models.Q(key_string__istartswith='DLC-'))
+            elif requested_target in ['IOS', 'IPHONE', 'MOBILE_IOS']:
                 keys_filter &= (models.Q(device_type__iexact='IOS') | models.Q(key_string__istartswith='IOS-'))
             elif requested_target in ['ANDROID', 'MOBILE_ANDROID']:
                 keys_filter &= (models.Q(device_type__iexact='ANDROID') | models.Q(key_string__istartswith='AND-'))
-                # Strict exclusion of IOS and TV keys
-                keys_filter &= ~models.Q(key_string__istartswith='IOS-') & ~models.Q(key_string__istartswith='TV-')
+                keys_filter &= ~models.Q(key_string__istartswith='DLC-') & ~models.Q(key_string__istartswith='IOS-') & ~models.Q(key_string__istartswith='TV-')
             elif requested_target in ['TV', 'SMART_TV']:
                 keys_filter &= (models.Q(device_type__iexact='TV') | models.Q(key_string__istartswith='TV-'))
             else:

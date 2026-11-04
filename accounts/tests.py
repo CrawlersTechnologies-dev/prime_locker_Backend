@@ -255,3 +255,138 @@ class AccountsBackendTests(TestCase):
 
         customer.refresh_from_db()
         self.assertTrue(customer.check_password('DistributorReset@123'))
+
+    def test_customer_lifecycle_inactive_editable_active_locked(self):
+        from devices.models import Device, DeviceLockStatus
+        customer = User.objects.create_user(
+            username='cust_lifecycle_test',
+            email='lifecycle@test.com',
+            password='Password@123',
+            role=Role.CUSTOMER,
+            mobile_number='+919876543210',
+            address='Initial Street',
+            parent=self.retailer
+        )
+        device = Device.objects.create(
+            retailer=self.retailer,
+            customer=customer,
+            imei='999988887777666',
+            brand='Samsung',
+            model='Galaxy A15',
+            status=DeviceLockStatus.INACTIVE,
+            is_activated=False
+        )
+        client = APIClient()
+        client.force_authenticate(user=self.retailer)
+        detail_resp = client.get(f'/api/customers/{customer.id}/')
+        self.assertEqual(detail_resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(detail_resp.data['status'], 'INACTIVE')
+
+        # Retailer edits while INACTIVE -> succeeds
+        patch_resp = client.patch(f'/api/customers/{customer.id}/', {'address': 'Updated Street 1'}, format='json')
+        self.assertEqual(patch_resp.status_code, status.HTTP_200_OK)
+        customer.refresh_from_db()
+        self.assertEqual(customer.address, 'Updated Street 1')
+
+        # Device is activated
+        device.is_activated = True
+        device.status = DeviceLockStatus.ACTIVE
+        device.save()
+
+        # Status is now ACTIVE
+        detail_resp2 = client.get(f'/api/customers/{customer.id}/')
+        self.assertEqual(detail_resp2.data['status'], 'ACTIVE')
+
+        # Retailer tries to edit while ACTIVE -> returns 400
+        patch_resp2 = client.patch(f'/api/customers/{customer.id}/', {'address': 'Blocked Street'}, format='json')
+        self.assertEqual(patch_resp2.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("cannot be modified once the device is activated", patch_resp2.data['detail'])
+
+    def test_uninstalled_customer_status_and_dashboard_filter(self):
+        from devices.models import Device, DeviceLockStatus
+        customer = User.objects.create_user(
+            username='cust_uninstalled_test',
+            email='uninstalled@test.com',
+            password='Password@123',
+            role=Role.CUSTOMER,
+            mobile_number='+919876543211',
+            parent=self.retailer
+        )
+        device = Device.objects.create(
+            retailer=self.retailer,
+            customer=customer,
+            imei='999988887777555',
+            brand='Vivo',
+            model='Y20',
+            status=DeviceLockStatus.UNENROLLED,
+            provider_status='UNREGISTERED'
+        )
+        client = APIClient()
+        client.force_authenticate(user=self.retailer)
+        
+        detail_resp = client.get(f'/api/customers/{customer.id}/')
+        self.assertEqual(detail_resp.data['status'], 'UNINSTALL')
+
+        list_resp = client.get('/api/customers/?status=uninstalled')
+        self.assertEqual(list_resp.status_code, status.HTTP_200_OK)
+        ids = [c['id'] for c in list_resp.data.get('results', list_resp.data)]
+        self.assertIn(customer.id, ids)
+
+        dash_resp = client.get('/api/dashboard/')
+        self.assertEqual(dash_resp.status_code, status.HTTP_200_OK)
+        self.assertGreaterEqual(dash_resp.data['device_and_emi_kpis']['uninstalled_customers'], 1)
+
+    def test_retailer_terms_and_conditions_endpoint(self):
+        ps = PlatformSettings.get_settings()
+        ps.retailer_terms_and_conditions = "Prime Locker Retailer Agreement: All devices must be verified."
+        ps.save()
+
+        client = APIClient()
+        client.force_authenticate(user=self.retailer)
+        resp = client.get('/api/settings/terms-and-conditions/')
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertIn("Prime Locker Retailer Agreement", resp.data['terms_and_conditions'])
+
+    def test_unified_customer_and_device_details_consistency(self):
+        from devices.models import Device, DeviceLockStatus
+        customer = User.objects.create_user(
+            username='cust_unified_test',
+            email='unified@test.com',
+            first_name='Rahul',
+            last_name='Sharma',
+            password='Password@123',
+            role=Role.CUSTOMER,
+            mobile_number='+919876543212',
+            address='MG Road 123',
+            city='Bengaluru',
+            state='Karnataka',
+            pincode='560001',
+            id_type='AADHAAR',
+            id_number='123456789012',
+            parent=self.retailer
+        )
+        device = Device.objects.create(
+            retailer=self.retailer,
+            customer=customer,
+            imei='999988887777444',
+            brand='Xiaomi',
+            model='Redmi Note 12',
+            status=DeviceLockStatus.ACTIVE,
+            is_activated=True
+        )
+        client = APIClient()
+        client.force_authenticate(user=self.retailer)
+        
+        cust_resp = client.get(f'/api/customers/{customer.id}/')
+        dev_resp = client.get(f'/api/devices/{device.id}/')
+
+        cust_data = cust_resp.data
+        dev_cust = dev_resp.data['customer_details']
+
+        self.assertEqual(cust_data['name'], dev_cust['name'])
+        self.assertEqual(cust_data['mobile_number'], dev_cust['mobile_number'])
+        self.assertEqual(cust_data['address'], dev_cust['address'])
+        self.assertEqual(cust_data['city'], dev_cust['city'])
+        self.assertEqual(cust_data['state'], dev_cust['state'])
+        self.assertEqual(cust_data['pincode'], dev_cust['pincode'])
+        self.assertEqual(cust_data['status'], dev_cust['status'])

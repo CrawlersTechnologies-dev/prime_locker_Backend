@@ -410,3 +410,46 @@ class EMIBackendTests(TestCase):
             inst.refresh_from_db()
             self.assertEqual(inst.status, InstallmentStatus.PAID)
             self.assertEqual(inst.paid_amount, expected_total)
+
+    def test_cashfree_create_upi_mandate(self):
+        create_mandate_url = f'/api/emi-contracts/{self.contract.id}/create-mandate/'
+        with override_settings(CASHFREE_CONFIG={'APP_ID': '', 'SECRET_KEY': ''}):
+            resp = self.client.post(create_mandate_url, {'auth_mode': 'UPI'}, format='json')
+            self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+            self.assertTrue(resp.data['success'])
+            self.assertEqual(resp.data['mandate_status'], 'PENDING_AUTH')
+            self.assertIn('mandate_auth_url', resp.data)
+
+            self.contract.refresh_from_db()
+            self.assertEqual(self.contract.mandate_status, 'PENDING_AUTH')
+            self.assertTrue(bool(self.contract.mandate_id))
+
+    def test_cashfree_mandate_webhook_and_status(self):
+        self.contract.mandate_id = 'cf_mandate_webhook_test_123'
+        self.contract.mandate_status = 'PENDING_AUTH'
+        self.contract.save()
+
+        import json
+        webhook_url = '/api/emi/webhook/cashfree/'
+        payload = {
+            'type': 'MANDATE_SUCCESS',
+            'data': {
+                'subscription': {
+                    'subscription_id': 'cf_mandate_webhook_test_123',
+                    'umrn': 'UMRNTEST998877'
+                }
+            }
+        }
+        with override_settings(CASHFREE_CONFIG={'APP_ID': '', 'SECRET_KEY': ''}):
+            resp = self.client.post(
+                webhook_url,
+                data=json.dumps(payload),
+                content_type='application/json',
+                HTTP_X_WEBHOOK_SIGNATURE='valid',
+                HTTP_X_WEBHOOK_TIMESTAMP='123456'
+            )
+            self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+            self.contract.refresh_from_db()
+            self.assertEqual(self.contract.mandate_status, 'ACTIVE')
+            self.assertEqual(self.contract.mandate_umrn, 'UMRNTEST998877')

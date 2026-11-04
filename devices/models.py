@@ -25,9 +25,10 @@ class DeviceScannerState(models.TextChoices):
 
 
 class DeviceLockStatus(models.TextChoices):
+    INACTIVE = 'INACTIVE', 'Inactive (Pending Activation)'
     ACTIVE = 'ACTIVE', 'Active (Unlocked)'
     LOCKED = 'LOCKED', 'Locked'
-    UNENROLLED = 'UNENROLLED', 'Unenrolled / Released'
+    UNENROLLED = 'UNENROLLED', 'Uninstalled / Released'
 
 
 class LockProvider(models.TextChoices):
@@ -141,7 +142,9 @@ class Device(models.Model):
     loan_account_number = models.CharField(max_length=100, blank=True, null=True, help_text="Loan Application / Account Number")
     
     # Status & Connectivity
-    status = models.CharField(max_length=20, choices=DeviceLockStatus.choices, default=DeviceLockStatus.ACTIVE)
+    status = models.CharField(max_length=20, choices=DeviceLockStatus.choices, default=DeviceLockStatus.INACTIVE)
+    is_activated = models.BooleanField(default=False, help_text="True once physical device has completed enrollment")
+    activated_at = models.DateTimeField(null=True, blank=True)
     last_online_at = models.DateTimeField(null=True, blank=True)
     ip_address = models.CharField(max_length=45, blank=True, null=True)
     app_version = models.CharField(max_length=50, blank=True, null=True)

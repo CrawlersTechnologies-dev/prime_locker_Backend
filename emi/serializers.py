@@ -148,6 +148,10 @@ class CustomerEMIContractSerializer(serializers.ModelSerializer):
             'grace_period_days',
             'whatsapp_reminders',
             'status',
+            'mandate_id',
+            'mandate_status',
+            'mandate_umrn',
+            'mandate_auth_url',
             'total_paid',
             'total_remaining',
             'paid_installments_count',
@@ -155,7 +159,7 @@ class CustomerEMIContractSerializer(serializers.ModelSerializer):
             'created_at',
             'updated_at'
         ]
-        read_only_fields = ['id', 'retailer', 'financed_amount', 'monthly_emi_amount', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'retailer', 'financed_amount', 'monthly_emi_amount', 'mandate_id', 'mandate_status', 'mandate_umrn', 'mandate_auth_url', 'created_at', 'updated_at']
 
     def get_customer_details(self, obj):
         c = obj.customer

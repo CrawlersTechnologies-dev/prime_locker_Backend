@@ -591,3 +591,27 @@ class PartnerMDMBackendTests(TestCase):
         self.pm_device.refresh_from_db()
         self.assertEqual(self.pm_device.status, DeviceLockStatus.UNENROLLED)
         self.assertEqual(self.pm_device.provider_status, "UNREGISTERED")
+
+    def test_device_activate_action(self):
+        from devices.models import DeviceLockStatus
+        self.pm_device.status = DeviceLockStatus.INACTIVE
+        self.pm_device.is_activated = False
+        self.pm_device.save()
+
+        resp = self.client.post(f'/api/devices/{self.pm_device.id}/activate/', {}, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.pm_device.refresh_from_db()
+        self.assertTrue(self.pm_device.is_activated)
+        self.assertEqual(self.pm_device.status, DeviceLockStatus.ACTIVE)
+
+    def test_device_uninstall_action(self):
+        from devices.models import DeviceLockStatus
+        self.pm_device.status = DeviceLockStatus.ACTIVE
+        self.pm_device.save()
+
+        resp = self.client.post(f'/api/devices/{self.pm_device.id}/uninstall/', {'reason': 'EMI Completed'}, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.pm_device.refresh_from_db()
+        self.assertEqual(self.pm_device.status, DeviceLockStatus.UNENROLLED)
+        self.assertEqual(self.pm_device.provider_status, 'UNREGISTERED')
+        self.assertEqual(resp.data.get('customer_status'), 'UNINSTALL')
