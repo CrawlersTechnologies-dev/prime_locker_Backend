@@ -136,14 +136,29 @@ pip install -r requirements.txt
 **4. Environment Variables (`.env`)**
 Create a `.env` file in the root directory:
 ```ini
-SECRET_KEY=your-django-secret-key-here
+SECRET_KEY=prime-locker-secret-key-change-in-production
 DEBUG=True
-# Add PostgreSQL credentials if not using SQLite:
-# DB_NAME=prime_locker
+ALLOWED_HOSTS=*
+
+# PostgreSQL Database (Optional - defaults to SQLite if not configured)
+# DB_NAME=locker_db
 # DB_USER=postgres
-# DB_PASSWORD=your_password
-# DB_HOST=localhost
+# DB_PASSWORD=password
+# DB_HOST=127.0.0.1
 # DB_PORT=5432
+
+# Partner MDM Integration (Android Enterprise 6-Tap QR Setup)
+PARTNER_MDM_BASE_URL=https://apirenewjss.com/partner-api
+PARTNER_MDM_USERNAME=admin
+PARTNER_MDM_PASSWORD=123456
+PARTNER_MDM_SIMULATION=false
+
+# Cashfree Online Payment Gateway (v2023-08-01)
+CASHFREE_APP_ID=your_cashfree_app_id
+CASHFREE_SECRET_KEY=your_cashfree_secret_key
+CASHFREE_API_VERSION=2023-08-01
+CASHFREE_BASE_URL=https://sandbox.cashfree.com/pg
+CASHFREE_ENV=TEST
 ```
 
 **5. Apply Database Migrations**
@@ -275,6 +290,8 @@ chmod +x deploy.sh
 | `POST` | `/api/devices/{id}/retry-provider-command/` | Manually retry a failed RocketPay command (`{"command": "LOCK"|"UNLOCK"}`) |
 | `POST` | `/api/devices/{id}/reboot/` | Queue remote reboot command |
 | `POST` | `/api/devices/{id}/toggle-hide-app/` | Stealth Mode: hide / unhide locker app icon on device (`{"hide_application": true|false}`) |
+| `POST` | `/api/devices/{id}/audio-reminder/` | Audio Siren: plays high-volume warning tone on customer device even if silenced |
+| `POST` | `/api/devices/{id}/refresh-location/` | Real-time GPS coordinate refresh request |
 | `POST` | `/api/devices/{id}/toggle-camera/` | Remotely enable/disable camera (native MDM only; returns 400 on RocketPay) |
 | `POST` | `/api/devices/{id}/toggle-social-media/` | Remotely enable/disable WhatsApp, Instagram, Facebook (native MDM only; returns 400 on RocketPay) |
 | `POST` | `/api/devices/{id}/toggle-reset-block/` | Reset Option Block & FRP Protection (block unauthorized factory reset) |
@@ -323,3 +340,31 @@ chmod +x deploy.sh
 | `GET` | `/api/whatsapp/campaigns/` | View available message templates and recent delivery logs |
 | `POST` | `/api/whatsapp/campaigns/` | Dispatch automated or bulk WhatsApp reminder campaigns (`OVERDUE_ALL`, `LOCKED_DEVICES`, custom numbers) |
 
+---
+
+## 🧪 Automated Testing
+
+Prime Locker comes with a comprehensive automated test suite covering all modules:
+
+```bash
+# Run all tests across Accounts, Devices, and EMI modules
+python manage.py test accounts.tests emi.tests devices.tests
+```
+
+* **Test Coverage:** 34 comprehensive unit tests validating JWT auth, key inventory ledger, TAC whitelists, Cashfree webhooks, in-store payment auto-unlocks, RocketPay DLC, Partner MDM 6-tap QR enrollment, stealth mode toggles, and loan completion release.
+* **Status:** 34 of 34 tests passing with zero errors.
+
+---
+
+## 📮 Postman Collections
+
+Two pre-configured Postman collections are included directly in the repository root directory:
+
+1. **`Partner_MDM_API.postman_collection.json`**
+   * Direct testing of the third-party Partner MDM server (`https://apirenewjss.com/partner-api`).
+   * Includes all 27 direct API requests (Authentication, Customer creation, Device registration, Policy updates, Lock, Unlock, Audio siren, GPS location, Offline codes).
+   * Pre-configured with live credentials (`admin / 123456`).
+
+2. **`Prime_Locker_Super_Admin_API.postman_collection.json`**
+   * Primary collection for testing the complete Prime Locker platform.
+   * Includes Customer Enrollment with Dual-Engine support (`PARTNER_MDM` & `ROCKETPAY`), Stealth Mode (`toggle-hide-app`), Device Controls, Key Allocation, Cashfree Payments, and Overdue Dashboards.
