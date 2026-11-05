@@ -76,6 +76,7 @@ class User(AbstractUser):
     max_devices = models.PositiveIntegerField(default=100)
 
     # Customer Specific Fields
+    customer_code = models.CharField(max_length=30, null=True, blank=True, unique=True, db_index=True)
     id_type = models.CharField(max_length=50, null=True, blank=True)
     id_number = models.CharField(max_length=50, null=True, blank=True)
     id_front_image = models.FileField(upload_to='kyc_documents/', null=True, blank=True)

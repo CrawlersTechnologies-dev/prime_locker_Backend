@@ -546,10 +546,16 @@ class CustomerViewSet(BaseRoleViewSet):
         photo_url = request.build_absolute_uri(customer.customer_photo.url) if customer.customer_photo else None
         sig_url = request.build_absolute_uri(customer.customer_signature.url) if customer.customer_signature else None
 
+        if not getattr(customer, 'customer_code', None):
+            customer.customer_code = f"PR-{customer.id:04d}"
+            customer.save(update_fields=['customer_code'])
+
         return Response({
             "message": "Customer and device successfully enrolled. You can now attach an EMI plan in the next step.",
             "customer": {
                 "id": customer.id,
+                "customer_id": customer.customer_code,
+                "customer_code": customer.customer_code,
                 "name": f"{customer.first_name} {customer.last_name}".strip(),
                 "mobile_number": customer.mobile_number,
                 "alternate_mobile_number": customer.alternate_mobile_number,
@@ -1601,3 +1607,177 @@ class RetailerTermsAndConditionsView(APIView):
             "terms_and_conditions": ps.retailer_terms_and_conditions,
             "updated_at": ps.updated_at
         })
+
+
+class DeviceActivateAuthView(APIView):
+    """
+    POST /auth/device-activate/
+    Customer App Activation without password.
+    Takes {customer_id} (e.g. PR-6327, Activation Key, or Mobile Number),
+    links physical device (storing FCM token), activates device,
+    and returns customer-scoped JWT tokens {access, refresh, user, device, contract}.
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        raw_id = request.data.get('customer_id') or request.data.get('customerId') or request.data.get('code', '')
+        raw_id = str(raw_id).strip()
+        if not raw_id:
+            return Response(
+                {"detail": "Field 'customer_id' is required (e.g. PR-6327, Activation Key, or Mobile Number)."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        fcm_token = request.data.get('fcm_token') or request.data.get('fcmToken', '')
+        imei = request.data.get('imei', '').strip()
+        brand = request.data.get('brand', '').strip()
+        model = request.data.get('model', '').strip()
+        app_version = request.data.get('app_version', '').strip()
+
+        # Find Customer
+        customer = None
+        
+        # 1. Match by customer_code (e.g. PR-6327 or pr-6327)
+        customer = User.objects.filter(role='CUSTOMER', customer_code__iexact=raw_id).first()
+
+        # 2. If starts with PR- or CUST-, extract suffix
+        if not customer and (raw_id.upper().startswith('PR-') or raw_id.upper().startswith('CUST-')):
+            parts = raw_id.split('-', 1)
+            if len(parts) == 2 and parts[1].isdigit():
+                customer = User.objects.filter(role='CUSTOMER', id=int(parts[1])).first()
+
+        # 3. Match by Activation Key (e.g. DLC-XXXX or AND-XXXX)
+        if not customer:
+            from keys.models import DeviceKey
+            key_obj = DeviceKey.objects.filter(key_string__iexact=raw_id).first()
+            if key_obj:
+                if key_obj.activated_for_customer:
+                    customer = key_obj.activated_for_customer
+                else:
+                    dev = key_obj.enrolled_device.first()
+                    if dev and dev.customer:
+                        customer = dev.customer
+
+        # 4. Match by mobile number
+        if not customer:
+            clean_mobile = raw_id.replace(' ', '').replace('-', '')
+            if clean_mobile.startswith('+91'):
+                clean_mobile = clean_mobile[3:]
+            customer = User.objects.filter(role='CUSTOMER', mobile_number__icontains=clean_mobile).first()
+
+        # 5. Match by numeric ID
+        if not customer and raw_id.isdigit():
+            customer = User.objects.filter(role='CUSTOMER', id=int(raw_id)).first()
+
+        # 6. Match by username / email
+        if not customer:
+            customer = User.objects.filter(role='CUSTOMER').filter(
+                models.Q(username__iexact=raw_id) | models.Q(email__iexact=raw_id)
+            ).first()
+
+        if not customer:
+            return Response(
+                {"detail": f"Customer not found for identifier '{raw_id}'. Please check the Customer ID and try again."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        if not customer.is_active:
+            return Response(
+                {"detail": "Customer account is inactive. Please contact support or retailer."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # Ensure customer has customer_code set
+        if not getattr(customer, 'customer_code', None):
+            customer.customer_code = f"PR-{customer.id:04d}"
+            customer.save(update_fields=['customer_code'])
+
+        # Find or link Device
+        from devices.models import Device, DeviceLockStatus
+        device = None
+        if imei:
+            device = customer.registered_devices.filter(imei=imei).first()
+            if not device:
+                device = Device.objects.filter(imei=imei).first()
+                if device and not device.customer_id:
+                    device.customer = customer
+                    device.save(update_fields=['customer'])
+
+        if not device:
+            device = customer.registered_devices.first()
+
+        if device:
+            device.is_activated = True
+            device.activated_at = timezone.now()
+            if device.status == DeviceLockStatus.INACTIVE:
+                device.status = DeviceLockStatus.ACTIVE
+            if fcm_token:
+                device.fcm_token = fcm_token
+            if app_version:
+                device.app_version = app_version
+            if brand and not device.brand:
+                device.brand = brand
+            if model and not device.model:
+                device.model = model
+            device.last_online_at = timezone.now()
+            device.save()
+
+        # Generate customer-scoped JWT tokens
+        from rest_framework_simplejwt.tokens import RefreshToken
+        from datetime import timedelta
+        refresh = RefreshToken.for_user(customer)
+        refresh['username'] = customer.username
+        refresh['role'] = customer.role
+        refresh.set_exp(lifetime=timedelta(days=365))
+
+        # Fetch contract if exists
+        contract = getattr(customer, 'emi_contracts', None) and customer.emi_contracts.first()
+
+        AuditLog.objects.create(
+            user=customer,
+            action="DEVICE_ACTIVATE_AUTH",
+            ip_address=get_client_ip(request),
+            details={
+                "customer_code": customer.customer_code,
+                "customer_id": customer.id,
+                "device_id": device.id if device else None,
+                "imei": device.imei if device else imei,
+                "fcm_token_registered": bool(fcm_token)
+            }
+        )
+
+        cust_code = customer.customer_code or f"PR-{customer.id:04d}"
+        return Response({
+            "access": str(refresh.access_token),
+            "refresh": str(refresh),
+            "user": {
+                "id": customer.id,
+                "customer_id": cust_code,
+                "customer_code": cust_code,
+                "name": f"{customer.first_name} {customer.last_name}".strip() or customer.username,
+                "first_name": customer.first_name,
+                "last_name": customer.last_name,
+                "username": customer.username,
+                "email": customer.email,
+                "mobile_number": customer.mobile_number,
+                "role": customer.role,
+            },
+            "device": {
+                "id": device.id,
+                "imei": device.imei,
+                "brand": device.brand,
+                "model": device.model,
+                "status": device.status,
+                "is_activated": device.is_activated,
+                "fcm_token": device.fcm_token,
+                "offline_unlock_code": device.offline_unlock_code,
+                "lock_message": device.lock_message,
+            } if device else None,
+            "contract": {
+                "id": contract.id,
+                "status": contract.status,
+                "monthly_emi_amount": str(contract.monthly_emi_amount),
+                "total_amount": str(contract.total_amount),
+            } if contract else None,
+            "message": "Device successfully activated and linked."
+        }, status=status.HTTP_200_OK)

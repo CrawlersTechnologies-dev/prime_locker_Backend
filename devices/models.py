@@ -206,6 +206,7 @@ class Device(models.Model):
     )
 
     # Device Agent Commands & Control Extensions (Section C: M10)
+    fcm_token = models.TextField(blank=True, null=True, help_text="Firebase Cloud Messaging device token")
     installed_apps = models.JSONField(default=list, blank=True)
     locked_packages = models.JSONField(default=list, blank=True)
     streaming_blocked = models.BooleanField(default=False)

@@ -390,3 +390,110 @@ class AccountsBackendTests(TestCase):
         self.assertEqual(cust_data['state'], dev_cust['state'])
         self.assertEqual(cust_data['pincode'], dev_cust['pincode'])
         self.assertEqual(cust_data['status'], dev_cust['status'])
+
+    def test_device_activate_auth_with_customer_code(self):
+        from devices.models import Device, DeviceLockStatus
+        customer = User.objects.create_user(
+            username='cust_dev_act_1',
+            email='devact1@test.com',
+            password='Password@123',
+            role=Role.CUSTOMER,
+            mobile_number='+919111222333',
+            parent=self.retailer
+        )
+        customer.customer_code = f"PR-{customer.id:04d}"
+        customer.save()
+
+        device = Device.objects.create(
+            retailer=self.retailer,
+            customer=customer,
+            imei='864201234567891',
+            brand='Samsung',
+            model='Galaxy A15',
+            status=DeviceLockStatus.INACTIVE,
+            is_activated=False
+        )
+
+        client = APIClient()
+        # Test with uppercase PR-XXXX
+        resp = client.post('/auth/device-activate/', {
+            'customer_id': customer.customer_code,
+            'fcm_token': 'fcm_token_sample_abc123',
+            'imei': '864201234567891',
+            'app_version': '1.0.2'
+        }, format='json')
+
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertIn('access', resp.data)
+        self.assertIn('refresh', resp.data)
+        self.assertEqual(resp.data['user']['id'], customer.id)
+        self.assertEqual(resp.data['user']['customer_code'], customer.customer_code)
+        self.assertEqual(resp.data['device']['status'], DeviceLockStatus.ACTIVE)
+        self.assertTrue(resp.data['device']['is_activated'])
+
+        device.refresh_from_db()
+        self.assertEqual(device.fcm_token, 'fcm_token_sample_abc123')
+        self.assertTrue(device.is_activated)
+        self.assertEqual(device.status, DeviceLockStatus.ACTIVE)
+
+    def test_device_activate_auth_with_lowercase_code(self):
+        from devices.models import Device, DeviceLockStatus
+        customer = User.objects.create_user(
+            username='cust_dev_act_2',
+            email='devact2@test.com',
+            password='Password@123',
+            role=Role.CUSTOMER,
+            mobile_number='+919111222334',
+            parent=self.retailer
+        )
+        customer.customer_code = f"PR-{customer.id:04d}"
+        customer.save()
+
+        Device.objects.create(
+            retailer=self.retailer,
+            customer=customer,
+            imei='864201234567892',
+            status=DeviceLockStatus.INACTIVE
+        )
+
+        client = APIClient()
+        # Test with lowercase pr-xxxx
+        resp = client.post('/auth/device-activate/', {
+            'customer_id': customer.customer_code.lower()
+        }, format='json')
+
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data['user']['id'], customer.id)
+
+    def test_device_activate_auth_with_mobile_number(self):
+        from devices.models import Device, DeviceLockStatus
+        customer = User.objects.create_user(
+            username='cust_dev_act_3',
+            email='devact3@test.com',
+            password='Password@123',
+            role=Role.CUSTOMER,
+            mobile_number='+919111222335',
+            parent=self.retailer
+        )
+        Device.objects.create(
+            retailer=self.retailer,
+            customer=customer,
+            imei='864201234567893',
+            status=DeviceLockStatus.INACTIVE
+        )
+
+        client = APIClient()
+        resp = client.post('/auth/device-activate/', {
+            'customer_id': '9111222335'
+        }, format='json')
+
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data['user']['id'], customer.id)
+
+    def test_device_activate_invalid_id_returns_404(self):
+        client = APIClient()
+        resp = client.post('/auth/device-activate/', {
+            'customer_id': 'PR-NONEXISTENT-9999'
+        }, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertIn("Customer not found", resp.data['detail'])

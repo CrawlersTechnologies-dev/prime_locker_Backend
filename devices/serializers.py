@@ -126,6 +126,7 @@ class DeviceSerializer(serializers.ModelSerializer):
 
             return {
                 'id': c.id,
+                'customer_code': getattr(c, 'customer_code', None) or f"PR-{c.id:04d}",
                 'name': name,
                 'first_name': c.first_name or '',
                 'last_name': c.last_name or '',
@@ -309,6 +310,7 @@ class DeviceHeartbeatSerializer(serializers.Serializer):
     Heartbeat ping payload sent silently by the Android Locker APK or TV App.
     """
     imei = serializers.CharField(max_length=50, required=True)
+    fcm_token = serializers.CharField(required=False, allow_blank=True)
     battery_level = serializers.IntegerField(required=False, min_value=0, max_value=100)
     app_version = serializers.CharField(max_length=50, required=False, allow_blank=True)
     latitude = serializers.DecimalField(max_digits=10, decimal_places=7, required=False)

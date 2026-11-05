@@ -3,6 +3,7 @@ from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
 from .views import (
     CustomTokenObtainPairView,
+    DeviceActivateAuthView,
     SuperDistributorViewSet,
     DistributorViewSet,
     SubDistributorViewSet,
@@ -36,6 +37,7 @@ router.register(r'banners', BannerViewSet, basename='banners')
 
 urlpatterns = [
     path('auth/login/', CustomTokenObtainPairView.as_view(), name='token_obtain_pair'),
+    path('auth/device-activate/', DeviceActivateAuthView.as_view(), name='device_activate_auth'),
     path('auth/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('auth/me/', CurrentUserView.as_view(), name='current_user'),
     path('auth/logout/', LogoutView.as_view(), name='auth_logout'),

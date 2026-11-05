@@ -171,6 +171,12 @@ class DeviceViewSet(viewsets.ModelViewSet):
         if device.os_type == OSType.IOS:
             from .services.apple_mdm import AppleMDMService
             AppleMDMService.send_command(device, command_type, params)
+        if getattr(device, 'fcm_token', None):
+            try:
+                from .services.fcm_service import FCMService
+                FCMService.send_command(device, command_type, params)
+            except Exception:
+                pass
         return cmd
 
     def _block_customer(self, request):
@@ -1333,6 +1339,8 @@ class DeviceHeartbeatView(APIView):
             device.battery_level = serializer.validated_data['battery_level']
         if 'app_version' in serializer.validated_data:
             device.app_version = serializer.validated_data['app_version']
+        if 'fcm_token' in serializer.validated_data and serializer.validated_data['fcm_token']:
+            device.fcm_token = serializer.validated_data['fcm_token']
 
         # Location recording
         lat = serializer.validated_data.get('latitude')

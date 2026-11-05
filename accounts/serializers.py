@@ -298,7 +298,7 @@ class CustomerSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = [
-            'id', 'first_name', 'last_name', 'name', 'full_name', 'email', 'mobile_number', 'alternate_mobile_number',
+            'id', 'customer_code', 'first_name', 'last_name', 'name', 'full_name', 'email', 'mobile_number', 'alternate_mobile_number',
             'address', 'city', 'state', 'pincode', 
             'customer_photo', 'customer_signature',
             'id_type', 'id_number', 'masked_id_number', 'id_front_image', 'id_back_image',
@@ -308,7 +308,7 @@ class CustomerSerializer(serializers.ModelSerializer):
             'status', 'customer_status'
         ]
         read_only_fields = [
-            'id', 'date_joined', 'role', 'parent', 'is_active', 'masked_id_number',
+            'id', 'customer_code', 'date_joined', 'role', 'parent', 'is_active', 'masked_id_number',
             'device_summary', 'contract_summary', 'emi_status',
             'status', 'customer_status'
         ]
