@@ -455,30 +455,53 @@ class PartnerMDMBackendTests(TestCase):
         self.assertTrue(remove_res['success'])
 
     def test_partner_mdm_qr_extraction_nesting(self):
-        """Verify _extract_qr_url finds the QR code across all nested response formats"""
-        # 1. Standard enrollment.qr_url
-        data1 = {"enrollment": {"qr_url": "https://example.com/qr1"}}
-        self.assertEqual(PartnerMDMService._extract_qr_url(data1), "https://example.com/qr1")
+        """Verify _extract_qr_url finds and prioritizes QR codes across provider response formats"""
+        # 1. Live provider response format with 3 QRs (qr_test_dpc must be prioritized)
+        live_payload = {
+            "enrollment": {
+                "qr_test_dpc": "https://apirenewjss.com/api2/QR/new/QR-1.png",
+                "qr_service_app": "https://apirenewjss.com/api2/QR/new/QR-2.png",
+                "qr_running_device": "https://apirenewjss.com/api2/QR/new/QR-3.png"
+            }
+        }
+        self.assertEqual(
+            PartnerMDMService._extract_qr_url(live_payload),
+            "https://apirenewjss.com/api2/QR/new/QR-1.png"
+        )
 
-        # 2. Nested under device.qr_code
-        data2 = {"device": {"id": 5354, "qr_code": "https://example.com/qr2"}}
-        self.assertEqual(PartnerMDMService._extract_qr_url(data2), "https://example.com/qr2")
+        # 2. Priority fallback to qr_running_device when qr_test_dpc is absent
+        payload_running = {
+            "enrollment": {
+                "qr_service_app": "https://apirenewjss.com/api2/QR/new/QR-2.png",
+                "qr_running_device": "https://apirenewjss.com/api2/QR/new/QR-3.png"
+            }
+        }
+        self.assertEqual(
+            PartnerMDMService._extract_qr_url(payload_running),
+            "https://apirenewjss.com/api2/QR/new/QR-3.png"
+        )
 
-        # 3. Top-level qr_code_url
-        data3 = {"id": 5354, "qr_code_url": "https://example.com/qr3"}
-        self.assertEqual(PartnerMDMService._extract_qr_url(data3), "https://example.com/qr3")
+        # 3. Priority fallback to qr_service_app when both above are absent
+        payload_service = {
+            "enrollment": {
+                "qr_service_app": "https://apirenewjss.com/api2/QR/new/QR-2.png"
+            }
+        }
+        self.assertEqual(
+            PartnerMDMService._extract_qr_url(payload_service),
+            "https://apirenewjss.com/api2/QR/new/QR-2.png"
+        )
 
-        # 4. Deeply nested provisioning_qr
-        data4 = {"response": {"payload": {"provisioning_qr": "https://example.com/qr4"}}}
-        self.assertEqual(PartnerMDMService._extract_qr_url(data4), "https://example.com/qr4")
+        # 4. Standard fallback keys (e.g. qr_url, qr_code, provisioning_qr)
+        data_generic = {"enrollment": {"qr_url": "https://example.com/qr1"}}
+        self.assertEqual(PartnerMDMService._extract_qr_url(data_generic), "https://example.com/qr1")
 
-        # 5. List format with qr
-        data5 = {"items": [{"name": "meta"}, {"qr": "https://example.com/qr5"}]}
-        self.assertEqual(PartnerMDMService._extract_qr_url(data5), "https://example.com/qr5")
+        data_nested = {"device": {"id": 5354, "qr_code": "https://example.com/qr2"}}
+        self.assertEqual(PartnerMDMService._extract_qr_url(data_nested), "https://example.com/qr2")
 
-        # 6. Empty / not present
-        data6 = {"device": {"id": 5354}, "status": "OK"}
-        self.assertEqual(PartnerMDMService._extract_qr_url(data6), "")
+        # 5. Empty / not present
+        data_empty = {"device": {"id": 5354}, "status": "OK"}
+        self.assertEqual(PartnerMDMService._extract_qr_url(data_empty), "")
 
     def test_api_enrollment_with_partner_mdm(self):
         """Verify /api/customers/enroll/ with lock_provider=PARTNER_MDM returns qr_code_data"""

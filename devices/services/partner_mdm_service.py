@@ -128,33 +128,54 @@ class PartnerMDMService:
     @classmethod
     def _extract_qr_url(cls, data):
         """
-        Recursively searches for a QR code URL anywhere inside nested dicts or lists.
-        Matches common keys: qr_url, qr_code, qr_code_url, provisioning_qr, qr.
+        Extracts the provisioning QR code URL from the Partner MDM response payload.
+        Priority order:
+          1. qr_test_dpc (6-tap factory-reset DPC setup for new phones)
+          2. qr_running_device (install on already-running phone)
+          3. qr_service_app (service app self-enrollment backup)
+          4. Generic fallback keys: qr_url, qr_code, qr_code_url, provisioning_qr, qr
+        Searches under enrollment, device, top-level, or any nested structure.
         """
         if not data:
             return ""
 
-        target_keys = {"qr_url", "qr_code", "qr_code_url", "provisioning_qr", "qr"}
+        priority_keys = ["qr_test_dpc", "qr_running_device", "qr_service_app"]
+        generic_keys = ["qr_url", "qr_code", "qr_code_url", "provisioning_qr", "qr"]
 
-        if isinstance(data, dict):
-            for key, val in data.items():
-                if str(key).lower() in target_keys:
-                    if isinstance(val, str) and val.strip():
-                        return val.strip()
-                    elif isinstance(val, dict):
-                        nested = cls._extract_qr_url(val)
-                        if nested:
-                            return nested
-            for val in data.values():
-                if isinstance(val, (dict, list)):
-                    found = cls._extract_qr_url(val)
-                    if found:
-                        return found
-        elif isinstance(data, list):
-            for item in data:
-                found = cls._extract_qr_url(item)
-                if found:
-                    return found
+        def find_key(obj, target_key):
+            if isinstance(obj, dict):
+                for k, v in obj.items():
+                    if str(k).lower() == target_key:
+                        if isinstance(v, str) and v.strip():
+                            return v.strip()
+                        elif isinstance(v, dict):
+                            res = cls._extract_qr_url(v)
+                            if res:
+                                return res
+                for v in obj.values():
+                    if isinstance(v, (dict, list)):
+                        res = find_key(v, target_key)
+                        if res:
+                            return res
+            elif isinstance(obj, list):
+                for item in obj:
+                    res = find_key(item, target_key)
+                    if res:
+                        return res
+            return ""
+
+        # 1. Check priority keys in exact order
+        for key in priority_keys:
+            found = find_key(data, key)
+            if found:
+                return found
+
+        # 2. Check generic fallback keys
+        for key in generic_keys:
+            found = find_key(data, key)
+            if found:
+                return found
+
         return ""
 
     @classmethod
