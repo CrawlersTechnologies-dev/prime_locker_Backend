@@ -82,6 +82,7 @@ class AppType(models.TextChoices):
     ANDROID_LOCKER = 'ANDROID_LOCKER', 'Android Locker APK'
     TV_LOCKER = 'TV_LOCKER', 'Smart TV Locker APK'
     RETAILER_APP = 'RETAILER_APP', 'Retailer Management App'
+    CUSTOMER_APP = 'CUSTOMER_APP', 'Customer Mobile App'
     IOS_AGENT = 'IOS_AGENT', 'iOS / Apple DEP Profile'
 
 

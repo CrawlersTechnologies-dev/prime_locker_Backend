@@ -615,3 +615,39 @@ class PartnerMDMBackendTests(TestCase):
         self.assertEqual(self.pm_device.status, DeviceLockStatus.UNENROLLED)
         self.assertEqual(self.pm_device.provider_status, 'UNREGISTERED')
         self.assertEqual(resp.data.get('customer_status'), 'UNINSTALL')
+
+    def test_device_uninstall_blocked_when_emi_pending(self):
+        from devices.models import DeviceLockStatus
+        from emi.models import CustomerEMIContract, EMIContractStatus
+        from decimal import Decimal
+        self.pm_device.status = DeviceLockStatus.ACTIVE
+        self.pm_device.save()
+
+        # Create active contract on this device
+        contract = CustomerEMIContract.objects.create(
+            customer=self.pm_device.customer,
+            retailer=self.pm_device.retailer,
+            lock_device=self.pm_device,
+            device_imei=self.pm_device.imei,
+            total_amount=Decimal('10000.00'),
+            down_payment=Decimal('1000.00'),
+            financed_amount=Decimal('9000.00'),
+            tenure_months=6,
+            monthly_emi_amount=Decimal('1500.00'),
+            first_emi_date=timezone.localdate(),
+            status=EMIContractStatus.ACTIVE
+        )
+
+        # Retailer attempts to uninstall -> must be rejected with 400
+        resp = self.client.post(f'/api/devices/{self.pm_device.id}/uninstall/', {'reason': 'Attempt before completion'}, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("must be completed first", resp.data['detail'])
+
+        # Now mark contract COMPLETED -> uninstall succeeds
+        contract.status = EMIContractStatus.COMPLETED
+        contract.save()
+
+        resp2 = self.client.post(f'/api/devices/{self.pm_device.id}/uninstall/', {'reason': 'EMI Completed'}, format='json')
+        self.assertEqual(resp2.status_code, status.HTTP_200_OK)
+        self.pm_device.refresh_from_db()
+        self.assertEqual(self.pm_device.status, DeviceLockStatus.UNENROLLED)

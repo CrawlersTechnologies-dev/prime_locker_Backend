@@ -211,3 +211,6 @@ PARTNER_MDM_CONFIG = {
     'SIMULATION': os.getenv('PARTNER_MDM_SIMULATION', 'True').lower() in ('true', '1', 't', 'yes'),
 }
 
+
+# Firebase Cloud Messaging Service Account Credentials
+FIREBASE_CREDENTIALS = os.getenv('FIREBASE_CREDENTIALS', str(BASE_DIR / 'firebase-service-account.json'))

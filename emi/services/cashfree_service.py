@@ -404,10 +404,9 @@ class CashfreeService:
             customer_phone = f"+91{customer_phone[-10:]}"
         customer_email = customer.email or f"{customer.mobile_number}@customer.primelocker.com"
 
-        mandate_id = f"cf_mandate_{contract.id}_{uuid.uuid4().hex[:8]}"
-
         # Simulation Mode fallback
         if cls.is_simulation():
+            mandate_id = f"sub_sim_{contract.id}_{uuid.uuid4().hex[:8]}"
             sim_auth_url = f"https://sandbox.cashfree.com/pg/orders/mandate/{mandate_id}?auth_mode={auth_mode}"
             sim_umrn = f"UMRN{uuid.uuid4().hex[:10].upper()}"
             logger.info(f"[SIMULATION] Cashfree UPI Mandate created: {mandate_id} (UMRN: {sim_umrn})")
@@ -479,7 +478,8 @@ class CashfreeService:
     @classmethod
     def get_mandate_status(cls, mandate_id):
         """Fetches status of a Cashfree mandate / subscription."""
-        if cls.is_simulation() or mandate_id.startswith('cf_mandate_') or mandate_id.startswith('sub_sim_'):
+        # Only simulate when simulation mode is explicitly enabled or mandate_id is marked simulated
+        if cls.is_simulation() or str(mandate_id).startswith('sub_sim_'):
             return {
                 "success": True,
                 "mandate_id": mandate_id,

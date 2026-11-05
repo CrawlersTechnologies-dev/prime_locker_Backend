@@ -329,6 +329,23 @@ class DeviceViewSet(viewsets.ModelViewSet):
             return denied
         device = self.get_object()
 
+        # Check if EMI contract is completed
+        from emi.models import CustomerEMIContract, EMIContractStatus
+        active_contracts = CustomerEMIContract.objects.filter(
+            models.Q(lock_device=device) | models.Q(device_imei=device.imei)
+        ).exclude(status=EMIContractStatus.COMPLETED)
+
+        force = str(request.data.get('force', '')).lower() in ['true', '1']
+        if active_contracts.exists() and not (force and request.user.role == 'SUPER_ADMIN'):
+            pending_ids = list(active_contracts.values_list('id', flat=True))
+            return Response(
+                {
+                    "detail": f"Device cannot be uninstalled because EMI contract(s) {pending_ids} are still active with pending payments. All EMI payments must be completed first.",
+                    "active_contracts": pending_ids
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
         # Call provider unregister/remove if applicable
         if device.lock_provider == LockProvider.PARTNER_MDM:
             from .services.partner_mdm_service import PartnerMDMService

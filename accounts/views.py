@@ -423,6 +423,8 @@ class CustomerViewSet(BaseRoleViewSet):
                     is_active=True
                 )
                 customer.set_password(password)
+                customer.customer_code = f"PR-{customer.id:04d}"
+                customer.save(update_fields=['customer_code'])
 
             # Handle files (photo, signature)
             if 'customer_photo' in request.FILES:
