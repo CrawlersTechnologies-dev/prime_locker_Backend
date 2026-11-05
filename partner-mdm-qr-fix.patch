@@ -1,0 +1,66 @@
+﻿diff --git a/devices/services/partner_mdm_service.py b/devices/services/partner_mdm_service.py
+index ca5a23a..1f4b912 100644
+--- a/devices/services/partner_mdm_service.py
++++ b/devices/services/partner_mdm_service.py
+@@ -125,6 +125,38 @@ class PartnerMDMService:
+             logger.error(f"Network error calling Partner MDM {endpoint}: {e}")
+             return {"success": False, "error": str(e)}
+ 
++    @classmethod
++    def _extract_qr_url(cls, data):
++        """
++        Recursively searches for a QR code URL anywhere inside nested dicts or lists.
++        Matches common keys: qr_url, qr_code, qr_code_url, provisioning_qr, qr.
++        """
++        if not data:
++            return ""
++
++        target_keys = {"qr_url", "qr_code", "qr_code_url", "provisioning_qr", "qr"}
++
++        if isinstance(data, dict):
++            for key, val in data.items():
++                if str(key).lower() in target_keys:
++                    if isinstance(val, str) and val.strip():
++                        return val.strip()
++                    elif isinstance(val, dict):
++                        nested = cls._extract_qr_url(val)
++                        if nested:
++                            return nested
++            for val in data.values():
++                if isinstance(val, (dict, list)):
++                    found = cls._extract_qr_url(val)
++                    if found:
++                        return found
++        elif isinstance(data, list):
++            for item in data:
++                found = cls._extract_qr_url(item)
++                if found:
++                    return found
++        return ""
++
+     @classmethod
+     def enroll_device(cls, device, customer_name="", customer_mobile="", customer_address="", loan_data=None, user=None):
+         """
+@@ -210,10 +242,18 @@ class PartnerMDMService:
+                 "error": f"Failed to register device with Partner MDM: {dev_res.get('error')}"
+             }
+ 
+-        dev_data = dev_res['data'].get('device', dev_res['data'])
+-        partner_device_id = dev_data.get('id')
+-        enrollment_info = dev_res['data'].get('enrollment', {})
+-        qr_url = enrollment_info.get('qr_url') or ""
++        raw_data = dev_res.get('data') or {}
++        dev_data = raw_data.get('device', raw_data) if isinstance(raw_data, dict) else {}
++        partner_device_id = dev_data.get('id') if isinstance(dev_data, dict) else None
++        if not partner_device_id and isinstance(raw_data, dict):
++            partner_device_id = raw_data.get('id')
++
++        qr_url = cls._extract_qr_url(raw_data)
++        if not qr_url:
++            logger.warning(
++                f"[Partner MDM] Device {device.imei} enrolled successfully (provider ID {partner_device_id}), "
++                f"but could not locate QR code URL in response payload: {raw_data}"
++            )
+ 
+         cls._log_audit(
+             action="PARTNER_MDM_DEVICE_ENROLLED",

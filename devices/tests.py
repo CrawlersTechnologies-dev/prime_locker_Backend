@@ -454,6 +454,32 @@ class PartnerMDMBackendTests(TestCase):
         remove_res = PartnerMDMService.remove_device(self.pm_device)
         self.assertTrue(remove_res['success'])
 
+    def test_partner_mdm_qr_extraction_nesting(self):
+        """Verify _extract_qr_url finds the QR code across all nested response formats"""
+        # 1. Standard enrollment.qr_url
+        data1 = {"enrollment": {"qr_url": "https://example.com/qr1"}}
+        self.assertEqual(PartnerMDMService._extract_qr_url(data1), "https://example.com/qr1")
+
+        # 2. Nested under device.qr_code
+        data2 = {"device": {"id": 5354, "qr_code": "https://example.com/qr2"}}
+        self.assertEqual(PartnerMDMService._extract_qr_url(data2), "https://example.com/qr2")
+
+        # 3. Top-level qr_code_url
+        data3 = {"id": 5354, "qr_code_url": "https://example.com/qr3"}
+        self.assertEqual(PartnerMDMService._extract_qr_url(data3), "https://example.com/qr3")
+
+        # 4. Deeply nested provisioning_qr
+        data4 = {"response": {"payload": {"provisioning_qr": "https://example.com/qr4"}}}
+        self.assertEqual(PartnerMDMService._extract_qr_url(data4), "https://example.com/qr4")
+
+        # 5. List format with qr
+        data5 = {"items": [{"name": "meta"}, {"qr": "https://example.com/qr5"}]}
+        self.assertEqual(PartnerMDMService._extract_qr_url(data5), "https://example.com/qr5")
+
+        # 6. Empty / not present
+        data6 = {"device": {"id": 5354}, "status": "OK"}
+        self.assertEqual(PartnerMDMService._extract_qr_url(data6), "")
+
     def test_api_enrollment_with_partner_mdm(self):
         """Verify /api/customers/enroll/ with lock_provider=PARTNER_MDM returns qr_code_data"""
         from keys.models import DeviceKey, KeyStatus
