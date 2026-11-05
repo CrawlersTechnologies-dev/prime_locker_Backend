@@ -4,6 +4,7 @@ from .views import (
     DeviceViewSet,
     DeviceHeartbeatView,
     AppVersionViewSet,
+    PublicAppDownloadView,
     LockMessageTemplateViewSet,
     RocketPayWebhookView,
     ApprovedDeviceTACViewSet,
@@ -18,6 +19,7 @@ router.register(r'tac-list', ApprovedDeviceTACViewSet, basename='tac-list')
 router.register(r'installation-videos', InstallationVideoViewSet, basename='installation-videos')
 
 urlpatterns = [
+    path('app-versions/download/<str:slug>/', PublicAppDownloadView.as_view(), name='public_app_download'),
     path('devices/ping/', DeviceHeartbeatView.as_view(), name='device-heartbeat'),
     path('devices/check-in/', DeviceHeartbeatView.as_view(), name='device-checkin-alias'),
     path('devices/rocketpay/webhook/', RocketPayWebhookView.as_view(), name='rocketpay-webhook-alias'),

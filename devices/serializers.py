@@ -269,6 +269,7 @@ class DeviceLocationLogSerializer(serializers.ModelSerializer):
 class AppVersionSerializer(serializers.ModelSerializer):
     uploaded_by_name = serializers.SerializerMethodField(read_only=True)
     download_url = serializers.SerializerMethodField(read_only=True)
+    public_link = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = AppVersion
@@ -279,6 +280,7 @@ class AppVersionSerializer(serializers.ModelSerializer):
             'version_code',
             'apk_file',
             'download_url',
+            'public_link',
             'external_download_url',
             'release_notes',
             'is_mandatory',
@@ -296,13 +298,26 @@ class AppVersionSerializer(serializers.ModelSerializer):
             return name or obj.uploaded_by.username
         return None
 
-    def get_download_url(self, obj):
+    def get_public_link(self, obj):
+        slug = 'customer'
+        if obj.app_type == AppType.CUSTOMER_APP:
+            slug = 'customer'
+        elif obj.app_type == AppType.RETAILER_APP:
+            slug = 'retailer'
+        elif obj.app_type == AppType.ANDROID_LOCKER:
+            slug = 'android-locker'
+        elif obj.app_type == AppType.TV_LOCKER:
+            slug = 'tv'
+        path = f"/api/app-versions/download/{slug}/"
         request = self.context.get('request')
-        if obj.apk_file:
-            if request:
-                return request.build_absolute_uri(obj.apk_file.url)
-            return obj.apk_file.url
-        return obj.external_download_url or None
+        if request:
+            return request.build_absolute_uri(path)
+        return path
+
+    def get_download_url(self, obj):
+        if obj.external_download_url:
+            return obj.external_download_url
+        return self.get_public_link(obj)
 
 
 class DeviceHeartbeatSerializer(serializers.Serializer):

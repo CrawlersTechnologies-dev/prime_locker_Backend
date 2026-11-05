@@ -1686,4 +1686,75 @@ class InstallationVideoViewSet(viewsets.ModelViewSet):
         )
         instance.delete()
 
+PUBLIC_APP_SLUGS = {
+    'customer': AppType.CUSTOMER_APP,
+    'customer-app': AppType.CUSTOMER_APP,
+    'retailer': AppType.RETAILER_APP,
+    'retailer-app': AppType.RETAILER_APP,
+    'android-locker': AppType.ANDROID_LOCKER,
+    'locker': AppType.ANDROID_LOCKER,
+    'tv': AppType.TV_LOCKER,
+    'tv-locker': AppType.TV_LOCKER,
+}
 
+
+class PublicAppDownloadView(APIView):
+    """
+    Public, no-login direct APK download route.
+    GET /api/app-versions/download/<slug>/ (e.g. /api/app-versions/download/customer/)
+    Streams the latest live APK binary directly, enabling public QR-code scanning
+    without requiring authentication or 401 errors.
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request, slug):
+        import os
+        from django.http import FileResponse, HttpResponseRedirect
+
+        clean_slug = str(slug).strip().lower()
+        app_type = PUBLIC_APP_SLUGS.get(clean_slug)
+        if not app_type:
+            # Fallback: check raw AppType choices
+            for at in AppType:
+                if at.value.lower() == clean_slug or at.name.lower() == clean_slug:
+                    app_type = at.value
+                    break
+
+        if not app_type:
+            return Response(
+                {
+                    "detail": f"Unknown app download slug '{slug}'.",
+                    "available_slugs": list(PUBLIC_APP_SLUGS.keys())
+                },
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        latest_version = AppVersion.objects.filter(
+            app_type=app_type,
+            is_active=True
+        ).order_by('-version_code', '-created_at').first()
+
+        if not latest_version:
+            return Response(
+                {"detail": f"No active APK release found for '{slug}' ({app_type}). Please upload a version in Super Admin portal."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Redirect to external CDN URL if configured
+        if latest_version.external_download_url:
+            return HttpResponseRedirect(latest_version.external_download_url)
+
+        if not latest_version.apk_file or not os.path.exists(latest_version.apk_file.path):
+            return Response(
+                {"detail": f"APK binary file for version {latest_version.version_name} is missing from the server storage."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        filename = os.path.basename(latest_version.apk_file.name)
+        response = FileResponse(
+            latest_version.apk_file.open('rb'),
+            content_type='application/vnd.android.package-archive',
+            as_attachment=True,
+            filename=filename
+        )
+        return response

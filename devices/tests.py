@@ -651,3 +651,49 @@ class PartnerMDMBackendTests(TestCase):
         self.assertEqual(resp2.status_code, status.HTTP_200_OK)
         self.pm_device.refresh_from_db()
         self.assertEqual(self.pm_device.status, DeviceLockStatus.UNENROLLED)
+
+
+from devices.models import AppVersion, AppType
+
+class PublicAppDownloadTests(TestCase):
+    def setUp(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from devices.models import AppVersion, AppType
+        self.apk_content = b"PK\x03\x04MockAPKBinaryContentForTest123"
+        self.apk_file = SimpleUploadedFile("app-release.apk", self.apk_content, content_type="application/vnd.android.package-archive")
+        self.customer_app = AppVersion.objects.create(
+            app_type=AppType.CUSTOMER_APP,
+            version_name="1.0.0",
+            version_code=100,
+            apk_file=self.apk_file,
+            is_active=True
+        )
+        self.client = APIClient()  # Unauthenticated client!
+
+    def test_public_customer_apk_download_no_auth(self):
+        resp = self.client.get('/api/app-versions/download/customer/')
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp['Content-Type'], 'application/vnd.android.package-archive')
+        self.assertEqual(b"".join(resp.streaming_content), self.apk_content)
+
+    def test_public_apk_download_unknown_slug_returns_404(self):
+        resp = self.client.get('/api/app-versions/download/non-existent-app/')
+        self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_public_app_serializer_public_link(self):
+        from devices.serializers import AppVersionSerializer
+        serializer = AppVersionSerializer(self.customer_app)
+        self.assertIn('/api/app-versions/download/customer/', serializer.data['public_link'])
+        self.assertEqual(serializer.data['download_url'], serializer.data['public_link'])
+
+    def test_public_apk_external_redirect(self):
+        AppVersion.objects.create(
+            app_type=AppType.RETAILER_APP,
+            version_name="2.0.0",
+            version_code=200,
+            external_download_url="https://cdn.primelocker.pro/retailer.apk",
+            is_active=True
+        )
+        resp = self.client.get('/api/app-versions/download/retailer/')
+        self.assertEqual(resp.status_code, status.HTTP_302_FOUND)
+        self.assertEqual(resp['Location'], "https://cdn.primelocker.pro/retailer.apk")

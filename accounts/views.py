@@ -1293,8 +1293,9 @@ class ProtectedMediaView(APIView):
     Bug 3 Fix: Authenticated & Hierarchy-Scoped Media File Server.
     Protects /media/kyc_documents/, /media/customer_photos/, /media/customer_signatures/
     so unauthenticated or unauthorized users cannot access sensitive customer KYC data.
+    Allows public direct access for APK releases in /media/apks/.
     """
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.AllowAny]
 
     def get(self, request, file_path):
         clean_path = os.path.normpath(file_path).lstrip('/\\')
@@ -1306,6 +1307,16 @@ class ProtectedMediaView(APIView):
 
         if not os.path.exists(full_path):
             raise Http404("File not found.")
+
+        # Allow unauthenticated access for APK downloads
+        if clean_path.startswith('apks') or clean_path.endswith('.apk'):
+            content_type, _ = mimetypes.guess_type(full_path)
+            return FileResponse(open(full_path, 'rb'), content_type=content_type or 'application/vnd.android.package-archive')
+
+        # If not an APK file, enforce authentication for protected KYC documents
+        if not (clean_path.startswith('apks') or clean_path.endswith('.apk')):
+            if not request.user or not request.user.is_authenticated:
+                return Response({"detail": "Authentication credentials were not provided."}, status=status.HTTP_401_UNAUTHORIZED)
 
         # Super Admin has global access to all files
         user = request.user
