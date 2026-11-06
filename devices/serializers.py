@@ -30,6 +30,9 @@ class DeviceSerializer(serializers.ModelSerializer):
     is_online = serializers.ReadOnlyField()
     activation_key_string = serializers.CharField(write_only=True, required=False, allow_blank=True)
     emi_contract_id = serializers.IntegerField(write_only=True, required=False)
+    qr_service_app = serializers.SerializerMethodField(read_only=True)
+    qr_running_device = serializers.SerializerMethodField(read_only=True)
+    qr_test_dpc = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = Device
@@ -83,6 +86,10 @@ class DeviceSerializer(serializers.ModelSerializer):
             'provider_status',
             'provider_error',
             'qr_code_url',
+            'qr_codes',
+            'qr_service_app',
+            'qr_running_device',
+            'qr_test_dpc',
             'hide_application',
             'calls_disabled',
             'wifi_disabled',
@@ -105,6 +112,18 @@ class DeviceSerializer(serializers.ModelSerializer):
             'id', 'retailer', 'activation_key', 'emi_contract', 'offline_unlock_code',
             'last_online_at', 'ip_address', 'last_location_at', 'created_at', 'updated_at'
         ]
+
+    def get_qr_service_app(self, obj):
+        codes = getattr(obj, 'qr_codes', None) or {}
+        return codes.get('qr_service_app') or obj.qr_code_url
+
+    def get_qr_running_device(self, obj):
+        codes = getattr(obj, 'qr_codes', None) or {}
+        return codes.get('qr_running_device')
+
+    def get_qr_test_dpc(self, obj):
+        codes = getattr(obj, 'qr_codes', None) or {}
+        return codes.get('qr_test_dpc')
 
     def get_customer_details(self, obj):
         if obj.customer:

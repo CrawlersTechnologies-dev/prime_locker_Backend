@@ -167,6 +167,7 @@ class Device(models.Model):
     mobile_data_disabled = models.BooleanField(default=False, help_text="Block mobile data")
     usb_debugging_disabled = models.BooleanField(default=False, help_text="Block USB debugging")
     qr_code_url = models.URLField(max_length=500, blank=True, null=True, help_text="QR Code URL for 6-tap Android Enterprise setup")
+    qr_codes = models.JSONField(default=dict, blank=True, help_text="Multi-format provisioning QRs (qr_service_app, qr_running_device, qr_test_dpc)")
 
     # Wallpaper & Screen Reminders
     wallpaper_locked = models.BooleanField(default=False)

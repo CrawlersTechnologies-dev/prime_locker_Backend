@@ -484,7 +484,12 @@ class CustomerViewSet(BaseRoleViewSet):
                 qr_code_data = rp_result.get('qr_code_data')
                 device.provider_device_id = rp_device_id
                 device.provider_status = rp_result.get('provider_status', 'PENDING')
-                device.save(update_fields=['provider_device_id', 'provider_status'])
+                if qr_code_data:
+                    device.qr_code_url = qr_code_data
+                    device.qr_codes = {"qr_service_app": qr_code_data}
+                    device.save(update_fields=['provider_device_id', 'provider_status', 'qr_code_url', 'qr_codes'])
+                else:
+                    device.save(update_fields=['provider_device_id', 'provider_status'])
             elif lock_provider == LockProvider.PARTNER_MDM:
                 from devices.services.partner_mdm_service import PartnerMDMService
                 loan_data = {
@@ -511,10 +516,12 @@ class CustomerViewSet(BaseRoleViewSet):
                     )
                 rp_device_id = pm_result.get('provider_device_id')
                 qr_code_data = pm_result.get('qr_code_url')
+                qr_codes_data = pm_result.get('qr_codes') or {}
                 device.provider_device_id = str(rp_device_id)
                 device.provider_status = pm_result.get('provider_status', 'PENDING')
                 device.qr_code_url = qr_code_data
-                device.save(update_fields=['provider_device_id', 'provider_status', 'qr_code_url'])
+                device.qr_codes = qr_codes_data
+                device.save(update_fields=['provider_device_id', 'provider_status', 'qr_code_url', 'qr_codes'])
 
             # Activate Key if present
             if key_obj:
@@ -1688,6 +1695,21 @@ class DeviceActivateAuthView(APIView):
                 models.Q(username__iexact=raw_id) | models.Q(email__iexact=raw_id)
             ).first()
 
+        # 7. Match by Device IMEI (imei / secondary_imei) for running-device activation
+        matched_by_imei_dev = None
+        if not customer:
+            clean_imei = ''.join(c for c in raw_id if c.isalnum())
+            if len(clean_imei) >= 6:
+                from devices.models import Device
+                matched_by_imei_dev = Device.objects.filter(
+                    models.Q(imei__iexact=raw_id) |
+                    models.Q(secondary_imei__iexact=raw_id) |
+                    models.Q(imei__iexact=clean_imei) |
+                    models.Q(secondary_imei__iexact=clean_imei)
+                ).first()
+                if matched_by_imei_dev and matched_by_imei_dev.customer:
+                    customer = matched_by_imei_dev.customer
+
         if not customer:
             return Response(
                 {"detail": f"Customer not found for identifier '{raw_id}'. Please check the Customer ID and try again."},
@@ -1707,8 +1729,8 @@ class DeviceActivateAuthView(APIView):
 
         # Find or link Device
         from devices.models import Device, DeviceLockStatus
-        device = None
-        if imei:
+        device = matched_by_imei_dev
+        if not device and imei:
             device = customer.registered_devices.filter(imei=imei).first()
             if not device:
                 device = Device.objects.filter(imei=imei).first()

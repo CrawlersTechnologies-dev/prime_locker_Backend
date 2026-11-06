@@ -503,6 +503,35 @@ class PartnerMDMBackendTests(TestCase):
         data_empty = {"device": {"id": 5354}, "status": "OK"}
         self.assertEqual(PartnerMDMService._extract_qr_url(data_empty), "")
 
+    def test_extract_qr_codes_all_three(self):
+        """Verify _extract_qr_codes extracts all 3 QRs into a dict"""
+        live_payload = {
+            "enrollment": {
+                "qr_test_dpc": "https://apirenewjss.com/api2/QR/new/QR-1.png",
+                "qr_service_app": "https://apirenewjss.com/api2/QR/new/QR-2.png",
+                "qr_running_device": "https://apirenewjss.com/api2/QR/new/QR-3.png"
+            }
+        }
+        codes = PartnerMDMService._extract_qr_codes(live_payload)
+        self.assertEqual(codes['qr_service_app'], "https://apirenewjss.com/api2/QR/new/QR-2.png")
+        self.assertEqual(codes['qr_running_device'], "https://apirenewjss.com/api2/QR/new/QR-3.png")
+        self.assertEqual(codes['qr_test_dpc'], "https://apirenewjss.com/api2/QR/new/QR-1.png")
+
+    def test_device_serializer_multi_qr(self):
+        """Verify DeviceSerializer exposes qr_codes and individual helper fields"""
+        from devices.serializers import DeviceSerializer
+        self.pm_device.qr_codes = {
+            "qr_service_app": "https://example.com/qr-app",
+            "qr_running_device": "https://example.com/qr-running",
+            "qr_test_dpc": "https://example.com/qr-dpc"
+        }
+        self.pm_device.save(update_fields=['qr_codes'])
+        ser = DeviceSerializer(self.pm_device)
+        self.assertEqual(ser.data['qr_service_app'], "https://example.com/qr-app")
+        self.assertEqual(ser.data['qr_running_device'], "https://example.com/qr-running")
+        self.assertEqual(ser.data['qr_test_dpc'], "https://example.com/qr-dpc")
+        self.assertIn('qr_codes', ser.data)
+
     def test_api_enrollment_with_partner_mdm(self):
         """Verify /api/customers/enroll/ with lock_provider=PARTNER_MDM returns qr_code_data"""
         from keys.models import DeviceKey, KeyStatus

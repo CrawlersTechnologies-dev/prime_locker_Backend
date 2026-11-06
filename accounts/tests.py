@@ -497,3 +497,34 @@ class AccountsBackendTests(TestCase):
         }, format='json')
         self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
         self.assertIn("Customer not found", resp.data['detail'])
+
+    def test_device_activate_by_imei(self):
+        """Verify device activation succeeds when customer_id is the device's IMEI"""
+        from devices.models import Device, DeviceLockStatus
+        customer = User.objects.create_user(
+            username='cust_imei_act',
+            email='cust_imei_act@example.com',
+            mobile_number='9888777666',
+            role='CUSTOMER',
+            customer_code='PR-7788'
+        )
+        device = Device.objects.create(
+            retailer=self.retailer,
+            customer=customer,
+            imei='861803254940484',
+            secondary_imei='861803254940485',
+            status=DeviceLockStatus.INACTIVE
+        )
+
+        client = APIClient()
+        resp = client.post('/auth/device-activate/', {
+            'customer_id': '861803254940484',
+            'fcm_token': 'fcm_running_token_123'
+        }, format='json')
+
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data['user']['id'], customer.id)
+        self.assertIn('access', resp.data)
+        device.refresh_from_db()
+        self.assertTrue(device.is_activated)
+        self.assertEqual(device.fcm_token, 'fcm_running_token_123')

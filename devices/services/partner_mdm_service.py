@@ -126,15 +126,40 @@ class PartnerMDMService:
             return {"success": False, "error": str(e)}
 
     @classmethod
+    def _find_key_in_data(cls, obj, target_key):
+        """Recursively searches for a specific key in dicts or lists."""
+        if not obj:
+            return ""
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                if str(k).lower() == target_key.lower():
+                    if isinstance(v, str) and v.strip():
+                        return v.strip()
+                    elif isinstance(v, dict):
+                        res = cls._extract_qr_url(v)
+                        if res:
+                            return res
+            for v in obj.values():
+                if isinstance(v, (dict, list)):
+                    res = cls._find_key_in_data(v, target_key)
+                    if res:
+                        return res
+        elif isinstance(obj, list):
+            for item in obj:
+                res = cls._find_key_in_data(item, target_key)
+                if res:
+                    return res
+        return ""
+
+    @classmethod
     def _extract_qr_url(cls, data):
         """
-        Extracts the provisioning QR code URL from the Partner MDM response payload.
+        Extracts the primary provisioning QR code URL from Partner MDM response payload.
         Priority order:
           1. qr_service_app (service app self-enrollment / direct DPC)
           2. qr_test_dpc (6-tap factory-reset DPC setup for new phones)
           3. qr_running_device (install on already-running phone)
           4. Generic fallback keys: qr_url, qr_code, qr_code_url, provisioning_qr, qr
-        Searches under enrollment, device, top-level, or any nested structure.
         """
         if not data:
             return ""
@@ -142,41 +167,42 @@ class PartnerMDMService:
         priority_keys = ["qr_service_app", "qr_test_dpc", "qr_running_device"]
         generic_keys = ["qr_url", "qr_code", "qr_code_url", "provisioning_qr", "qr"]
 
-        def find_key(obj, target_key):
-            if isinstance(obj, dict):
-                for k, v in obj.items():
-                    if str(k).lower() == target_key:
-                        if isinstance(v, str) and v.strip():
-                            return v.strip()
-                        elif isinstance(v, dict):
-                            res = cls._extract_qr_url(v)
-                            if res:
-                                return res
-                for v in obj.values():
-                    if isinstance(v, (dict, list)):
-                        res = find_key(v, target_key)
-                        if res:
-                            return res
-            elif isinstance(obj, list):
-                for item in obj:
-                    res = find_key(item, target_key)
-                    if res:
-                        return res
-            return ""
-
-        # 1. Check priority keys in exact order
         for key in priority_keys:
-            found = find_key(data, key)
+            found = cls._find_key_in_data(data, key)
             if found:
                 return found
 
-        # 2. Check generic fallback keys
         for key in generic_keys:
-            found = find_key(data, key)
+            found = cls._find_key_in_data(data, key)
             if found:
                 return found
 
         return ""
+
+    @classmethod
+    def _extract_qr_codes(cls, data):
+        """
+        Extracts all 3 provisioning QR code URLs from Partner MDM response payload into a dict:
+          - qr_service_app (new phone Service App install)
+          - qr_running_device (install on already-running phone)
+          - qr_test_dpc (6-tap factory-reset DPC setup)
+        """
+        if not data:
+            return {}
+
+        qr_keys = ["qr_service_app", "qr_running_device", "qr_test_dpc"]
+        result = {}
+        for key in qr_keys:
+            val = cls._find_key_in_data(data, key)
+            if val:
+                result[key] = val
+
+        if not result:
+            single = cls._extract_qr_url(data)
+            if single:
+                result["qr_service_app"] = single
+
+        return result
 
     @classmethod
     def enroll_device(cls, device, customer_name="", customer_mobile="", customer_address="", loan_data=None, user=None):
@@ -202,11 +228,17 @@ class PartnerMDMService:
                     "status": "PENDING"
                 }
             )
+            sim_qr_codes = {
+                "qr_service_app": sim_qr,
+                "qr_running_device": f"{sim_qr}&type=running",
+                "qr_test_dpc": f"{sim_qr}&type=dpc"
+            }
             return {
                 "success": True,
                 "provider_device_id": sim_device_id,
                 "provider_status": "PENDING",
                 "qr_code_url": sim_qr,
+                "qr_codes": sim_qr_codes,
                 "mode": "SIMULATION"
             }
 
@@ -286,12 +318,14 @@ class PartnerMDMService:
             }
         )
 
+        qr_codes = cls._extract_qr_codes(raw_data)
         return {
             "success": True,
             "provider_device_id": str(partner_device_id),
             "provider_status": "PENDING",
             "qr_code_url": qr_url,
-            "details": dev_res['data']
+            "qr_codes": qr_codes,
+            "details": dev_res.get('data')
         }
 
     @classmethod

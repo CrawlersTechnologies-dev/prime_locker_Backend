@@ -359,6 +359,10 @@ class CustomerSerializer(serializers.ModelSerializer):
             "provider_device_id": device.provider_device_id,
             "provider_status": device.provider_status,
             "qr_code_url": device.qr_code_url,
+            "qr_codes": getattr(device, 'qr_codes', {}) or {},
+            "qr_service_app": (getattr(device, 'qr_codes', {}) or {}).get('qr_service_app') or device.qr_code_url,
+            "qr_running_device": (getattr(device, 'qr_codes', {}) or {}).get('qr_running_device'),
+            "qr_test_dpc": (getattr(device, 'qr_codes', {}) or {}).get('qr_test_dpc'),
             "loan_provider": device.loan_provider,
             "loan_account_number": device.loan_account_number
         }
