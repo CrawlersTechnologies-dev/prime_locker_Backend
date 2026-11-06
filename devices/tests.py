@@ -456,7 +456,7 @@ class PartnerMDMBackendTests(TestCase):
 
     def test_partner_mdm_qr_extraction_nesting(self):
         """Verify _extract_qr_url finds and prioritizes QR codes across provider response formats"""
-        # 1. Live provider response format with 3 QRs (qr_test_dpc must be prioritized)
+        # 1. Live provider response format with 3 QRs (qr_service_app must be prioritized)
         live_payload = {
             "enrollment": {
                 "qr_test_dpc": "https://apirenewjss.com/api2/QR/new/QR-1.png",
@@ -466,30 +466,30 @@ class PartnerMDMBackendTests(TestCase):
         }
         self.assertEqual(
             PartnerMDMService._extract_qr_url(live_payload),
+            "https://apirenewjss.com/api2/QR/new/QR-2.png"
+        )
+
+        # 2. Priority fallback to qr_test_dpc when qr_service_app is absent
+        payload_test_dpc = {
+            "enrollment": {
+                "qr_test_dpc": "https://apirenewjss.com/api2/QR/new/QR-1.png",
+                "qr_running_device": "https://apirenewjss.com/api2/QR/new/QR-3.png"
+            }
+        }
+        self.assertEqual(
+            PartnerMDMService._extract_qr_url(payload_test_dpc),
             "https://apirenewjss.com/api2/QR/new/QR-1.png"
         )
 
-        # 2. Priority fallback to qr_running_device when qr_test_dpc is absent
+        # 3. Priority fallback to qr_running_device when both above are absent
         payload_running = {
             "enrollment": {
-                "qr_service_app": "https://apirenewjss.com/api2/QR/new/QR-2.png",
                 "qr_running_device": "https://apirenewjss.com/api2/QR/new/QR-3.png"
             }
         }
         self.assertEqual(
             PartnerMDMService._extract_qr_url(payload_running),
             "https://apirenewjss.com/api2/QR/new/QR-3.png"
-        )
-
-        # 3. Priority fallback to qr_service_app when both above are absent
-        payload_service = {
-            "enrollment": {
-                "qr_service_app": "https://apirenewjss.com/api2/QR/new/QR-2.png"
-            }
-        }
-        self.assertEqual(
-            PartnerMDMService._extract_qr_url(payload_service),
-            "https://apirenewjss.com/api2/QR/new/QR-2.png"
         )
 
         # 4. Standard fallback keys (e.g. qr_url, qr_code, provisioning_qr)

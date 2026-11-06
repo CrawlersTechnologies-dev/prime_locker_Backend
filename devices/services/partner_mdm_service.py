@@ -130,16 +130,16 @@ class PartnerMDMService:
         """
         Extracts the provisioning QR code URL from the Partner MDM response payload.
         Priority order:
-          1. qr_test_dpc (6-tap factory-reset DPC setup for new phones)
-          2. qr_running_device (install on already-running phone)
-          3. qr_service_app (service app self-enrollment backup)
+          1. qr_service_app (service app self-enrollment / direct DPC)
+          2. qr_test_dpc (6-tap factory-reset DPC setup for new phones)
+          3. qr_running_device (install on already-running phone)
           4. Generic fallback keys: qr_url, qr_code, qr_code_url, provisioning_qr, qr
         Searches under enrollment, device, top-level, or any nested structure.
         """
         if not data:
             return ""
 
-        priority_keys = ["qr_test_dpc", "qr_running_device", "qr_service_app"]
+        priority_keys = ["qr_service_app", "qr_test_dpc", "qr_running_device"]
         generic_keys = ["qr_url", "qr_code", "qr_code_url", "provisioning_qr", "qr"]
 
         def find_key(obj, target_key):
