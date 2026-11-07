@@ -406,8 +406,16 @@ class DeviceViewSet(viewsets.ModelViewSet):
         device.save(update_fields=['camera_disabled'])
         if device.lock_provider == LockProvider.PARTNER_MDM:
             from .services.partner_mdm_service import PartnerMDMService
-            PartnerMDMService.update_policy(device, {"camera_enabled": not new_camera_disabled}, user=request.user)
-        self._create_command(device, CommandType.UPDATE_POLICY, {"camera_disabled": device.camera_disabled})
+            policy_payload = {
+                "disable_camera": new_camera_disabled,
+                "camera_disabled": new_camera_disabled,
+                "camera_enabled": not new_camera_disabled,
+            }
+            PartnerMDMService.update_policy(device, policy_payload, user=request.user)
+        self._create_command(device, CommandType.UPDATE_POLICY, {
+            "camera_disabled": device.camera_disabled,
+            "disable_camera": device.camera_disabled
+        })
         return Response({
             "message": f"Camera is now {'DISABLED' if device.camera_disabled else 'ENABLED'}.",
             "camera_disabled": device.camera_disabled
@@ -1377,6 +1385,10 @@ class DeviceHeartbeatView(APIView):
 
         if 'synced_contacts' in serializer.validated_data:
             device.synced_contacts = serializer.validated_data['synced_contacts']
+
+        for sim_f in ['sim_operator', 'sim_number', 'sim_serial', 'sim_operator_2', 'sim_number_2']:
+            if sim_f in serializer.validated_data and serializer.validated_data[sim_f]:
+                setattr(device, sim_f, serializer.validated_data[sim_f])
 
         device.save()
 

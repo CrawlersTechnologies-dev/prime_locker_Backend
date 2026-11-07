@@ -105,6 +105,11 @@ class DeviceSerializer(serializers.ModelSerializer):
             # Synced contacts & apps
             'synced_contacts',
             'installed_apps',
+            'sim_operator',
+            'sim_number',
+            'sim_serial',
+            'sim_operator_2',
+            'sim_number_2',
             'created_at',
             'updated_at'
         ]
@@ -351,6 +356,11 @@ class DeviceHeartbeatSerializer(serializers.Serializer):
     longitude = serializers.DecimalField(max_digits=10, decimal_places=7, required=False)
     address = serializers.CharField(required=False, allow_blank=True)
     synced_contacts = serializers.ListField(required=False, child=serializers.DictField())
+    sim_operator = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    sim_number = serializers.CharField(max_length=30, required=False, allow_blank=True)
+    sim_serial = serializers.CharField(max_length=50, required=False, allow_blank=True)
+    sim_operator_2 = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    sim_number_2 = serializers.CharField(max_length=30, required=False, allow_blank=True)
 
 
 class LockMessageTemplateSerializer(serializers.ModelSerializer):

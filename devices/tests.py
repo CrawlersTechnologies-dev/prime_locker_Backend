@@ -454,6 +454,34 @@ class PartnerMDMBackendTests(TestCase):
         remove_res = PartnerMDMService.remove_device(self.pm_device)
         self.assertTrue(remove_res['success'])
 
+    def test_offline_code_is_six_digits(self):
+        """Verify offline unlock code generated is strictly 6 digits"""
+        from devices.models import generate_offline_code
+        code = generate_offline_code()
+        self.assertEqual(len(code), 6)
+        self.assertTrue(code.isdigit())
+
+    def test_device_heartbeat_sim_telemetry(self):
+        """Verify heartbeat ping updates SIM card information"""
+        client = APIClient()
+        ping_payload = {
+            "imei": self.pm_device.imei,
+            "battery_level": 88,
+            "sim_operator": "Airtel 5G",
+            "sim_number": "+919876543210",
+            "sim_serial": "8991000123456789012F",
+            "sim_operator_2": "Jio True 5G",
+            "sim_number_2": "+919812345678"
+        }
+        resp = client.post('/api/devices/ping/', ping_payload, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.pm_device.refresh_from_db()
+        self.assertEqual(self.pm_device.sim_operator, "Airtel 5G")
+        self.assertEqual(self.pm_device.sim_number, "+919876543210")
+        self.assertEqual(self.pm_device.sim_serial, "8991000123456789012F")
+        self.assertEqual(self.pm_device.sim_operator_2, "Jio True 5G")
+        self.assertEqual(self.pm_device.sim_number_2, "+919812345678")
+
     def test_partner_mdm_qr_extraction_nesting(self):
         """Verify _extract_qr_url finds and prioritizes QR codes across provider response formats"""
         # 1. Live provider response format with 3 QRs (qr_service_app must be prioritized)
@@ -775,3 +803,4 @@ class PublicAppDownloadTests(TestCase):
         resp = self.client.get('/api/app-versions/download/retailer/')
         self.assertEqual(resp.status_code, status.HTTP_302_FOUND)
         self.assertEqual(resp['Location'], "https://cdn.primelocker.pro/retailer.apk")
+

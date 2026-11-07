@@ -364,7 +364,12 @@ class CustomerSerializer(serializers.ModelSerializer):
             "qr_running_device": (getattr(device, 'qr_codes', {}) or {}).get('qr_running_device'),
             "qr_test_dpc": (getattr(device, 'qr_codes', {}) or {}).get('qr_test_dpc'),
             "loan_provider": device.loan_provider,
-            "loan_account_number": device.loan_account_number
+            "loan_account_number": device.loan_account_number,
+            "sim_operator": getattr(device, 'sim_operator', None),
+            "sim_number": getattr(device, 'sim_number', None),
+            "sim_serial": getattr(device, 'sim_serial', None),
+            "sim_operator_2": getattr(device, 'sim_operator_2', None),
+            "sim_number_2": getattr(device, 'sim_number_2', None)
         }
 
     def get_contract_summary(self, obj):

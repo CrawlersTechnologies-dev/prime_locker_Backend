@@ -1,0 +1,153 @@
+﻿diff --git a/accounts/serializers.py b/accounts/serializers.py
+index 82ad0e9..e4b3cd6 100644
+--- a/accounts/serializers.py
++++ b/accounts/serializers.py
+@@ -364,7 +364,12 @@ class CustomerSerializer(serializers.ModelSerializer):
+             "qr_running_device": (getattr(device, 'qr_codes', {}) or {}).get('qr_running_device'),
+             "qr_test_dpc": (getattr(device, 'qr_codes', {}) or {}).get('qr_test_dpc'),
+             "loan_provider": device.loan_provider,
+-            "loan_account_number": device.loan_account_number
++            "loan_account_number": device.loan_account_number,
++            "sim_operator": getattr(device, 'sim_operator', None),
++            "sim_number": getattr(device, 'sim_number', None),
++            "sim_serial": getattr(device, 'sim_serial', None),
++            "sim_operator_2": getattr(device, 'sim_operator_2', None),
++            "sim_number_2": getattr(device, 'sim_number_2', None)
+         }
+ 
+     def get_contract_summary(self, obj):
+diff --git a/devices/models.py b/devices/models.py
+index 9465b99..0f71ff0 100644
+--- a/devices/models.py
++++ b/devices/models.py
+@@ -87,8 +87,8 @@ class AppType(models.TextChoices):
+ 
+ 
+ def generate_offline_code():
+-    """Generates a secure 8-digit random pin for offline unlock"""
+-    return ''.join(random.choices(string.digits, k=8))
++    """Generates a secure 6-digit random pin for offline unlock"""
++    return ''.join(random.choices(string.digits, k=6))
+ 
+ 
+ class Device(models.Model):
+@@ -168,6 +168,13 @@ class Device(models.Model):
+     usb_debugging_disabled = models.BooleanField(default=False, help_text="Block USB debugging")
+     qr_code_url = models.URLField(max_length=500, blank=True, null=True, help_text="QR Code URL for 6-tap Android Enterprise setup")
+     qr_codes = models.JSONField(default=dict, blank=True, help_text="Multi-format provisioning QRs (qr_service_app, qr_running_device, qr_test_dpc)")
++    
++    # SIM Card Information
++    sim_operator = models.CharField(max_length=100, blank=True, null=True, help_text="Primary SIM Carrier (e.g. Jio, Airtel)")
++    sim_number = models.CharField(max_length=30, blank=True, null=True, help_text="Primary SIM phone number")
++    sim_serial = models.CharField(max_length=50, blank=True, null=True, help_text="SIM ICCID / Serial Number")
++    sim_operator_2 = models.CharField(max_length=100, blank=True, null=True, help_text="Secondary SIM Carrier")
++    sim_number_2 = models.CharField(max_length=30, blank=True, null=True, help_text="Secondary SIM phone number")
+ 
+     # Wallpaper & Screen Reminders
+     wallpaper_locked = models.BooleanField(default=False)
+diff --git a/devices/serializers.py b/devices/serializers.py
+index 36825ef..a8a7425 100644
+--- a/devices/serializers.py
++++ b/devices/serializers.py
+@@ -105,6 +105,11 @@ class DeviceSerializer(serializers.ModelSerializer):
+             # Synced contacts & apps
+             'synced_contacts',
+             'installed_apps',
++            'sim_operator',
++            'sim_number',
++            'sim_serial',
++            'sim_operator_2',
++            'sim_number_2',
+             'created_at',
+             'updated_at'
+         ]
+@@ -351,6 +356,11 @@ class DeviceHeartbeatSerializer(serializers.Serializer):
+     longitude = serializers.DecimalField(max_digits=10, decimal_places=7, required=False)
+     address = serializers.CharField(required=False, allow_blank=True)
+     synced_contacts = serializers.ListField(required=False, child=serializers.DictField())
++    sim_operator = serializers.CharField(max_length=100, required=False, allow_blank=True)
++    sim_number = serializers.CharField(max_length=30, required=False, allow_blank=True)
++    sim_serial = serializers.CharField(max_length=50, required=False, allow_blank=True)
++    sim_operator_2 = serializers.CharField(max_length=100, required=False, allow_blank=True)
++    sim_number_2 = serializers.CharField(max_length=30, required=False, allow_blank=True)
+ 
+ 
+ class LockMessageTemplateSerializer(serializers.ModelSerializer):
+diff --git a/devices/tests.py b/devices/tests.py
+index 6895cae..1f0600d 100644
+--- a/devices/tests.py
++++ b/devices/tests.py
+@@ -454,6 +454,34 @@ class PartnerMDMBackendTests(TestCase):
+         remove_res = PartnerMDMService.remove_device(self.pm_device)
+         self.assertTrue(remove_res['success'])
+ 
++    def test_offline_code_is_six_digits(self):
++        """Verify offline unlock code generated is strictly 6 digits"""
++        from devices.models import generate_offline_code
++        code = generate_offline_code()
++        self.assertEqual(len(code), 6)
++        self.assertTrue(code.isdigit())
++
++    def test_device_heartbeat_sim_telemetry(self):
++        """Verify heartbeat ping updates SIM card information"""
++        client = APIClient()
++        ping_payload = {
++            "imei": self.pm_device.imei,
++            "battery_level": 88,
++            "sim_operator": "Airtel 5G",
++            "sim_number": "+919876543210",
++            "sim_serial": "8991000123456789012F",
++            "sim_operator_2": "Jio True 5G",
++            "sim_number_2": "+919812345678"
++        }
++        resp = client.post('/api/devices/ping/', ping_payload, format='json')
++        self.assertEqual(resp.status_code, status.HTTP_200_OK)
++        self.pm_device.refresh_from_db()
++        self.assertEqual(self.pm_device.sim_operator, "Airtel 5G")
++        self.assertEqual(self.pm_device.sim_number, "+919876543210")
++        self.assertEqual(self.pm_device.sim_serial, "8991000123456789012F")
++        self.assertEqual(self.pm_device.sim_operator_2, "Jio True 5G")
++        self.assertEqual(self.pm_device.sim_number_2, "+919812345678")
++
+     def test_partner_mdm_qr_extraction_nesting(self):
+         """Verify _extract_qr_url finds and prioritizes QR codes across provider response formats"""
+         # 1. Live provider response format with 3 QRs (qr_service_app must be prioritized)
+@@ -775,3 +803,4 @@ class PublicAppDownloadTests(TestCase):
+         resp = self.client.get('/api/app-versions/download/retailer/')
+         self.assertEqual(resp.status_code, status.HTTP_302_FOUND)
+         self.assertEqual(resp['Location'], "https://cdn.primelocker.pro/retailer.apk")
++
+diff --git a/devices/views.py b/devices/views.py
+index e269d94..c7ea638 100644
+--- a/devices/views.py
++++ b/devices/views.py
+@@ -406,8 +406,16 @@ class DeviceViewSet(viewsets.ModelViewSet):
+         device.save(update_fields=['camera_disabled'])
+         if device.lock_provider == LockProvider.PARTNER_MDM:
+             from .services.partner_mdm_service import PartnerMDMService
+-            PartnerMDMService.update_policy(device, {"camera_enabled": not new_camera_disabled}, user=request.user)
+-        self._create_command(device, CommandType.UPDATE_POLICY, {"camera_disabled": device.camera_disabled})
++            policy_payload = {
++                "disable_camera": new_camera_disabled,
++                "camera_disabled": new_camera_disabled,
++                "camera_enabled": not new_camera_disabled,
++            }
++            PartnerMDMService.update_policy(device, policy_payload, user=request.user)
++        self._create_command(device, CommandType.UPDATE_POLICY, {
++            "camera_disabled": device.camera_disabled,
++            "disable_camera": device.camera_disabled
++        })
+         return Response({
+             "message": f"Camera is now {'DISABLED' if device.camera_disabled else 'ENABLED'}.",
+             "camera_disabled": device.camera_disabled
+@@ -1378,6 +1386,10 @@ class DeviceHeartbeatView(APIView):
+         if 'synced_contacts' in serializer.validated_data:
+             device.synced_contacts = serializer.validated_data['synced_contacts']
+ 
++        for sim_f in ['sim_operator', 'sim_number', 'sim_serial', 'sim_operator_2', 'sim_number_2']:
++            if sim_f in serializer.validated_data and serializer.validated_data[sim_f]:
++                setattr(device, sim_f, serializer.validated_data[sim_f])
++
+         device.save()
+ 
+         # Fetch pending commands

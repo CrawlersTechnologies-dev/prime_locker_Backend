@@ -87,8 +87,8 @@ class AppType(models.TextChoices):
 
 
 def generate_offline_code():
-    """Generates a secure 8-digit random pin for offline unlock"""
-    return ''.join(random.choices(string.digits, k=8))
+    """Generates a secure 6-digit random pin for offline unlock"""
+    return ''.join(random.choices(string.digits, k=6))
 
 
 class Device(models.Model):
@@ -168,6 +168,13 @@ class Device(models.Model):
     usb_debugging_disabled = models.BooleanField(default=False, help_text="Block USB debugging")
     qr_code_url = models.URLField(max_length=500, blank=True, null=True, help_text="QR Code URL for 6-tap Android Enterprise setup")
     qr_codes = models.JSONField(default=dict, blank=True, help_text="Multi-format provisioning QRs (qr_service_app, qr_running_device, qr_test_dpc)")
+    
+    # SIM Card Information
+    sim_operator = models.CharField(max_length=100, blank=True, null=True, help_text="Primary SIM Carrier (e.g. Jio, Airtel)")
+    sim_number = models.CharField(max_length=30, blank=True, null=True, help_text="Primary SIM phone number")
+    sim_serial = models.CharField(max_length=50, blank=True, null=True, help_text="SIM ICCID / Serial Number")
+    sim_operator_2 = models.CharField(max_length=100, blank=True, null=True, help_text="Secondary SIM Carrier")
+    sim_number_2 = models.CharField(max_length=30, blank=True, null=True, help_text="Secondary SIM phone number")
 
     # Wallpaper & Screen Reminders
     wallpaper_locked = models.BooleanField(default=False)
