@@ -17,6 +17,26 @@
     {
       "key": "refresh_token",
       "value": ""
+    },
+    {
+      "key": "mobile_number",
+      "value": "9855551234"
+    },
+    {
+      "key": "mpin",
+      "value": "654321"
+    },
+    {
+      "key": "otp_code",
+      "value": "123456"
+    },
+    {
+      "key": "key_request_id",
+      "value": "1"
+    },
+    {
+      "key": "customer_id",
+      "value": "1"
     }
   ],
   "auth": {
@@ -1583,6 +1603,770 @@
             },
             "description": "Super Admin deletes an installation video."
           }
+        }
+      ]
+    },
+    {
+      "name": "15. Retailer App Updates - Keys, Edit Flag, Videos, OTP & MPIN",
+      "description": "Endpoints added/updated on 11 Nov 2026: Zero Key Balance Validation, Dynamic Customer Edit Flags, Installation Video Enrollment Options, Forgot Password OTP Verify, and One-Time Login / MPIN Authentication.",
+      "item": [
+        {
+          "name": "A. One-Time Login & MPIN Authentication",
+          "item": [
+            {
+              "name": "1. First-Time Password Login (Returns has_mpin)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/auth/login/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "auth",
+                    "login",
+                    ""
+                  ]
+                },
+                "description": "First-time retailer login via mobile/username and password. Returns access, refresh, has_mpin (false on first login), and user profile info.",
+                "auth": {
+                  "type": "noauth"
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n    \"username\": \"{{mobile_number}}\",\n    \"password\": \"Password@123\"\n}"
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "exec": [
+                      "if (pm.response.code === 200) {",
+                      "    var data = pm.response.json();",
+                      "    if (data.access) pm.collectionVariables.set('access_token', data.access);",
+                      "    if (data.refresh) pm.collectionVariables.set('refresh_token', data.refresh);",
+                      "}"
+                    ],
+                    "type": "text/javascript"
+                  }
+                }
+              ]
+            },
+            {
+              "name": "2. Setup MPIN (4 or 6 Numeric Digits)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{access_token}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/auth/mpin/setup/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "auth",
+                    "mpin",
+                    "setup",
+                    ""
+                  ]
+                },
+                "description": "Authenticated endpoint to create or update the retailer's 4-digit or 6-digit MPIN.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n    \"mpin\": \"{{mpin}}\",\n    \"confirm_mpin\": \"{{mpin}}\"\n}"
+                }
+              }
+            },
+            {
+              "name": "3. Direct MPIN Login (Auto-saves JWT)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/auth/mpin/login/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "auth",
+                    "mpin",
+                    "login",
+                    ""
+                  ]
+                },
+                "description": "Direct MPIN login returning access/refresh JWT tokens and user details without asking for password.",
+                "auth": {
+                  "type": "noauth"
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n    \"mobile_number\": \"{{mobile_number}}\",\n    \"mpin\": \"{{mpin}}\",\n    \"keep_me_signed_in\": true\n}"
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "exec": [
+                      "if (pm.response.code === 200) {",
+                      "    var data = pm.response.json();",
+                      "    if (data.access) pm.collectionVariables.set('access_token', data.access);",
+                      "    if (data.refresh) pm.collectionVariables.set('refresh_token', data.refresh);",
+                      "}"
+                    ],
+                    "type": "text/javascript"
+                  }
+                }
+              ]
+            },
+            {
+              "name": "4. Session Restore / Check has_mpin",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{access_token}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/auth/me/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "auth",
+                    "me",
+                    ""
+                  ]
+                },
+                "description": "Returns current user details including has_mpin flag when reopening the app."
+              }
+            },
+            {
+              "name": "5. Forgot MPIN - Request SMS OTP",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/auth/mpin/forgot/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "auth",
+                    "mpin",
+                    "forgot",
+                    ""
+                  ]
+                },
+                "description": "Sends a 6-digit MPIN reset OTP to the registered mobile number.",
+                "auth": {
+                  "type": "noauth"
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n    \"mobile_number\": \"{{mobile_number}}\"\n}"
+                }
+              }
+            },
+            {
+              "name": "6. Reset MPIN with OTP (Invalidates Old MPIN)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/auth/mpin/reset/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "auth",
+                    "mpin",
+                    "reset",
+                    ""
+                  ]
+                },
+                "description": "Verifies MPIN_RESET OTP and replaces the previous MPIN.",
+                "auth": {
+                  "type": "noauth"
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n    \"mobile_number\": \"{{mobile_number}}\",\n    \"otp\": \"{{otp_code}}\",\n    \"new_mpin\": \"998877\",\n    \"confirm_mpin\": \"998877\"\n}"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "B. Forgot Password & Mobile OTP Verification",
+          "item": [
+            {
+              "name": "1. Forgot Password - Request OTP (Mobile Number)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/auth/password-reset-request/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "auth",
+                    "password-reset-request",
+                    ""
+                  ]
+                },
+                "description": "Accepts mobile_number (with or without +91) or username and issues a PASSWORD_RESET OTP.",
+                "auth": {
+                  "type": "noauth"
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n    \"mobile_number\": \"{{mobile_number}}\"\n}"
+                }
+              }
+            },
+            {
+              "name": "2. Forgot Password - Verify OTP",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/auth/password-reset-verify-otp/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "auth",
+                    "password-reset-verify-otp",
+                    ""
+                  ]
+                },
+                "description": "Validates the 6-digit OTP before navigating to the Set New Password screen (keeps OTP valid for confirmation).",
+                "auth": {
+                  "type": "noauth"
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n    \"mobile_number\": \"{{mobile_number}}\",\n    \"otp\": \"{{otp_code}}\"\n}"
+                }
+              }
+            },
+            {
+              "name": "3. Forgot Password - Confirm New Password",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/auth/password-reset-confirm/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "auth",
+                    "password-reset-confirm",
+                    ""
+                  ]
+                },
+                "description": "Validates OTP, sets new password, and marks the OTP used.",
+                "auth": {
+                  "type": "noauth"
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n    \"mobile_number\": \"{{mobile_number}}\",\n    \"otp\": \"{{otp_code}}\",\n    \"new_password\": \"NewPassword@123\",\n    \"confirm_password\": \"NewPassword@123\"\n}"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "C. Zero Key Balance Validation & Key Requests",
+          "item": [
+            {
+              "name": "1. Check All Services Key Balance",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{access_token}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/keys/check-balance/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "keys",
+                    "check-balance",
+                    ""
+                  ]
+                },
+                "description": "Returns available key balances for Android MDM, Android DLC Locker, and iOS Locker."
+              }
+            },
+            {
+              "name": "2. Check Balance - Android MDM (ANDROID_MDM)",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{access_token}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/keys/check-balance/?service=ANDROID_MDM",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "keys",
+                    "check-balance",
+                    ""
+                  ],
+                  "query": [
+                    {
+                      "key": "service",
+                      "value": "ANDROID_MDM"
+                    }
+                  ]
+                },
+                "description": "Checks balance for ANDROID_MDM (also accepts ANDROID_DLC or IOS_LOCKER)."
+              }
+            },
+            {
+              "name": "3. Check Balance - Android DLC Locker (ANDROID_DLC)",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{access_token}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/keys/check-balance/?service=ANDROID_DLC",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "keys",
+                    "check-balance",
+                    ""
+                  ],
+                  "query": [
+                    {
+                      "key": "service",
+                      "value": "ANDROID_DLC"
+                    }
+                  ]
+                },
+                "description": "Checks balance for ANDROID_DLC."
+              }
+            },
+            {
+              "name": "4. Check Balance - iOS Locker (IOS_LOCKER)",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{access_token}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/keys/check-balance/?service=IOS_LOCKER",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "keys",
+                    "check-balance",
+                    ""
+                  ],
+                  "query": [
+                    {
+                      "key": "service",
+                      "value": "IOS_LOCKER"
+                    }
+                  ]
+                },
+                "description": "Checks balance for IOS_LOCKER."
+              }
+            },
+            {
+              "name": "5. Request Keys by Service (Auto-saves {{key_request_id}})",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{access_token}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/key-requests/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "key-requests",
+                    ""
+                  ]
+                },
+                "description": "Retailer requests additional keys from distributor/admin for ANDROID_MDM, ANDROID_DLC, or IOS_LOCKER.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n    \"service\": \"ANDROID_MDM\",\n    \"quantity\": 5,\n    \"notes\": \"Requesting additional keys for enrollment\"\n}"
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "exec": [
+                      "if (pm.response.code === 201) {",
+                      "    var data = pm.response.json();",
+                      "    if (data.id) pm.collectionVariables.set('key_request_id', data.id);",
+                      "}"
+                    ],
+                    "type": "text/javascript"
+                  }
+                }
+              ]
+            },
+            {
+              "name": "6. Distributor/Admin Approve Key Request",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{access_token}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/key-requests/{{key_request_id}}/approve/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "key-requests",
+                    "{{key_request_id}}",
+                    "approve",
+                    ""
+                  ]
+                },
+                "description": "Distributor/Admin approves the key request so retailer's available balance increases immediately.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{}"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "D. Enrollment (Key Check) & Dynamic Customer Edit Flag",
+          "item": [
+            {
+              "name": "1. Enroll Customer (Checks Balance & Consumes 1 Key)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{access_token}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/customers/enroll/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "customers",
+                    "enroll",
+                    ""
+                  ]
+                },
+                "description": "Blocks enrollment with HTTP 400 (ZERO_KEY_BALANCE) if balance is 0 for selected service (mdm_type: PARTNER_MDM | DLC, or os_type: IOS). Auto-consumes 1 key when balance > 0.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n    \"full_name\": \"Suresh Kumar\",\n    \"mobile_number\": \"9911223344\",\n    \"imei\": \"866671061111222\",\n    \"brand\": \"VIVO\",\n    \"model\": \"Y35\",\n    \"mdm_type\": \"PARTNER_MDM\",\n    \"loan_provider\": \"NO_LOAN_CASH\"\n}"
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "exec": [
+                      "if (pm.response.code === 201) {",
+                      "    var data = pm.response.json();",
+                      "    if (data.customer && data.customer.id) pm.collectionVariables.set('customer_id', data.customer.id);",
+                      "}"
+                    ],
+                    "type": "text/javascript"
+                  }
+                }
+              ]
+            },
+            {
+              "name": "2. Get Customer Details (Check can_edit & is_device_activated)",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{access_token}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/customers/{{customer_id}}/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "customers",
+                    "{{customer_id}}",
+                    ""
+                  ]
+                },
+                "description": "Returns can_edit (true before device activation, false after activation) and is_device_activated."
+              }
+            },
+            {
+              "name": "3. Update Customer Details (Allowed only when can_edit=true)",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{access_token}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/customers/{{customer_id}}/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "customers",
+                    "{{customer_id}}",
+                    ""
+                  ]
+                },
+                "description": "Allowed before device activation; blocked for retailers once device is activated.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n    \"city\": \"Pune\",\n    \"address\": \"MG Road\"\n}"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "E. Installation Video Enrollment Options",
+          "item": [
+            {
+              "name": "1. Get Enrollment Video Options (3 Categories + YouTube URLs)",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{access_token}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/installation-videos/enrollment-options/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "installation-videos",
+                    "enrollment-options",
+                    ""
+                  ]
+                },
+                "description": "Returns New Device Enrollment (NEW_DEVICE), Running Device Enrollment (RUNNING_DEVICE), and WiFi Activation Enrollment (WIFI_ACTIVATION) options in fixed order."
+              }
+            },
+            {
+              "name": "2. Admin: Create Video (NEW_DEVICE / RUNNING_DEVICE / WIFI_ACTIVATION)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{access_token}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/installation-videos/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "installation-videos",
+                    ""
+                  ]
+                },
+                "description": "Super Admin publishes YouTube URLs for NEW_DEVICE, RUNNING_DEVICE, or WIFI_ACTIVATION.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n    \"title\": \"New Device Enrollment Guide\",\n    \"description\": \"Step-by-step setup guide for a brand new phone.\",\n    \"category\": \"NEW_DEVICE\",\n    \"source_type\": \"URL\",\n    \"video_url\": \"https://www.youtube.com/watch?v=new_device_demo\",\n    \"duration\": \"03:45\",\n    \"target_role\": \"RETAILER\",\n    \"display_order\": 1,\n    \"is_active\": true\n}"
+                }
+              }
+            },
+            {
+              "name": "3. Filter Videos by WIFI_ACTIVATION Category",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{access_token}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/installation-videos/?category=WIFI_ACTIVATION",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "installation-videos",
+                    ""
+                  ],
+                  "query": [
+                    {
+                      "key": "category",
+                      "value": "WIFI_ACTIVATION"
+                    }
+                  ]
+                },
+                "description": "Filter installation videos by NEW_DEVICE, RUNNING_DEVICE, or WIFI_ACTIVATION."
+              }
+            }
+          ]
         }
       ]
     }
