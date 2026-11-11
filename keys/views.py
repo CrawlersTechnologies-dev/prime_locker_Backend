@@ -161,28 +161,54 @@ class KeyViewSet(viewsets.GenericViewSet, viewsets.mixins.ListModelMixin, viewse
             for item in inventory_annotated
         ]
 
-        from django.db.models import Q
-        user_avail = DeviceKey.objects.filter(current_owner=request.user, status=KeyStatus.AVAILABLE)
-        dlc_keys_left = user_avail.filter(Q(key_string__istartswith='DLC-') | Q(device_type__iexact='DLC')).count()
-        android_keys_left = user_avail.filter(
-            (Q(key_string__istartswith='AND-') | Q(device_type__iexact='ANDROID')) &
-            ~Q(key_string__istartswith='DLC-') & ~Q(key_string__istartswith='IOS-') & ~Q(key_string__istartswith='TV-')
-        ).count()
-        ios_keys_left = user_avail.filter(Q(key_string__istartswith='IOS-') | Q(device_type__iexact='IOS')).count()
-        total_keys_left = dlc_keys_left + android_keys_left + ios_keys_left
-            
+        from .services import get_service_key_queryset
+        dlc_keys_left = get_service_key_queryset(request.user, 'ANDROID_DLC').count()
+        android_keys_left = get_service_key_queryset(request.user, 'ANDROID_MDM').count()
+        ios_keys_left = get_service_key_queryset(request.user, 'IOS_LOCKER').count()
+        tv_keys_left = get_service_key_queryset(request.user, 'SMART_TV').count()
+        total_keys_left = dlc_keys_left + android_keys_left + ios_keys_left + tv_keys_left
+
         return Response({
             "inventory": summary,
             "dlc_keys_left": dlc_keys_left,
             "android_keys_left": android_keys_left,
             "ios_keys_left": ios_keys_left,
+            "tv_keys_left": tv_keys_left,
             "total_keys_left": total_keys_left,
             "keys_left": {
                 "dlc_keys_left": dlc_keys_left,
                 "android_keys_left": android_keys_left,
                 "ios_keys_left": ios_keys_left,
+                "tv_keys_left": tv_keys_left,
                 "total_keys_left": total_keys_left
             }
+        })
+
+    @action(detail=False, methods=['get'], url_path='check-balance')
+    def check_balance(self, request):
+        """
+        Checks retailer's available key balance for a specific service
+        (ANDROID_MDM, ANDROID_DLC, IOS_LOCKER) or returns all services.
+        """
+        from .services import resolve_service_code, get_service_balance_info
+        service_param = (
+            request.query_params.get('service')
+            or request.query_params.get('lock_provider')
+            or request.query_params.get('os_type')
+            or request.query_params.get('mdm_type')
+        )
+        if service_param:
+            code = resolve_service_code(service=service_param)
+            return Response(get_service_balance_info(request.user, code))
+
+        services = [
+            get_service_balance_info(request.user, code)
+            for code in ('ANDROID_MDM', 'ANDROID_DLC', 'IOS_LOCKER')
+        ]
+        total_available = sum(item['available_balance'] for item in services)
+        return Response({
+            'services': services,
+            'total_available': total_available,
         })
 
     @action(detail=False, methods=['get'])
@@ -652,16 +678,13 @@ class KeyRequestViewSet(viewsets.ModelViewSet):
             from rest_framework.exceptions import ValidationError
             raise ValidationError({"detail": "You do not have a parent assigned to request keys from."})
         
+        from .services import resolve_service_code, SERVICE_META
         device_type = serializer.validated_data.get('device_type', '').upper()
         os_type = serializer.validated_data.get('os_type')
         if not os_type:
-            if device_type in ['DLC', 'DLC_LOCKER']:
-                os_type = 'DLC'
-            elif device_type in ['ANDROID', 'MOBILE_ANDROID']:
-                os_type = 'ANDROID'
-            elif device_type in ['IOS', 'IPHONE', 'MOBILE_IOS']:
-                os_type = 'IOS'
-            elif device_type in ['TV', 'SMART_TV']:
+            resolved_code = resolve_service_code(service=device_type)
+            os_type = SERVICE_META.get(resolved_code, {}).get('device_type', device_type)
+            if os_type == 'TV':
                 os_type = 'SMART_TV'
             
         instance = serializer.save(
@@ -717,23 +740,20 @@ class KeyRequestViewSet(viewsets.ModelViewSet):
                 pass
             
         with transaction.atomic():
+            from .services import resolve_service_code, get_service_key_queryset, SERVICE_ALIASES
             requested_target = (key_req.os_type or key_req.device_type or '').upper()
-
-            # Bug B5: Match based on requested platform and key prefix/device_type strictly
-            keys_filter = models.Q(current_owner=request.user, status=KeyStatus.AVAILABLE)
-            if requested_target in ['DLC', 'DLC_LOCKER']:
-                keys_filter &= (models.Q(device_type__iexact='DLC') | models.Q(key_string__istartswith='DLC-'))
-            elif requested_target in ['IOS', 'IPHONE', 'MOBILE_IOS']:
-                keys_filter &= (models.Q(device_type__iexact='IOS') | models.Q(key_string__istartswith='IOS-'))
-            elif requested_target in ['ANDROID', 'MOBILE_ANDROID']:
-                keys_filter &= (models.Q(device_type__iexact='ANDROID') | models.Q(key_string__istartswith='AND-'))
-                keys_filter &= ~models.Q(key_string__istartswith='DLC-') & ~models.Q(key_string__istartswith='IOS-') & ~models.Q(key_string__istartswith='TV-')
-            elif requested_target in ['TV', 'SMART_TV']:
-                keys_filter &= (models.Q(device_type__iexact='TV') | models.Q(key_string__istartswith='TV-'))
+            norm_target = requested_target.replace(' ', '_').replace('-', '_')
+            if norm_target in SERVICE_ALIASES:
+                svc_code = resolve_service_code(service=requested_target)
+                available_keys = list(get_service_key_queryset(request.user, svc_code)[:approve_qty])
             else:
-                keys_filter &= models.Q(device_type__iexact=key_req.device_type)
-
-            available_keys = DeviceKey.objects.filter(keys_filter)[:approve_qty]
+                available_keys = list(
+                    DeviceKey.objects.filter(
+                        current_owner=request.user,
+                        status=KeyStatus.AVAILABLE,
+                        device_type__iexact=key_req.device_type,
+                    )[:approve_qty]
+                )
             
             if len(available_keys) < approve_qty:
                 return Response({

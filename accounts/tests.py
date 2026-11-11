@@ -528,3 +528,282 @@ class AccountsBackendTests(TestCase):
         device.refresh_from_db()
         self.assertTrue(device.is_activated)
         self.assertEqual(device.fcm_token, 'fcm_running_token_123')
+
+
+@override_settings(ROCKETPAY_SIMULATION=True, PARTNER_MDM_SIMULATION=True)
+class PrimeLockerProRequirementsTests(TestCase):
+    def setUp(self):
+        self.distributor = User.objects.create_user(
+            username='dist_pro',
+            email='dist_pro@test.com',
+            password='Password@123',
+            role=Role.DISTRIBUTOR,
+            mobile_number='+919700000001'
+        )
+        self.retailer = User.objects.create_user(
+            username='ret_pro',
+            email='ret_pro@test.com',
+            password='Password@123',
+            role=Role.RETAILER,
+            mobile_number='+919855551234',
+            business_name='Prime Pro Mobiles',
+            first_name='Ramesh',
+            last_name='Kumar',
+            parent=self.distributor
+        )
+        ps = PlatformSettings.get_settings()
+        ps.rocketpay_base_url = 'https://api-staging.rocketpay.co.in'
+        ps.save()
+
+        ApprovedDeviceTAC.objects.create(
+            tac='86667106',
+            brand='VIVO',
+            model_number='V2205',
+            marketing_name='Y35',
+            environment=TACEnvironment.STAGING,
+            active=True
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.retailer)
+
+    def test_enroll_blocked_on_zero_balance_and_allowed_after_key_allocation(self):
+        from keys.services import ZERO_KEY_MESSAGE
+
+        base_payload = {
+            'full_name': 'Suresh Customer',
+            'mobile_number': '9911223344',
+            'imei': '866671061111222',
+            'brand': 'VIVO',
+            'model': 'Y35',
+        }
+
+        # Zero balance across all 3 services blocks enrollment
+        for svc_payload, expected_service in [
+            ({'mdm_type': 'PARTNER_MDM'}, 'Android MDM'),
+            ({'mdm_type': 'DLC'}, 'Android DLC Locker'),
+            ({'os_type': 'IOS'}, 'iOS Locker'),
+        ]:
+            resp = self.client.post('/api/customers/enroll/', {**base_payload, **svc_payload}, format='json')
+            self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+            self.assertEqual(resp.data['error_code'], 'ZERO_KEY_BALANCE')
+            self.assertEqual(resp.data['available_balance'], 0)
+            self.assertFalse(resp.data['can_enroll'])
+            self.assertEqual(resp.data['service'], expected_service)
+            self.assertEqual(resp.data['detail'], ZERO_KEY_MESSAGE)
+
+        # Allocate 1 DLC key to retailer
+        dlc_key = DeviceKey.objects.create(
+            key_string='DLC-TEST-9001',
+            device_type='DLC',
+            current_owner=self.retailer,
+            status=KeyStatus.AVAILABLE,
+        )
+
+        # Android MDM still has 0 balance and stays blocked
+        resp_mdm = self.client.post('/api/customers/enroll/', {**base_payload, 'mdm_type': 'PARTNER_MDM'}, format='json')
+        self.assertEqual(resp_mdm.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(resp_mdm.data['service'], 'Android MDM')
+
+        # Android DLC Locker now has 1 key and succeeds, auto-consuming the DLC key
+        resp_dlc = self.client.post('/api/customers/enroll/', {**base_payload, 'mdm_type': 'DLC'}, format='json')
+        self.assertEqual(resp_dlc.status_code, status.HTTP_201_CREATED)
+        dlc_key.refresh_from_db()
+        self.assertEqual(dlc_key.status, KeyStatus.ACTIVATED)
+
+        bal_after = self.client.get('/api/keys/check-balance/?service=ANDROID_DLC')
+        self.assertEqual(bal_after.data['available_balance'], 0)
+        self.assertFalse(bal_after.data['can_enroll'])
+
+    def test_customer_can_edit_flag_before_and_after_activation(self):
+        from devices.models import Device, DeviceLockStatus
+
+        customer = User.objects.create_user(
+            username='cust_dyn_edit',
+            email='custdyn@test.com',
+            password='Password@123',
+            role=Role.CUSTOMER,
+            mobile_number='+919922334455',
+            first_name='Before',
+            last_name='Activation',
+            parent=self.retailer
+        )
+        device = Device.objects.create(
+            retailer=self.retailer,
+            customer=customer,
+            imei='866671069998887',
+            status=DeviceLockStatus.INACTIVE,
+            is_activated=False
+        )
+
+        # Before activation: editable
+        detail_before = self.client.get(f'/api/customers/{customer.id}/')
+        self.assertEqual(detail_before.status_code, status.HTTP_200_OK)
+        self.assertTrue(detail_before.data['can_edit'])
+        self.assertFalse(detail_before.data['is_device_activated'])
+
+        patch_before = self.client.patch(f'/api/customers/{customer.id}/', {'city': 'Pune'}, format='json')
+        self.assertEqual(patch_before.status_code, status.HTTP_200_OK)
+        self.assertEqual(patch_before.data['city'], 'Pune')
+
+        # After activation: read-only for retailer
+        device.is_activated = True
+        device.status = DeviceLockStatus.ACTIVE
+        device.save()
+
+        detail_after = self.client.get(f'/api/customers/{customer.id}/')
+        self.assertEqual(detail_after.status_code, status.HTTP_200_OK)
+        self.assertFalse(detail_after.data['can_edit'])
+        self.assertTrue(detail_after.data['is_device_activated'])
+
+        patch_after = self.client.patch(f'/api/customers/{customer.id}/', {'city': 'Mumbai'}, format='json')
+        self.assertIn(patch_after.status_code, [status.HTTP_400_BAD_REQUEST, status.HTTP_403_FORBIDDEN])
+        customer.refresh_from_db()
+        self.assertEqual(customer.city, 'Pune')
+
+    def test_forgot_password_mobile_otp_verify_and_confirm(self):
+        from accounts.models import PasswordResetOTP
+
+        anon = APIClient()
+
+        # Request OTP via normalized 10-digit mobile number (stored with +91)
+        req_resp = anon.post('/api/auth/password-reset-request/', {'mobile_number': '9855551234'}, format='json')
+        self.assertEqual(req_resp.status_code, status.HTTP_200_OK)
+
+        otp_obj = PasswordResetOTP.objects.filter(user=self.retailer, purpose='PASSWORD_RESET', is_used=False).latest('created_at')
+
+        # Wrong OTP fails verification
+        bad_verify = anon.post('/api/auth/password-reset-verify-otp/', {'mobile_number': '9855551234', 'otp': '000000'}, format='json')
+        self.assertEqual(bad_verify.status_code, status.HTTP_400_BAD_REQUEST)
+
+        # Valid OTP passes standalone verification step without marking OTP used
+        good_verify = anon.post('/api/auth/password-reset-verify-otp/', {'mobile_number': '9855551234', 'otp': otp_obj.otp}, format='json')
+        self.assertEqual(good_verify.status_code, status.HTTP_200_OK)
+        self.assertTrue(good_verify.data['valid'])
+
+        # Mismatched confirm fails
+        mismatch_resp = anon.post('/api/auth/password-reset-confirm/', {
+            'mobile_number': '9855551234',
+            'otp': otp_obj.otp,
+            'new_password': 'NewStrong@123',
+            'confirm_password': 'Different@123',
+        }, format='json')
+        self.assertEqual(mismatch_resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+        # Matching confirm succeeds and marks OTP used
+        confirm_resp = anon.post('/api/auth/password-reset-confirm/', {
+            'mobile_number': '9855551234',
+            'otp': otp_obj.otp,
+            'new_password': 'NewStrong@123',
+            'confirm_password': 'NewStrong@123',
+        }, format='json')
+        self.assertEqual(confirm_resp.status_code, status.HTTP_200_OK)
+
+        # Cannot reuse same OTP
+        reuse_resp = anon.post('/api/auth/password-reset-confirm/', {
+            'mobile_number': '9855551234',
+            'otp': otp_obj.otp,
+            'new_password': 'AnotherStrong@123',
+            'confirm_password': 'AnotherStrong@123',
+        }, format='json')
+        self.assertEqual(reuse_resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+        # Login with new password succeeds
+        login_resp = anon.post('/api/auth/login/', {'username': '9855551234', 'password': 'NewStrong@123'}, format='json')
+        self.assertEqual(login_resp.status_code, status.HTTP_200_OK)
+        self.assertIn('access', login_resp.data)
+
+    def test_mpin_full_lifecycle_and_forgot_reset(self):
+        from accounts.models import PasswordResetOTP
+
+        anon = APIClient()
+
+        # 1. First-time login indicates has_mpin=False
+        first_login = anon.post('/api/auth/login/', {'username': 'ret_pro', 'password': 'Password@123'}, format='json')
+        self.assertEqual(first_login.status_code, status.HTTP_200_OK)
+        self.assertFalse(first_login.data['has_mpin'])
+        self.assertFalse(first_login.data['user']['has_mpin'])
+        self.assertEqual(first_login.data['user']['business_name'], 'Prime Pro Mobiles')
+
+        # MPIN login rejected cleanly before setup
+        pre_mpin_login = anon.post('/api/auth/mpin/login/', {'mobile_number': '9855551234', 'mpin': '1234'}, format='json')
+        self.assertEqual(pre_mpin_login.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertFalse(pre_mpin_login.data['has_mpin'])
+
+        # 2. Setup validation: reject 5-digit, non-numeric, and mismatched confirm
+        token_client = APIClient()
+        token_client.credentials(HTTP_AUTHORIZATION=f"Bearer {first_login.data['access']}")
+
+        for bad_payload in [
+            {'mpin': '12345', 'confirm_mpin': '12345'},
+            {'mpin': 'abcd', 'confirm_mpin': 'abcd'},
+            {'mpin': '1234', 'confirm_mpin': '4321'},
+        ]:
+            bad_setup = token_client.post('/api/auth/mpin/setup/', bad_payload, format='json')
+            self.assertEqual(bad_setup.status_code, status.HTTP_400_BAD_REQUEST)
+
+        # Setup 4-digit MPIN then update to 6-digit MPIN
+        setup_4 = token_client.post('/api/auth/mpin/setup/', {'mpin': '1234', 'confirm_mpin': '1234'}, format='json')
+        self.assertEqual(setup_4.status_code, status.HTTP_200_OK)
+        self.assertTrue(setup_4.data['has_mpin'])
+
+        setup_6 = token_client.post('/api/auth/mpin/setup/', {'mpin': '654321', 'confirm_mpin': '654321'}, format='json')
+        self.assertEqual(setup_6.status_code, status.HTTP_200_OK)
+        self.assertTrue(setup_6.data['has_mpin'])
+
+        # Subsequent password login also sees has_mpin=True
+        second_login = anon.post('/api/auth/login/', {'username': 'ret_pro', 'password': 'Password@123'}, format='json')
+        self.assertTrue(second_login.data['has_mpin'])
+
+        # 3. Direct MPIN Login
+        wrong_mpin = anon.post('/api/auth/mpin/login/', {'mobile_number': '9855551234', 'mpin': '000000'}, format='json')
+        self.assertEqual(wrong_mpin.status_code, status.HTTP_401_UNAUTHORIZED)
+
+        good_mpin = anon.post('/api/auth/mpin/login/', {'mobile_number': '9855551234', 'mpin': '654321'}, format='json')
+        self.assertEqual(good_mpin.status_code, status.HTTP_200_OK)
+        self.assertIn('access', good_mpin.data)
+        self.assertIn('refresh', good_mpin.data)
+        self.assertTrue(good_mpin.data['has_mpin'])
+        self.assertEqual(good_mpin.data['user']['username'], 'ret_pro')
+
+        # Verify issued JWT works against /api/auth/me/
+        mpin_authed = APIClient()
+        mpin_authed.credentials(HTTP_AUTHORIZATION=f"Bearer {good_mpin.data['access']}")
+        me_resp = mpin_authed.get('/api/auth/me/')
+        self.assertEqual(me_resp.status_code, status.HTTP_200_OK)
+        self.assertTrue(me_resp.data['has_mpin'])
+
+        # 4. Forgot MPIN + Reset invalidates old MPIN
+        forgot_resp = anon.post('/api/auth/mpin/forgot/', {'mobile_number': '+91 98555 51234'}, format='json')
+        self.assertEqual(forgot_resp.status_code, status.HTTP_200_OK)
+        mpin_otp = PasswordResetOTP.objects.filter(user=self.retailer, purpose='MPIN_RESET', is_used=False).latest('created_at')
+
+        # Purpose isolation: MPIN_RESET OTP cannot be used on password-reset-verify-otp
+        cross_purpose = anon.post('/api/auth/password-reset-verify-otp/', {'mobile_number': '9855551234', 'otp': mpin_otp.otp}, format='json')
+        self.assertEqual(cross_purpose.status_code, status.HTTP_400_BAD_REQUEST)
+
+        # Reset MPIN
+        reset_resp = anon.post('/api/auth/mpin/reset/', {
+            'mobile_number': '9855551234',
+            'otp': mpin_otp.otp,
+            'new_mpin': '998877',
+            'confirm_mpin': '998877',
+        }, format='json')
+        self.assertEqual(reset_resp.status_code, status.HTTP_200_OK)
+
+        # Old MPIN invalidated
+        old_mpin_login = anon.post('/api/auth/mpin/login/', {'mobile_number': '9855551234', 'mpin': '654321'}, format='json')
+        self.assertEqual(old_mpin_login.status_code, status.HTTP_401_UNAUTHORIZED)
+
+        # OTP cannot be reused
+        reuse_otp = anon.post('/api/auth/mpin/reset/', {
+            'mobile_number': '9855551234',
+            'otp': mpin_otp.otp,
+            'new_mpin': '112233',
+            'confirm_mpin': '112233',
+        }, format='json')
+        self.assertEqual(reuse_otp.status_code, status.HTTP_400_BAD_REQUEST)
+
+        # New MPIN works
+        new_mpin_login = anon.post('/api/auth/mpin/login/', {'mobile_number': '9855551234', 'mpin': '998877'}, format='json')
+        self.assertEqual(new_mpin_login.status_code, status.HTTP_200_OK)
+        self.assertIn('access', new_mpin_login.data)

@@ -40,23 +40,48 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
             
         data['refresh'] = str(refresh)
         data['access'] = str(refresh.access_token)
-        
+        data['has_mpin'] = bool(getattr(self.user, 'has_mpin', False))
+
         # Add user data to the response
-        data['user'] = {
-            'id': self.user.id,
-            'username': self.user.username,
-            'email': self.user.email,
-            'role': self.user.role,
-        }
+        data['user'] = build_auth_user_payload(self.user)
         return data
+
+
+def build_auth_user_payload(user):
+    return {
+        'id': user.id,
+        'username': user.username,
+        'email': user.email,
+        'role': user.role,
+        'first_name': user.first_name or '',
+        'last_name': user.last_name or '',
+        'mobile_number': user.mobile_number,
+        'business_name': user.business_name,
+        'has_mpin': bool(getattr(user, 'has_mpin', False)),
+    }
+
+
+def build_login_response_data(user, keep_me_signed_in=True):
+    refresh = CustomTokenObtainPairSerializer.get_token(user)
+    return {
+        'refresh': str(refresh),
+        'access': str(refresh.access_token),
+        'has_mpin': bool(getattr(user, 'has_mpin', False)),
+        'keep_me_signed_in': bool(keep_me_signed_in),
+        'user': build_auth_user_payload(user),
+    }
+
 
 class UserSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=True, style={'input_type': 'password'})
 
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'mobile_number', 'password', 'role', 'parent', 'first_name', 'last_name', 'is_active', 'date_joined']
-        read_only_fields = ['id', 'date_joined']
+        fields = [
+            'id', 'username', 'email', 'mobile_number', 'password', 'role', 'parent',
+            'first_name', 'last_name', 'business_name', 'has_mpin', 'is_active', 'date_joined'
+        ]
+        read_only_fields = ['id', 'has_mpin', 'date_joined']
 
     def validate_email(self, value):
         if value:
@@ -294,6 +319,8 @@ class CustomerSerializer(serializers.ModelSerializer):
     emi_status = serializers.SerializerMethodField(read_only=True)
     status = serializers.SerializerMethodField(read_only=True)
     customer_status = serializers.SerializerMethodField(read_only=True)
+    can_edit = serializers.SerializerMethodField(read_only=True)
+    is_device_activated = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = User
@@ -305,12 +332,12 @@ class CustomerSerializer(serializers.ModelSerializer):
             'signed_emi_agreement_flag', 'draft_status',
             'password', 'parent', 'role', 'is_active', 'date_joined',
             'device_summary', 'contract_summary', 'emi_status',
-            'status', 'customer_status'
+            'status', 'customer_status', 'can_edit', 'is_device_activated'
         ]
         read_only_fields = [
             'id', 'customer_code', 'date_joined', 'role', 'parent', 'is_active', 'masked_id_number',
             'device_summary', 'contract_summary', 'emi_status',
-            'status', 'customer_status'
+            'status', 'customer_status', 'can_edit', 'is_device_activated'
         ]
 
     def get_name(self, obj):
@@ -338,6 +365,25 @@ class CustomerSerializer(serializers.ModelSerializer):
 
     def get_customer_status(self, obj):
         return self.get_status(obj)
+
+    def get_is_device_activated(self, obj):
+        from devices.models import DeviceLockStatus
+        device = obj.registered_devices.first()
+        if not device:
+            return False
+        if device.status == DeviceLockStatus.UNENROLLED or device.provider_status == 'UNREGISTERED':
+            return False
+        return bool(
+            getattr(device, 'is_activated', False)
+            or device.status in [DeviceLockStatus.ACTIVE, DeviceLockStatus.LOCKED]
+        )
+
+    def get_can_edit(self, obj):
+        request = self.context.get('request')
+        user = getattr(request, 'user', None)
+        if user and getattr(user, 'role', None) == 'SUPER_ADMIN':
+            return True
+        return not self.get_is_device_activated(obj)
 
     def get_device_summary(self, obj):
         device = obj.registered_devices.first()
@@ -460,20 +506,113 @@ class CustomerSerializer(serializers.ModelSerializer):
         user.save()
         return user
 
+def extract_login_identifier(attrs):
+    identifier = (attrs.get('mobile_number') or attrs.get('username') or '').strip()
+    if not identifier:
+        raise serializers.ValidationError({
+            "mobile_number": "Please provide a registered mobile number or username."
+        })
+    attrs['identifier'] = identifier
+    return attrs
+
+
+def validate_mpin_value(value, field_name='mpin'):
+    mpin_str = str(value or '').strip()
+    if not mpin_str.isdigit() or len(mpin_str) not in (4, 6):
+        raise serializers.ValidationError({
+            field_name: "MPIN must be exactly 4 or 6 numeric digits."
+        })
+    return mpin_str
+
+
 class PasswordResetRequestSerializer(serializers.Serializer):
-    # This can accept email, mobile number, or username
-    username = serializers.CharField(required=True)
+    # Accepts mobile number, username, or email
+    username = serializers.CharField(required=False, allow_blank=True)
+    mobile_number = serializers.CharField(required=False, allow_blank=True)
+
+    def validate(self, attrs):
+        return extract_login_identifier(attrs)
+
+
+class PasswordResetVerifyOTPSerializer(serializers.Serializer):
+    username = serializers.CharField(required=False, allow_blank=True)
+    mobile_number = serializers.CharField(required=False, allow_blank=True)
+    otp = serializers.CharField(required=True, max_length=6)
+
+    def validate(self, attrs):
+        extract_login_identifier(attrs)
+        attrs['otp'] = attrs['otp'].strip()
+        return attrs
+
 
 class PasswordResetConfirmSerializer(serializers.Serializer):
-    username = serializers.CharField(required=True)
+    username = serializers.CharField(required=False, allow_blank=True)
+    mobile_number = serializers.CharField(required=False, allow_blank=True)
     otp = serializers.CharField(required=True, max_length=6)
     new_password = serializers.CharField(write_only=True, required=True, style={'input_type': 'password'})
     confirm_password = serializers.CharField(write_only=True, required=True, style={'input_type': 'password'})
 
-    def validate(self, data):
-        if data['new_password'] != data['confirm_password']:
+    def validate(self, attrs):
+        extract_login_identifier(attrs)
+        attrs['otp'] = attrs['otp'].strip()
+        if attrs['new_password'] != attrs['confirm_password']:
             raise serializers.ValidationError({"password": "Passwords must match."})
-        return data
+        return attrs
+
+
+class MPINSetupSerializer(serializers.Serializer):
+    mpin = serializers.CharField(write_only=True, required=True, min_length=4, max_length=6)
+    confirm_mpin = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=6)
+
+    def validate(self, attrs):
+        mpin = validate_mpin_value(attrs.get('mpin'), 'mpin')
+        confirm_mpin = attrs.get('confirm_mpin')
+        if confirm_mpin is not None and str(confirm_mpin).strip() != '':
+            if mpin != str(confirm_mpin).strip():
+                raise serializers.ValidationError({"confirm_mpin": "MPIN and Confirm MPIN do not match."})
+        attrs['mpin'] = mpin
+        return attrs
+
+
+class MPINLoginSerializer(serializers.Serializer):
+    username = serializers.CharField(required=False, allow_blank=True)
+    mobile_number = serializers.CharField(required=False, allow_blank=True)
+    mpin = serializers.CharField(write_only=True, required=True, min_length=4, max_length=6)
+    keep_me_signed_in = serializers.BooleanField(required=False, default=True)
+
+    def validate(self, attrs):
+        extract_login_identifier(attrs)
+        attrs['mpin'] = validate_mpin_value(attrs.get('mpin'), 'mpin')
+        return attrs
+
+
+class MPINForgotSerializer(serializers.Serializer):
+    username = serializers.CharField(required=False, allow_blank=True)
+    mobile_number = serializers.CharField(required=False, allow_blank=True)
+
+    def validate(self, attrs):
+        return extract_login_identifier(attrs)
+
+
+class MPINResetSerializer(serializers.Serializer):
+    username = serializers.CharField(required=False, allow_blank=True)
+    mobile_number = serializers.CharField(required=False, allow_blank=True)
+    otp = serializers.CharField(required=True, max_length=6)
+    new_mpin = serializers.CharField(write_only=True, required=False, min_length=4, max_length=6)
+    mpin = serializers.CharField(write_only=True, required=False, min_length=4, max_length=6)
+    confirm_mpin = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=6)
+
+    def validate(self, attrs):
+        extract_login_identifier(attrs)
+        attrs['otp'] = attrs['otp'].strip()
+        raw_mpin = attrs.get('new_mpin') or attrs.get('mpin')
+        new_mpin = validate_mpin_value(raw_mpin, 'new_mpin')
+        confirm_mpin = attrs.get('confirm_mpin')
+        if confirm_mpin is not None and str(confirm_mpin).strip() != '':
+            if new_mpin != str(confirm_mpin).strip():
+                raise serializers.ValidationError({"confirm_mpin": "New MPIN and Confirm MPIN do not match."})
+        attrs['new_mpin'] = new_mpin
+        return attrs
 
 class ChangePasswordSerializer(serializers.Serializer):
     old_password = serializers.CharField(required=True, write_only=True)

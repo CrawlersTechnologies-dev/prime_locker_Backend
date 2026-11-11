@@ -87,7 +87,28 @@ class User(AbstractUser):
         default='COMPLETED',
         choices=[('DRAFT', 'Draft'), ('COMPLETED', 'Completed')]
     )
-    
+    mpin_hash = models.CharField(max_length=128, null=True, blank=True)
+    has_mpin = models.BooleanField(default=False)
+    mpin_updated_at = models.DateTimeField(null=True, blank=True)
+
+    def set_mpin(self, raw_mpin):
+        from django.contrib.auth.hashers import make_password
+        from django.utils import timezone
+        self.mpin_hash = make_password(str(raw_mpin))
+        self.has_mpin = True
+        self.mpin_updated_at = timezone.now()
+
+    def check_mpin(self, raw_mpin):
+        from django.contrib.auth.hashers import check_password
+        if not self.has_mpin or not self.mpin_hash or raw_mpin is None:
+            return False
+        return check_password(str(raw_mpin), self.mpin_hash)
+
+    def clear_mpin(self):
+        self.mpin_hash = None
+        self.has_mpin = False
+        self.mpin_updated_at = None
+
     objects = UserManager()
 
     def get_all_subordinates(self):
@@ -126,17 +147,23 @@ class AuditLog(models.Model):
 from django.utils import timezone
 
 class PasswordResetOTP(models.Model):
+    PURPOSE_CHOICES = [
+        ('PASSWORD_RESET', 'Password Reset'),
+        ('MPIN_RESET', 'MPIN Reset'),
+    ]
+
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     otp = models.CharField(max_length=6)
+    purpose = models.CharField(max_length=20, choices=PURPOSE_CHOICES, default='PASSWORD_RESET')
     created_at = models.DateTimeField(auto_now_add=True)
     is_used = models.BooleanField(default=False)
 
     def is_valid(self):
         # OTP is valid for 10 minutes (600 seconds)
-        return not self.is_used and (timezone.now() - self.created_at).seconds < 600
+        return not self.is_used and (timezone.now() - self.created_at).total_seconds() < 600
 
     def __str__(self):
-        return f"OTP for {self.user.username}"
+        return f"{self.purpose} OTP for {self.user.username}"
 
 
 class NotificationType(models.TextChoices):

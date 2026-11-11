@@ -20,7 +20,8 @@ from .models import (
     CommandType,
     CommandStatus,
     AppType,
-    InstallationVideo
+    InstallationVideo,
+    VideoCategory
 )
 from .serializers import (
     DeviceSerializer,
@@ -1697,6 +1698,41 @@ class InstallationVideoViewSet(viewsets.ModelViewSet):
             details={"video_id": instance.id, "title": instance.title}
         )
         instance.delete()
+
+    @action(detail=False, methods=['get'], url_path='enrollment-options')
+    def enrollment_options(self, request):
+        """
+        Return the three Installation Video enrollment options in fixed display order:
+        New Device Enrollment, Running Device Enrollment, WiFi Activation Enrollment.
+        """
+        options_spec = [
+            (VideoCategory.NEW_DEVICE, VideoCategory.NEW_DEVICE.label),
+            (VideoCategory.RUNNING_DEVICE, VideoCategory.RUNNING_DEVICE.label),
+            (VideoCategory.WIFI_ACTIVATION, VideoCategory.WIFI_ACTIVATION.label),
+        ]
+        qs = self.get_queryset().filter(
+            is_active=True,
+            category__in=[cat for cat, _ in options_spec],
+        ).order_by('display_order', '-created_at')
+
+        videos_by_category = {}
+        for video in qs:
+            videos_by_category.setdefault(video.category, video)
+
+        options = []
+        for cat, label in options_spec:
+            video = videos_by_category.get(cat)
+            serialized = self.get_serializer(video).data if video else None
+            options.append({
+                'category': cat,
+                'label': label,
+                'title': video.title if video else label,
+                'youtube_url': serialized['stream_url'] if serialized else None,
+                'video_url': serialized['video_url'] if serialized else None,
+                'video': serialized,
+            })
+
+        return Response({'options': options})
 
 PUBLIC_APP_SLUGS = {
     'customer': AppType.CUSTOMER_APP,

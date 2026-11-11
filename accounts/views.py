@@ -19,11 +19,24 @@ from .serializers import (
     RetailerSerializer,
     CustomerSerializer,
     PasswordResetRequestSerializer,
+    PasswordResetVerifyOTPSerializer,
     PasswordResetConfirmSerializer,
+    MPINSetupSerializer,
+    MPINLoginSerializer,
+    MPINForgotSerializer,
+    MPINResetSerializer,
+    build_auth_user_payload,
+    build_login_response_data,
     AuditLogSerializer
 )
 from .models import AuditLog, PasswordResetOTP, is_company_user
+import json
+import logging
 import random
+import secrets
+import urllib.request
+
+logger = logging.getLogger(__name__)
 
 User = get_user_model()
 
@@ -358,8 +371,8 @@ class CustomerViewSet(BaseRoleViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # 3. Check Activation Key if provided
-        key_string = data.get('activation_key_string', '').strip()
+        # 3. Check Activation Key / Service Key Balance
+        key_string = (data.get('activation_key_string') or '').strip()
         key_obj = None
         if key_string:
             key_obj = DeviceKey.objects.filter(key_string=key_string).first()
@@ -369,6 +382,31 @@ class CustomerViewSet(BaseRoleViewSet):
                 return Response({"detail": f"Activation key '{key_string}' is already {key_obj.status}."}, status=status.HTTP_400_BAD_REQUEST)
             if user.role != 'SUPER_ADMIN' and key_obj.current_owner != user:
                 return Response({"detail": "You do not own this activation key."}, status=status.HTTP_403_FORBIDDEN)
+        else:
+            from keys.services import (
+                resolve_service_code,
+                get_service_balance_info,
+                get_service_key_queryset,
+            )
+            service_code = resolve_service_code(
+                service=data.get('service') or data.get('service_code'),
+                mdm_type=data.get('mdm_type'),
+                lock_provider=data.get('lock_provider'),
+                os_type=data.get('os_type'),
+                device_category=data.get('device_category'),
+            )
+            if user.role != 'SUPER_ADMIN':
+                balance_info = get_service_balance_info(user, service_code)
+                if balance_info['available_balance'] <= 0:
+                    return Response(
+                        {
+                            "detail": balance_info["message"],
+                            "error_code": "ZERO_KEY_BALANCE",
+                            **balance_info,
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                key_obj = get_service_key_queryset(user, service_code).order_by('id').first()
 
         # Item 12: Check Approved Phone Models (TAC list)
         tac = imei[:8]
@@ -724,66 +762,257 @@ class CustomerViewSet(BaseRoleViewSet):
             "temporary_password": new_password
         }, status=status.HTTP_200_OK)
 
+def _find_user_by_identifier(identifier):
+    """Resolve a user by username, email, or normalized mobile number."""
+    raw = (identifier or '').strip()
+    if not raw:
+        return None
+    user = (
+        User.objects.filter(username__iexact=raw).first()
+        or User.objects.filter(email__iexact=raw).first()
+        or User.objects.filter(mobile_number=raw).first()
+    )
+    if user:
+        return user
+    digits = ''.join(ch for ch in raw if ch.isdigit())
+    if len(digits) >= 10:
+        last10 = digits[-10:]
+        candidates = [last10, f'+91{last10}', f'91{last10}', f'0{last10}']
+        return (
+            User.objects.filter(mobile_number__in=candidates).first()
+            or User.objects.filter(mobile_number__endswith=last10).first()
+        )
+    return None
+
+
+def _send_otp_sms(mobile_number, otp_code, purpose):
+    """Dispatch OTP SMS via configured gateway, or log cleanly in non-SMS environments."""
+    sms_url = os.environ.get('SMS_GATEWAY_URL', '').strip()
+    sms_key = os.environ.get('SMS_GATEWAY_KEY', '').strip()
+    is_configured = (
+        sms_url
+        and sms_key
+        and sms_url != 'https://api.sms-provider.com/send'
+        and sms_key != 'your_sms_gateway_key_here'
+        and bool(mobile_number)
+    )
+    if not is_configured:
+        logger.info("OTP SMS skipped (gateway unconfigured) for purpose=%s", purpose)
+        return False
+
+    purpose_label = 'MPIN reset' if purpose == 'MPIN_RESET' else 'password reset'
+    payload = json.dumps({
+        'to': mobile_number,
+        'message': f"Your Prime Locker Pro {purpose_label} OTP is {otp_code}. Valid for 10 minutes.",
+    }).encode('utf-8')
+    req = urllib.request.Request(
+        sms_url,
+        data=payload,
+        headers={
+            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {sms_key}',
+        },
+        method='POST',
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=5):
+            return True
+    except Exception as exc:
+        logger.warning("Failed to dispatch %s OTP SMS: %s", purpose, exc)
+        return False
+
+
+def _issue_and_send_otp(user, purpose):
+    PasswordResetOTP.objects.filter(user=user, purpose=purpose, is_used=False).update(is_used=True)
+    otp_code = str(secrets.randbelow(900000) + 100000)
+    otp_record = PasswordResetOTP.objects.create(user=user, otp=otp_code, purpose=purpose)
+    _send_otp_sms(user.mobile_number, otp_code, purpose)
+    return otp_record
+
+
+def _verify_user_otp(identifier, otp_code, purpose):
+    user = _find_user_by_identifier(identifier)
+    if not user:
+        return None, None
+    otp_record = PasswordResetOTP.objects.filter(
+        user=user,
+        otp=otp_code,
+        purpose=purpose,
+        is_used=False,
+    ).order_by('-created_at').first()
+    if otp_record and otp_record.is_valid():
+        return user, otp_record
+    return user, None
+
+
+def _handle_otp_request(serializer_cls, request, purpose):
+    serializer = serializer_cls(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    user = _find_user_by_identifier(serializer.validated_data['identifier'])
+    if user:
+        _issue_and_send_otp(user, purpose)
+    return Response(
+        {"message": "If the account exists, an OTP has been sent."},
+        status=status.HTTP_200_OK,
+    )
+
+
 class PasswordResetRequestView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
-        serializer = PasswordResetRequestSerializer(data=request.data)
-        if serializer.is_valid():
-            username = serializer.validated_data['username']
-            user = User.objects.filter(username=username).first() or \
-                   User.objects.filter(email=username).first() or \
-                   User.objects.filter(mobile_number=username).first()
-            
-            if user:
-                # Generate 6 digit OTP
-                otp_code = str(random.randint(100000, 999999))
-                PasswordResetOTP.objects.create(user=user, otp=otp_code)
-                
-                # TODO: Integrate real Email/SMS provider here
-                print(f"--- OTP for {user.username} is {otp_code} ---")
-                
-                return Response({
-                    "message": "If the account exists, an OTP has been sent."
-                }, status=status.HTTP_200_OK)
-            return Response({"message": "If the account exists, an OTP has been sent."}, status=status.HTTP_200_OK)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        return _handle_otp_request(PasswordResetRequestSerializer, request, 'PASSWORD_RESET')
+
+
+class PasswordResetVerifyOTPView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        serializer = PasswordResetVerifyOTPSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        identifier = serializer.validated_data['identifier']
+        otp_code = serializer.validated_data['otp']
+        _, otp_record = _verify_user_otp(identifier, otp_code, 'PASSWORD_RESET')
+        if not otp_record:
+            return Response({"error": "Invalid or expired OTP"}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {"valid": True, "message": "OTP verified successfully."},
+            status=status.HTTP_200_OK,
+        )
+
 
 class PasswordResetConfirmView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
         serializer = PasswordResetConfirmSerializer(data=request.data)
-        if serializer.is_valid():
-            username = serializer.validated_data['username']
-            otp_code = serializer.validated_data['otp']
-            new_password = serializer.validated_data['new_password']
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        identifier = serializer.validated_data['identifier']
+        otp_code = serializer.validated_data['otp']
+        new_password = serializer.validated_data['new_password']
 
-            user = User.objects.filter(username=username).first() or \
-                   User.objects.filter(email=username).first() or \
-                   User.objects.filter(mobile_number=username).first()
-
-            if not user:
-                return Response({"error": "Invalid details"}, status=status.HTTP_400_BAD_REQUEST)
-
-            otp_record = PasswordResetOTP.objects.filter(user=user, otp=otp_code).order_by('-created_at').first()
-            
-            if otp_record and otp_record.is_valid():
-                user.set_password(new_password)
-                user.save()
-                otp_record.is_used = True
-                otp_record.save()
-                
-                AuditLog.objects.create(
-                    user=user,
-                    action="PASSWORD_RESET",
-                    ip_address=get_client_ip(request)
-                )
-                
-                return Response({"message": "Password reset successful."}, status=status.HTTP_200_OK)
-            
+        user, otp_record = _verify_user_otp(identifier, otp_code, 'PASSWORD_RESET')
+        if not user:
+            return Response({"error": "Invalid details"}, status=status.HTTP_400_BAD_REQUEST)
+        if not otp_record:
             return Response({"error": "Invalid or expired OTP"}, status=status.HTTP_400_BAD_REQUEST)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        user.set_password(new_password)
+        user.save()
+        otp_record.is_used = True
+        otp_record.save(update_fields=['is_used'])
+
+        AuditLog.objects.create(
+            user=user,
+            action="PASSWORD_RESET",
+            ip_address=get_client_ip(request),
+        )
+        return Response({"message": "Password reset successful."}, status=status.HTTP_200_OK)
+
+
+class MPINSetupView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        serializer = MPINSetupSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        user = request.user
+        user.set_mpin(serializer.validated_data['mpin'])
+        user.save(update_fields=['mpin_hash', 'has_mpin', 'mpin_updated_at'])
+
+        AuditLog.objects.create(
+            user=user,
+            action="MPIN_SET",
+            ip_address=get_client_ip(request),
+        )
+        return Response(
+            {
+                "message": "MPIN created successfully.",
+                "has_mpin": True,
+                "user": build_auth_user_payload(user),
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class MPINLoginView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        serializer = MPINLoginSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        identifier = serializer.validated_data['identifier']
+        mpin = serializer.validated_data['mpin']
+        keep_me_signed_in = serializer.validated_data.get('keep_me_signed_in', True)
+
+        user = _find_user_by_identifier(identifier)
+        if not user:
+            return Response({"error": "Invalid mobile number or MPIN."}, status=status.HTTP_401_UNAUTHORIZED)
+        if not user.is_active:
+            return Response({"error": "This account is inactive."}, status=status.HTTP_401_UNAUTHORIZED)
+        if not user.has_mpin:
+            return Response(
+                {
+                    "error": "MPIN is not set for this account. Please login with password first.",
+                    "has_mpin": False,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not user.check_mpin(mpin):
+            return Response({"error": "Invalid mobile number or MPIN."}, status=status.HTTP_401_UNAUTHORIZED)
+
+        AuditLog.objects.create(
+            user=user,
+            action="MPIN_LOGIN",
+            ip_address=get_client_ip(request),
+        )
+        return Response(
+            build_login_response_data(user, keep_me_signed_in=keep_me_signed_in),
+            status=status.HTTP_200_OK,
+        )
+
+
+class MPINForgotView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        return _handle_otp_request(MPINForgotSerializer, request, 'MPIN_RESET')
+
+
+class MPINResetView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        serializer = MPINResetSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        identifier = serializer.validated_data['identifier']
+        otp_code = serializer.validated_data['otp']
+        new_mpin = serializer.validated_data['new_mpin']
+
+        user, otp_record = _verify_user_otp(identifier, otp_code, 'MPIN_RESET')
+        if not otp_record:
+            return Response({"error": "Invalid or expired OTP"}, status=status.HTTP_400_BAD_REQUEST)
+
+        user.set_mpin(new_mpin)
+        user.save(update_fields=['mpin_hash', 'has_mpin', 'mpin_updated_at'])
+        otp_record.is_used = True
+        otp_record.save(update_fields=['is_used'])
+
+        AuditLog.objects.create(
+            user=user,
+            action="MPIN_RESET",
+            ip_address=get_client_ip(request),
+        )
+        return Response(
+            {"message": "MPIN reset successful.", "has_mpin": True},
+            status=status.HTTP_200_OK,
+        )
 
 
 def get_all_downstream_users(user):
@@ -1194,6 +1423,7 @@ class CurrentUserView(APIView):
                 "can_see_devices": user.can_see_devices,
                 "can_see_customer_phones": user.can_see_customer_phones,
             },
+            "has_mpin": bool(getattr(user, "has_mpin", False)),
             "approval_step": user.approval_step,
             "suspend_reason": user.suspend_reason,
         })

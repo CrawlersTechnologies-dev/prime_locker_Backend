@@ -363,6 +363,9 @@ class ApprovedDeviceTAC(models.Model):
 class VideoCategory(models.TextChoices):
     ALL = 'ALL', 'All Categories'
     GENERAL = 'GENERAL', 'General Training & Setup'
+    NEW_DEVICE = 'NEW_DEVICE', 'New Device Enrollment'
+    RUNNING_DEVICE = 'RUNNING_DEVICE', 'Running Device Enrollment'
+    WIFI_ACTIVATION = 'WIFI_ACTIVATION', 'WiFi Activation Enrollment'
     ANDROID_DPC = 'ANDROID_DPC', 'Android (MDM / DPC)'
     DLC_LOCKER = 'DLC_LOCKER', 'DLC Locker (Google / OEM)'
     IPHONE = 'IPHONE', 'iPhone (Apple iOS)'

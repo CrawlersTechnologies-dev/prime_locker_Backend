@@ -804,3 +804,75 @@ class PublicAppDownloadTests(TestCase):
         self.assertEqual(resp.status_code, status.HTTP_302_FOUND)
         self.assertEqual(resp['Location'], "https://cdn.primelocker.pro/retailer.apk")
 
+
+class InstallationVideoEnrollmentOptionsTests(TestCase):
+    def setUp(self):
+        self.admin = User.objects.create_superuser(
+            username='vid_admin',
+            email='vidadmin@test.com',
+            password='Password@123',
+            role=Role.SUPER_ADMIN
+        )
+        self.retailer = User.objects.create_user(
+            username='vid_retailer',
+            email='vidret@test.com',
+            password='Password@123',
+            role=Role.RETAILER,
+            parent=self.admin
+        )
+        self.admin_client = APIClient()
+        self.admin_client.force_authenticate(user=self.admin)
+        self.ret_client = APIClient()
+        self.ret_client.force_authenticate(user=self.retailer)
+
+    def test_installation_video_enrollment_options_and_category_filter(self):
+        payloads = [
+            {
+                'title': 'New Device Enrollment Guide',
+                'category': VideoCategory.NEW_DEVICE,
+                'source_type': VideoSourceType.URL,
+                'video_url': 'https://www.youtube.com/watch?v=newdev123',
+                'target_role': 'RETAILER',
+                'display_order': 1,
+                'is_active': True,
+            },
+            {
+                'title': 'Running Device Enrollment Guide',
+                'category': VideoCategory.RUNNING_DEVICE,
+                'source_type': VideoSourceType.URL,
+                'video_url': 'https://www.youtube.com/watch?v=rundev456',
+                'target_role': 'ALL',
+                'display_order': 2,
+                'is_active': True,
+            },
+            {
+                'title': 'WiFi Activation Enrollment Guide',
+                'category': VideoCategory.WIFI_ACTIVATION,
+                'source_type': VideoSourceType.URL,
+                'video_url': 'https://www.youtube.com/watch?v=wifi789',
+                'target_role': 'RETAILER',
+                'display_order': 3,
+                'is_active': True,
+            },
+        ]
+        for payload in payloads:
+            create_resp = self.admin_client.post('/api/installation-videos/', payload, format='json')
+            self.assertEqual(create_resp.status_code, status.HTTP_201_CREATED)
+
+        resp = self.ret_client.get('/api/installation-videos/enrollment-options/')
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        options = resp.data['options']
+        self.assertEqual(len(options), 3)
+        self.assertEqual(
+            [o['category'] for o in options],
+            ['NEW_DEVICE', 'RUNNING_DEVICE', 'WIFI_ACTIVATION']
+        )
+        self.assertEqual(options[0]['youtube_url'], 'https://www.youtube.com/watch?v=newdev123')
+        self.assertEqual(options[1]['youtube_url'], 'https://www.youtube.com/watch?v=rundev456')
+        self.assertEqual(options[2]['youtube_url'], 'https://www.youtube.com/watch?v=wifi789')
+
+        filter_resp = self.ret_client.get('/api/installation-videos/?category=WIFI_ACTIVATION')
+        self.assertEqual(filter_resp.status_code, status.HTTP_200_OK)
+        results = filter_resp.data if isinstance(filter_resp.data, list) else filter_resp.data.get('results', [])
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]['category'], 'WIFI_ACTIVATION')

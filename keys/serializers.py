@@ -93,15 +93,31 @@ class ActivateKeySerializer(serializers.Serializer):
     customer_id = serializers.IntegerField(required=True)
 
 class KeyRequestSerializer(serializers.ModelSerializer):
+    device_type = serializers.CharField(max_length=50, required=False, allow_blank=True)
+    service = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    service_code = serializers.CharField(write_only=True, required=False, allow_blank=True)
     requester_details = serializers.SerializerMethodField(read_only=True)
     platform_display = serializers.SerializerMethodField(read_only=True)
     requester_key_balance = serializers.SerializerMethodField(read_only=True)
     requester_keys_used_this_month = serializers.SerializerMethodField(read_only=True)
-    
+
     class Meta:
         model = KeyRequest
         fields = '__all__'
         read_only_fields = ['requester', 'parent', 'status']
+
+    def validate(self, attrs):
+        from keys.services import resolve_service_code, SERVICE_META
+        service_hint = attrs.pop('service', None) or attrs.pop('service_code', None)
+        if not attrs.get('device_type') and not service_hint and not attrs.get('os_type'):
+            raise serializers.ValidationError({"device_type": "Please specify device_type or service."})
+        resolved_code = resolve_service_code(
+            service=service_hint or attrs.get('device_type'),
+            os_type=attrs.get('os_type'),
+        )
+        if not attrs.get('device_type'):
+            attrs['device_type'] = SERVICE_META[resolved_code]['device_type']
+        return attrs
 
     def get_requester_details(self, obj):
         return {
