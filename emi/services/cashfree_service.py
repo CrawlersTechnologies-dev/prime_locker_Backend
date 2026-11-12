@@ -4,6 +4,7 @@ Handles Order creation (returning payment_session_id), order status verification
 webhook signature parsing, and atomic EMI payment capture.
 Supports live credentials or operates seamlessly in Simulation Mode.
 """
+import os
 import hmac
 import hashlib
 import base64
@@ -35,6 +36,8 @@ class CashfreeService:
         return {
             'APP_ID': app_id,
             'SECRET_KEY': secret_key,
+            'VERIFY_APP_ID': os.getenv('CASHFREE_VERIFY_CLIENT_ID', ''),
+            'VERIFY_SECRET_KEY': os.getenv('CASHFREE_VERIFY_CLIENT_SECRET', ''),
             'API_VERSION': api_version,
             'BASE_URL': base_url,
             'ENV': env
@@ -414,9 +417,9 @@ class CashfreeService:
                 "message": "Bank account verified in simulation mode."
             }
 
-        app_id = config['APP_ID']
-        secret_key = config['SECRET_KEY']
-        if not app_id or not secret_key:
+        verify_client_id = config.get('VERIFY_APP_ID') or config['APP_ID']
+        verify_client_secret = config.get('VERIFY_SECRET_KEY') or config['SECRET_KEY']
+        if not verify_client_id or not verify_client_secret:
             return {
                 "success": True,
                 "verified": False,
@@ -429,8 +432,8 @@ class CashfreeService:
         verify_base = 'https://api.cashfree.com' if config['ENV'] == 'PROD' else 'https://sandbox.cashfree.com'
         url = f"{verify_base}/verification/bank-account/sync"
         headers = {
-            "x-client-id": app_id,
-            "x-client-secret": secret_key,
+            "x-client-id": verify_client_id,
+            "x-client-secret": verify_client_secret,
             "Content-Type": "application/json",
         }
         payload = {
@@ -488,7 +491,42 @@ class CashfreeService:
             }
 
     @classmethod
-    def _submit_subscription_mandate(cls, mandate_id, plan_id, customer_details, auth_mode="UPI", return_url=None, max_amount="0.00"):
+    def _ensure_subscription_plan(cls, base_url, headers, plan_id, plan_name, max_amount="50000.00"):
+        """Ensures an ON_DEMAND Cashfree subscription plan exists before creating a mandate."""
+        try:
+            max_amt = float(Decimal(str(max_amount or "50000.00")))
+        except Exception:
+            max_amt = 50000.0
+        if max_amt <= 0:
+            max_amt = 50000.0
+
+        plan_url = f"{base_url}/plans"
+        plan_payload = {
+            "plan_id": str(plan_id)[:50],
+            "plan_name": str(plan_name or f"Plan {plan_id}")[:50],
+            "plan_type": "ON_DEMAND",
+            "plan_currency": "INR",
+            "plan_max_amount": max_amt,
+            "plan_note": "Prime Locker UPI e-Mandate plan",
+        }
+        try:
+            resp = requests.post(plan_url, json=plan_payload, headers=headers, timeout=12)
+            if resp.status_code not in (200, 201, 409):
+                logger.info(f"Cashfree Plan check ({plan_id}): HTTP {resp.status_code} - {resp.text[:200]}")
+        except requests.RequestException as exc:
+            logger.warning(f"Cashfree Plan creation warning: {exc}")
+
+    @classmethod
+    def _submit_subscription_mandate(
+        cls,
+        mandate_id,
+        plan_id,
+        customer_details,
+        auth_mode="UPI",
+        return_url=None,
+        max_amount="0.00",
+        plan_name=None,
+    ):
         """Shared helper to create a Cashfree Subscription / UPI e-Mandate in simulation or live mode."""
         config = cls.get_config()
         if cls.is_simulation():
@@ -502,6 +540,7 @@ class CashfreeService:
                 "mandate_reference_id": sim_umrn,
                 "mandate_status": "PENDING_AUTH",
                 "mandate_auth_url": sim_auth_url,
+                "subscription_session_id": f"sub_session_sim_{uuid.uuid4().hex[:16]}",
                 "mandate_umrn": sim_umrn,
                 "auth_mode": auth_mode,
                 "max_amount": str(max_amount),
@@ -517,29 +556,56 @@ class CashfreeService:
             "x-api-version": config['API_VERSION'],
             "Content-Type": "application/json"
         }
+
+        cls._ensure_subscription_plan(
+            config['BASE_URL'],
+            headers,
+            plan_id=plan_id,
+            plan_name=plan_name or f"Prime Locker {plan_id}",
+            max_amount=max_amount,
+        )
+
+        raw_phone = str(customer_details.get('customer_phone') or '9999999999')
+        phone_10 = ''.join(ch for ch in raw_phone if ch.isdigit())[-10:] or '9999999999'
+        cf_customer = {
+            "customer_name": customer_details.get('customer_name') or 'Prime Locker User',
+            "customer_email": customer_details.get('customer_email') or 'user@primelocker.pro',
+            "customer_phone": phone_10,
+        }
+        method_key = 'enach' if str(auth_mode).upper() == 'ENACH' else ('card' if str(auth_mode).upper() == 'CARD' else 'upi')
+
         payload = {
             "subscription_id": mandate_id,
-            "plan_id": plan_id,
-            "customer_details": customer_details,
-            "auth_mode": auth_mode,
-            "notification_channels": ["SMS", "EMAIL"]
+            "customer_details": cf_customer,
+            "plan_details": {
+                "plan_id": str(plan_id)[:50],
+            },
+            "authorization_details": {
+                "authorization_amount": 1,
+                "authorization_amount_refund": True,
+                "payment_methods": [method_key],
+            },
+            "subscription_meta": {
+                "return_url": return_url or "https://primelocker.pro/mandate-status?sub_id={subscription_id}",
+            },
         }
-        if return_url:
-            payload["return_url"] = return_url
 
         try:
             resp = requests.post(url, json=payload, headers=headers, timeout=15)
             data = resp.json()
             if resp.status_code in [200, 201]:
-                auth_link = data.get('auth_link') or data.get('payment_session_id') or data.get('sub_auth_url') or ""
+                auth_link = data.get('auth_link') or data.get('sub_auth_url') or data.get('payment_link') or None
                 sub_id = data.get('subscription_id', mandate_id)
+                cf_sub_id = str(data.get('cf_subscription_id') or '')
                 return {
                     "success": True,
                     "gateway": "CASHFREE",
                     "mandate_id": sub_id,
-                    "mandate_reference_id": data.get('umrn') or data.get('cf_subscription_id') or sub_id,
+                    "mandate_reference_id": data.get('umrn') or cf_sub_id or sub_id,
                     "mandate_status": "PENDING_AUTH",
                     "mandate_auth_url": auth_link,
+                    "subscription_session_id": data.get('subscription_session_id'),
+                    "cf_subscription_id": cf_sub_id,
                     "auth_mode": auth_mode,
                     "max_amount": str(max_amount),
                     "simulation": False,
@@ -563,25 +629,25 @@ class CashfreeService:
         """
         customer = contract.customer
         customer_name = f"{customer.first_name} {customer.last_name}".strip() or customer.username
-        customer_phone = str(customer.mobile_number or "+919999999999")
-        if not customer_phone.startswith('+'):
-            customer_phone = f"+91{customer_phone[-10:]}"
-        customer_email = customer.email or f"{customer.mobile_number}@customer.primelocker.com"
+        customer_phone = str(customer.mobile_number or "9999999999")
+        phone_10 = ''.join(ch for ch in customer_phone if ch.isdigit())[-10:] or "9999999999"
+        customer_email = customer.email or f"{phone_10}@customer.primelocker.com"
 
         prefix = "sub_sim" if cls.is_simulation() else "sub"
         mandate_id = f"{prefix}_{contract.id}_{uuid.uuid4().hex[:8]}"
+        max_amt = str(contract.monthly_emi_amount)
         return cls._submit_subscription_mandate(
             mandate_id=mandate_id,
             plan_id=f"plan_{contract.plan_template_id or contract.id}",
+            plan_name=f"EMI Contract {contract.id}",
             customer_details={
-                "customer_id": f"cust_{customer.id}",
                 "customer_name": customer_name,
                 "customer_email": customer_email,
-                "customer_phone": customer_phone,
+                "customer_phone": phone_10,
             },
             auth_mode=auth_mode,
             return_url=return_url,
-            max_amount=str(contract.monthly_emi_amount),
+            max_amount=max_amt,
         )
 
     @classmethod
@@ -592,22 +658,25 @@ class CashfreeService:
         phone_10 = ''.join(ch for ch in raw_phone if ch.isdigit())[-10:] or "9999999999"
         prefix = "ret_sub_sim" if cls.is_simulation() else "ret_sub"
         mandate_id = f"{prefix}_{retailer.id}_{uuid.uuid4().hex[:8]}"
+        try:
+            plan_cap = int(float(Decimal(str(max_amount or "50000.00"))))
+        except Exception:
+            plan_cap = 50000
+        plan_cap = max(plan_cap, 100)
         customer_details = {
-            "customer_id": f"ret_{retailer.id}",
             "customer_name": bank_account.account_holder_name,
             "customer_email": retailer.email or f"{retailer.username}@retailer.primelocker.com",
-            "customer_phone": f"+91{phone_10}",
+            "customer_phone": phone_10,
         }
-        if bank_account.upi_id:
-            customer_details["upi_id"] = bank_account.upi_id
 
         return cls._submit_subscription_mandate(
             mandate_id=mandate_id,
-            plan_id="retailer_upi_mandate",
+            plan_id=f"ret_upi_od_{plan_cap}",
+            plan_name=f"Retailer UPI Mandate {plan_cap}",
             customer_details=customer_details,
             auth_mode=auth_mode,
             return_url=return_url,
-            max_amount=max_amount,
+            max_amount=str(max_amount),
         )
 
     @classmethod
@@ -634,11 +703,12 @@ class CashfreeService:
             resp = requests.get(url, headers=headers, timeout=10)
             if resp.status_code == 200:
                 data = resp.json()
+                auth_ref = (data.get('authorization_details') or {}).get('authorization_reference')
                 return {
                     "success": True,
                     "mandate_id": mandate_id,
                     "status": data.get('subscription_status', 'PENDING_AUTH'),
-                    "umrn": data.get('umrn'),
+                    "umrn": data.get('umrn') or auth_ref or data.get('cf_subscription_id'),
                     "data": data
                 }
             return {"success": False, "status_code": resp.status_code, "error": resp.text}
