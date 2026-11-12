@@ -94,9 +94,20 @@ A high-performance Django REST Framework (DRF) backend engineered for Mobile Dev
 
 ### 12. Installation & Training Videos Suite
 *   **Retailer Onboarding Tutorials:** Super Admin uploads or links step-by-step video guides for phone activations.
-*   **Category-Aware Filtering:** Filter guides directly by device enrollment options: `ANDROID_DPC` (Android App), `DLC_LOCKER` (Google / OEM Hardware Lock), `IPHONE` (Apple iOS MDM), and `GENERAL`.
+*   **Category-Aware Filtering:** Filter guides directly by device enrollment options (`NEW_DEVICE`, `RUNNING_DEVICE`, `WIFI_ACTIVATION`, `DLC_LOCKER`, `ANDROID_DPC`, `IPHONE`, `GENERAL`).
 *   **Dual Video Source Engine:** Supports direct MP4 video file uploads as well as high-speed external streaming URLs (YouTube, Vimeo, Cloudflare Stream, AWS S3).
 *   **Role-Based Targeting & Ordering:** Target videos to Retailers, Distributors, or All roles with custom display ordering (`1, 2, 3...`) and instant active/inactive toggles.
+
+### 13. Retailer Bank Details & Cashfree UPI e-Mandate Integration
+*   **Retailer Bank Submission & Validation:** Retailers can add or update their bank account (`account_holder_name`, `bank_name`, `account_number` with `confirm_account_number` matching, IFSC validation, optional `upi_id`, and `mobile_number`) from the Retailer App. Updating core bank details automatically resets verification status to `PENDING`.
+*   **Cashfree UPI e-Mandate Registration (`v2023-08-01`):** Retailers can initiate UPI e-Mandate setup (`POST /pg/plans` + `POST /pg/subscriptions` returning `subscription_session_id` / `mandate_id`) and check live mandate status. Supports Simulation Mode in `DEBUG`/test environments.
+*   **Automatic Sync to Admin Panel:** Retailer bank details and UPI e-Mandate status automatically sync to Admin Retailer profiles (`GET /api/retailers/` and `GET /api/retailers/{id}/`) with masked Account Number (`XXXXXX1234`) and masked UPI ID (`ra****@okaxis`), mandate registration date, mandate reference ID (UMRN), and last transaction status.
+*   **Authorized Admin Controls & History:** Strict role-hierarchy access for viewing masked bank details (unmasked access restricted to non-viewer company admins/staff with `AuditLog` tracking), manual/gateway bank verification, live Cashfree mandate status sync, chronological mandate history (`RetailerMandateHistory`), and retailer filtering by `COMPLETED`, `PENDING`, or `FAILED` status.
+*   **Webhook Auto-Sync:** Cashfree mandate and subscription debit webhooks (`POST /api/emi/webhook/cashfree/`) automatically update mandate state, last transaction status, and mandate history.
+
+### 14. One-Time Login & MPIN Authentication
+*   **Flexible App Login:** `/api/auth/login/` returns `has_mpin` so mobile clients know whether to show first-time password login + MPIN setup or direct MPIN login.
+*   **4 / 6-Digit Hashed MPIN:** Secure setup (`/api/auth/mpin/setup/`), direct mobile + MPIN JWT login (`/api/auth/mpin/login/`), and OTP-verified forgot/reset MPIN flows (`/api/auth/mpin/forgot/`, `/api/auth/mpin/reset/`).
 
 ---
 
@@ -153,12 +164,15 @@ PARTNER_MDM_USERNAME=your_username
 PARTNER_MDM_PASSWORD=your_password
 PARTNER_MDM_SIMULATION=true
 
-# Cashfree Online Payment Gateway (v2023-08-01)
+# Cashfree Online Payment Gateway & UPI e-Mandate (v2023-08-01)
 CASHFREE_APP_ID=your_cashfree_app_id
 CASHFREE_SECRET_KEY=your_cashfree_secret_key
 CASHFREE_API_VERSION=2023-08-01
 CASHFREE_BASE_URL=https://sandbox.cashfree.com/pg
 CASHFREE_ENV=TEST
+# Optional: Cashfree Verification Suite / Secure ID keys for instant bank verification
+# CASHFREE_VERIFY_CLIENT_ID=your_verification_client_id
+# CASHFREE_VERIFY_CLIENT_SECRET=your_verification_client_secret
 ```
 
 **5. Apply Database Migrations**
@@ -214,17 +228,36 @@ chmod +x deploy.sh
 | `POST` | `/api/auth/change-password/` | Change password (Screen A-42: `old_password`, `new_password`, `confirm_password`) |
 | `GET`/`PATCH` | `/api/auth/me/` | Current user profile, role, parent, key counts, permissions. `PATCH` allows partners and retailers to update their business profile (`name`, `business_name`, `address`, `city`, `store_phone`, and `logo` image) |
 | `POST` | `/api/auth/password-reset-request/` | Request 6-digit OTP for password reset |
+| `POST` | `/api/auth/password-reset-verify-otp/` | Verify 6-digit password reset OTP before setting new password |
 | `POST` | `/api/auth/password-reset-confirm/` | Verify OTP & set new password |
+| `POST` | `/api/auth/mpin/setup/` | Configure or update 4 or 6-digit numeric MPIN for authenticated user |
+| `POST` | `/api/auth/mpin/login/` | Direct mobile number + MPIN login (returns JWT tokens & `has_mpin`) |
+| `POST` | `/api/auth/mpin/forgot/` | Request 6-digit OTP for MPIN reset |
+| `POST` | `/api/auth/mpin/reset/` | Verify OTP and set a new MPIN (invalidates previous MPIN) |
 | `GET`/`POST` | `/api/super-distributors/` | Manage Super Distributors (returns key balances, children counts, key flow stats) |
 | `GET`/`POST` | `/api/distributors/` | Manage Distributors (returns key balances, children counts, key flow stats) |
 | `GET`/`POST` | `/api/sub-distributors/` | Manage Sub-Distributors (returns key balances, children counts, key flow stats) |
-| `GET`/`POST` | `/api/retailers/` | Manage Retailers (returns key balances, children counts, key flow stats) |
+| `GET`/`POST` | `/api/retailers/` | Manage Retailers & synced bank/mandate summaries (supports `?mandate_status=COMPLETED\|PENDING\|FAILED` & `?bank_status=VERIFIED\|PENDING\|FAILED`) |
 | `GET`/`POST` | `/api/customers/` | Onboard and view Customers (`first_name`, `last_name`, `name`, photo, signature, alt phone) |
 | `GET` | `/api/customers/loan-providers/` | Get list of loan providers/financiers for mobile app dropdown |
 | `POST` | `/api/customers/enroll/` | Step 1: Customer & Device Onboarding (Screen: Customer Device Details) with Photo, Signature, IMEI & Token Key |
 | `GET` | `/api/dashboard/` | Role-aware Overview Dashboard (`?range=today\|7d\|30d\|this_month` or `?start_date=&end_date=`) |
 | `GET` | `/api/audit-logs/` | Paginated, filterable Security Audit Logs (`?action=`, `?role=`, `?search=`, `?export=csv`) |
 | `GET` | `/media/<path>` | Secure, authenticated media file server for KYC docs, photos, and signatures |
+
+### 🏦 Retailer Bank Details & UPI e-Mandate
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `GET` | `/api/retailer/bank-details/` | *(Retailer App)* View saved bank account details, verification state, and UPI e-Mandate status |
+| `POST`/`PUT`/`PATCH` | `/api/retailer/bank-details/` | *(Retailer App)* Add/update bank details (`account_holder_name`, `bank_name`, `account_number`, `confirm_account_number`, `ifsc_code`, optional `upi_id`, `mobile_number`) & auto-sync to Admin Panel |
+| `POST` | `/api/retailer/bank-details/verify/` | *(Retailer App)* Trigger Cashfree bank verification on saved bank account |
+| `POST` | `/api/retailer/upi-mandate/register/` | *(Retailer App)* Initiate Cashfree UPI e-Mandate subscription (`mandate_id`, `subscription_session_id`, `mandate_auth_url`) |
+| `GET`/`POST` | `/api/retailer/upi-mandate/status/` | *(Retailer App)* Sync and view own UPI e-Mandate status and recent history |
+| `GET` | `/api/retailers/{id}/` | *(Admin Panel)* View Retailer profile with auto-synced masked bank & UPI e-Mandate summary |
+| `GET` | `/api/retailers/{id}/bank-details/` | *(Admin Panel)* Authorized view of masked bank/mandate details (`?unmasked=true` restricted to non-viewer company admins/staff, audit-logged) |
+| `POST` | `/api/retailers/{id}/verify-bank/` | *(Admin Panel)* Verify or fail retailer bank details (`VERIFY` / `FAILED` / optional `use_gateway`) |
+| `GET`/`POST` | `/api/retailers/{id}/check-mandate-status/` | *(Admin Panel)* Fetch & sync live Cashfree UPI e-Mandate status (`COMPLETED` / `PENDING` / `FAILED`) |
+| `GET` | `/api/retailers/{id}/mandate-history/` | *(Admin Panel)* View chronological bank verification, mandate registration, status sync, and webhook transaction history |
 
 ### 🔑 Key Management
 | Method | Endpoint | Description |
@@ -258,7 +291,7 @@ chmod +x deploy.sh
 | `POST` | `/api/emi-installments/{id}/record-payment/` | Record in-store offline payment (Cash/UPI/Card) & auto-unlock device via `transaction.on_commit` if overdue |
 | `POST` | `/api/emi-installments/{id}/create-payment-order/` | Create Cashfree PG (v2023-08-01) payment order (returns `payment_session_id`, `order_id`, and `order_amount` formatted to 2 decimals; charges `total_due` including late fees) |
 | `POST` | `/api/emi-installments/{id}/verify-online-payment/` | Verify Cashfree order status with gateway & mark installment as `PAID` via `ONLINE_GATEWAY` (auto-unlocks overdue device) |
-| `POST` | `/api/cashfree/webhook/` | External Cashfree PG webhook with timestamped HMAC-SHA256 signature verification (`PAYMENT_SUCCESS_WEBHOOK`) |
+| `POST` | `/api/emi/webhook/cashfree/` | External Cashfree PG webhook with timestamped HMAC-SHA256 signature verification (handles EMI `PAYMENT_SUCCESS_WEBHOOK` and Retailer/Customer mandate activation, failure, and subscription debit events) |
 | `GET` | `/api/emi-overdue/` | Overdue dashboard with Ageing KPIs (`?bucket=1-7`, `8-15`, `16-30`, `30+`), per-row `late_fee`, and calculated `total_due` |
 
 ### 🎁 Offers & Promotions
@@ -347,12 +380,12 @@ chmod +x deploy.sh
 Prime Locker comes with a comprehensive automated test suite covering all modules:
 
 ```bash
-# Run all tests across Accounts, Devices, and EMI modules
-python manage.py test accounts.tests emi.tests devices.tests
+# Run all tests across Accounts, Devices, Keys, and EMI modules
+python manage.py test accounts devices keys emi
 ```
 
-* **Test Coverage:** 34 comprehensive unit tests validating JWT auth, key inventory ledger, TAC whitelists, Cashfree webhooks, in-store payment auto-unlocks, RocketPay DLC, Partner MDM 6-tap QR enrollment, stealth mode toggles, and loan completion release.
-* **Status:** 34 of 34 tests passing with zero errors.
+* **Test Coverage:** 71 comprehensive unit tests validating JWT & MPIN auth, OTP password/MPIN reset, key inventory ledger & zero-balance enforcement, TAC whitelists, Cashfree orders/webhooks/UPI e-Mandates, Retailer bank details & Admin RBAC/masking, in-store payment auto-unlocks, RocketPay DLC, Partner MDM 6-tap QR enrollment, stealth mode toggles, and loan completion release.
+* **Status:** 71 of 71 tests passing with zero errors.
 
 ---
 
@@ -366,5 +399,5 @@ Two pre-configured Postman collections are included directly in the repository r
    * Uses collection variables (`{{base_url}}`, `{{username}}`, `{{password}}`) for secure local testing.
 
 2. **`Prime_Locker_Super_Admin_API.postman_collection.json`**
-   * Primary collection for testing the complete Prime Locker platform.
-   * Includes Customer Enrollment with Dual-Engine support (`PARTNER_MDM` & `ROCKETPAY`), Stealth Mode (`toggle-hide-app`), Device Controls, Key Allocation, Cashfree Payments, and Overdue Dashboards.
+   * Primary collection for testing the complete Prime Locker platform (16 folders).
+   * Includes Customer Enrollment with Dual-Engine support (`PARTNER_MDM` & `ROCKETPAY`), Stealth Mode (`toggle-hide-app`), Device Controls, Key Allocation, MPIN/OTP Auth, Retailer Bank Details & Cashfree UPI e-Mandate (Folder 16), Cashfree Payments, and Overdue Dashboards.
