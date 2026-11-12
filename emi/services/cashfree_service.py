@@ -385,28 +385,113 @@ class CashfreeService:
 
         return True
 
+    @staticmethod
+    def normalize_mandate_status(raw_status):
+        """Maps Cashfree subscription/mandate statuses into COMPLETED, PENDING, or FAILED."""
+        norm = str(raw_status or '').strip().upper()
+        if norm in ('COMPLETED', 'ACTIVE', 'AUTHORIZED', 'AUTHENTICATED', 'SUCCESS', 'VERIFIED'):
+            return 'COMPLETED'
+        if norm in ('FAILED', 'CANCELLED', 'CANCELED', 'REJECTED', 'EXPIRED', 'BANK_APPROVAL_FAILED'):
+            return 'FAILED'
+        return 'PENDING'
+
     @classmethod
-    def create_upi_mandate(cls, contract, auth_mode="UPI", return_url=None):
+    def verify_bank_account(cls, account_number, ifsc_code, account_holder_name, mobile_number=None):
         """
-        Point 10: Cashfree UPI Auto-Pay / e-Mandate registration for automated monthly EMI deduction.
-        Calls Cashfree Subscriptions API or generates simulation token for checkout SDK.
+        Verifies bank account details using Cashfree Verification API if enabled,
+        or Cashfree Simulation Mode in DEBUG/test environments.
+        Returns verification status: VERIFIED, PENDING (needs manual admin verify), or FAILED.
         """
         config = cls.get_config()
+        if cls.is_simulation():
+            return {
+                "success": True,
+                "verified": True,
+                "status": "VERIFIED",
+                "reference_id": f"bav_sim_{uuid.uuid4().hex[:10]}",
+                "name_at_bank": account_holder_name,
+                "simulation": True,
+                "message": "Bank account verified in simulation mode."
+            }
+
         app_id = config['APP_ID']
         secret_key = config['SECRET_KEY']
-        base_url = config['BASE_URL']
-        api_version = config['API_VERSION']
+        if not app_id or not secret_key:
+            return {
+                "success": True,
+                "verified": False,
+                "status": "PENDING",
+                "reference_id": None,
+                "simulation": False,
+                "message": "Bank details saved and queued for admin verification."
+            }
 
-        customer = contract.customer
-        customer_name = f"{customer.first_name} {customer.last_name}".strip() or customer.username
-        customer_phone = str(customer.mobile_number or "+919999999999")
-        if not customer_phone.startswith('+'):
-            customer_phone = f"+91{customer_phone[-10:]}"
-        customer_email = customer.email or f"{customer.mobile_number}@customer.primelocker.com"
+        verify_base = 'https://api.cashfree.com' if config['ENV'] == 'PROD' else 'https://sandbox.cashfree.com'
+        url = f"{verify_base}/verification/bank-account/sync"
+        headers = {
+            "x-client-id": app_id,
+            "x-client-secret": secret_key,
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "bank_account": str(account_number).strip(),
+            "ifsc": str(ifsc_code).strip().upper(),
+            "name": str(account_holder_name).strip(),
+        }
+        if mobile_number:
+            payload["phone"] = str(mobile_number).strip()[-10:]
 
-        # Simulation Mode fallback
+        try:
+            resp = requests.post(url, json=payload, headers=headers, timeout=12)
+            data = resp.json() if 'application/json' in resp.headers.get('content-type', '') else {}
+            if resp.status_code in (200, 201):
+                acct_status = str(data.get('account_status', '')).upper()
+                if acct_status == 'VALID':
+                    return {
+                        "success": True,
+                        "verified": True,
+                        "status": "VERIFIED",
+                        "reference_id": str(data.get('reference_id') or data.get('utr') or ''),
+                        "name_at_bank": data.get('name_at_bank') or account_holder_name,
+                        "simulation": False,
+                        "data": data,
+                        "message": "Bank account verified successfully with Cashfree."
+                    }
+                return {
+                    "success": False,
+                    "verified": False,
+                    "status": "FAILED",
+                    "reference_id": str(data.get('reference_id') or ''),
+                    "simulation": False,
+                    "data": data,
+                    "message": data.get('account_status_code') or data.get('message') or "Bank account verification failed."
+                }
+            # If Verification Suite is not enabled on PG-only credentials, keep PENDING for admin review
+            logger.warning(f"Cashfree Bank Verification returned HTTP {resp.status_code}: {resp.text}")
+            return {
+                "success": True,
+                "verified": False,
+                "status": "PENDING",
+                "reference_id": None,
+                "simulation": False,
+                "message": "Bank details submitted. Awaiting admin/gateway verification."
+            }
+        except requests.RequestException as exc:
+            logger.warning(f"Cashfree Bank Verification network error: {exc}")
+            return {
+                "success": True,
+                "verified": False,
+                "status": "PENDING",
+                "reference_id": None,
+                "simulation": False,
+                "message": "Bank details saved and queued for verification."
+            }
+
+    @classmethod
+    def _submit_subscription_mandate(cls, mandate_id, plan_id, customer_details, auth_mode="UPI", return_url=None, max_amount="0.00"):
+        """Shared helper to create a Cashfree Subscription / UPI e-Mandate in simulation or live mode."""
+        config = cls.get_config()
         if cls.is_simulation():
-            mandate_id = f"sub_sim_{contract.id}_{uuid.uuid4().hex[:8]}"
             sim_auth_url = f"https://sandbox.cashfree.com/pg/orders/mandate/{mandate_id}?auth_mode={auth_mode}"
             sim_umrn = f"UMRN{uuid.uuid4().hex[:10].upper()}"
             logger.info(f"[SIMULATION] Cashfree UPI Mandate created: {mandate_id} (UMRN: {sim_umrn})")
@@ -414,33 +499,28 @@ class CashfreeService:
                 "success": True,
                 "gateway": "CASHFREE",
                 "mandate_id": mandate_id,
+                "mandate_reference_id": sim_umrn,
                 "mandate_status": "PENDING_AUTH",
                 "mandate_auth_url": sim_auth_url,
                 "mandate_umrn": sim_umrn,
                 "auth_mode": auth_mode,
-                "max_amount": str(contract.monthly_emi_amount),
+                "max_amount": str(max_amount),
                 "frequency": "MONTHLY",
                 "simulation": True,
                 "message": "UPI Auto-Pay mandate generated in Cashfree simulation mode. Open auth URL to approve."
             }
 
-        url = f"{base_url}/subscriptions"
+        url = f"{config['BASE_URL']}/subscriptions"
         headers = {
-            "x-client-id": app_id,
-            "x-client-secret": secret_key,
-            "x-api-version": api_version,
+            "x-client-id": config['APP_ID'],
+            "x-client-secret": config['SECRET_KEY'],
+            "x-api-version": config['API_VERSION'],
             "Content-Type": "application/json"
         }
-        plan_id = f"plan_{contract.plan_template_id or contract.id}"
         payload = {
             "subscription_id": mandate_id,
             "plan_id": plan_id,
-            "customer_details": {
-                "customer_id": f"cust_{customer.id}",
-                "customer_name": customer_name,
-                "customer_email": customer_email,
-                "customer_phone": customer_phone
-            },
+            "customer_details": customer_details,
             "auth_mode": auth_mode,
             "notification_channels": ["SMS", "EMAIL"]
         }
@@ -452,34 +532,89 @@ class CashfreeService:
             data = resp.json()
             if resp.status_code in [200, 201]:
                 auth_link = data.get('auth_link') or data.get('payment_session_id') or data.get('sub_auth_url') or ""
+                sub_id = data.get('subscription_id', mandate_id)
                 return {
                     "success": True,
                     "gateway": "CASHFREE",
-                    "mandate_id": data.get('subscription_id', mandate_id),
+                    "mandate_id": sub_id,
+                    "mandate_reference_id": data.get('umrn') or data.get('cf_subscription_id') or sub_id,
                     "mandate_status": "PENDING_AUTH",
                     "mandate_auth_url": auth_link,
                     "auth_mode": auth_mode,
-                    "max_amount": str(contract.monthly_emi_amount),
+                    "max_amount": str(max_amount),
                     "simulation": False,
                     "data": data
                 }
-            else:
-                logger.error(f"Cashfree Mandate API error: {resp.status_code} - {data}")
-                return {
-                    "success": False,
-                    "error": data.get('message', 'Failed to create Cashfree mandate'),
-                    "status_code": resp.status_code,
-                    "details": data
-                }
+            logger.error(f"Cashfree Mandate API error: {resp.status_code} - {data}")
+            return {
+                "success": False,
+                "error": data.get('message', 'Failed to create Cashfree mandate'),
+                "status_code": resp.status_code,
+                "details": data
+            }
         except Exception as e:
             logger.error(f"Cashfree Mandate Connection exception: {e}")
             return {"success": False, "error": str(e)}
 
     @classmethod
+    def create_upi_mandate(cls, contract, auth_mode="UPI", return_url=None):
+        """
+        Point 10: Cashfree UPI Auto-Pay / e-Mandate registration for automated monthly EMI deduction.
+        """
+        customer = contract.customer
+        customer_name = f"{customer.first_name} {customer.last_name}".strip() or customer.username
+        customer_phone = str(customer.mobile_number or "+919999999999")
+        if not customer_phone.startswith('+'):
+            customer_phone = f"+91{customer_phone[-10:]}"
+        customer_email = customer.email or f"{customer.mobile_number}@customer.primelocker.com"
+
+        prefix = "sub_sim" if cls.is_simulation() else "sub"
+        mandate_id = f"{prefix}_{contract.id}_{uuid.uuid4().hex[:8]}"
+        return cls._submit_subscription_mandate(
+            mandate_id=mandate_id,
+            plan_id=f"plan_{contract.plan_template_id or contract.id}",
+            customer_details={
+                "customer_id": f"cust_{customer.id}",
+                "customer_name": customer_name,
+                "customer_email": customer_email,
+                "customer_phone": customer_phone,
+            },
+            auth_mode=auth_mode,
+            return_url=return_url,
+            max_amount=str(contract.monthly_emi_amount),
+        )
+
+    @classmethod
+    def create_retailer_upi_mandate(cls, bank_account, auth_mode="UPI", return_url=None, max_amount="50000.00"):
+        """Registers a Cashfree UPI e-Mandate for a Retailer bank account."""
+        retailer = bank_account.retailer
+        raw_phone = str(bank_account.mobile_number or retailer.mobile_number or "9999999999")
+        phone_10 = ''.join(ch for ch in raw_phone if ch.isdigit())[-10:] or "9999999999"
+        prefix = "ret_sub_sim" if cls.is_simulation() else "ret_sub"
+        mandate_id = f"{prefix}_{retailer.id}_{uuid.uuid4().hex[:8]}"
+        customer_details = {
+            "customer_id": f"ret_{retailer.id}",
+            "customer_name": bank_account.account_holder_name,
+            "customer_email": retailer.email or f"{retailer.username}@retailer.primelocker.com",
+            "customer_phone": f"+91{phone_10}",
+        }
+        if bank_account.upi_id:
+            customer_details["upi_id"] = bank_account.upi_id
+
+        return cls._submit_subscription_mandate(
+            mandate_id=mandate_id,
+            plan_id="retailer_upi_mandate",
+            customer_details=customer_details,
+            auth_mode=auth_mode,
+            return_url=return_url,
+            max_amount=max_amount,
+        )
+
+    @classmethod
     def get_mandate_status(cls, mandate_id):
         """Fetches status of a Cashfree mandate / subscription."""
         # Only simulate when simulation mode is explicitly enabled or mandate_id is marked simulated
-        if cls.is_simulation() or str(mandate_id).startswith('sub_sim_'):
+        if cls.is_simulation() or str(mandate_id).startswith(('sub_sim_', 'ret_sub_sim_')):
             return {
                 "success": True,
                 "mandate_id": mandate_id,

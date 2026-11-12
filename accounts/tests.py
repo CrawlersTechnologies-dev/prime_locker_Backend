@@ -807,3 +807,357 @@ class PrimeLockerProRequirementsTests(TestCase):
         new_mpin_login = anon.post('/api/auth/mpin/login/', {'mobile_number': '9855551234', 'mpin': '998877'}, format='json')
         self.assertEqual(new_mpin_login.status_code, status.HTTP_200_OK)
         self.assertIn('access', new_mpin_login.data)
+
+
+@override_settings(
+    DEBUG=True,
+    CASHFREE_SIMULATION=True,
+    CASHFREE_CONFIG={
+        'ENV': 'SANDBOX',
+        'APP_ID': '',
+        'SECRET_KEY': '',
+        'WEBHOOK_SECRET': '',
+        'API_VERSION': '2023-08-01',
+        'BASE_URL': 'https://sandbox.cashfree.com/pg',
+    },
+)
+class RetailerBankAndMandateTests(TestCase):
+    def setUp(self):
+        from accounts.models import AuditLog, RetailerBankAccount, RetailerMandateHistory
+        self.AuditLog = AuditLog
+        self.RetailerBankAccount = RetailerBankAccount
+        self.RetailerMandateHistory = RetailerMandateHistory
+
+        self.super_admin = User.objects.create_user(
+            username='bank_super_admin',
+            email='super_bank@test.com',
+            password='Password@123',
+            role=Role.SUPER_ADMIN,
+            mobile_number='+919900000001',
+            is_staff=True,
+        )
+        self.staff_viewer = User.objects.create_user(
+            username='bank_viewer',
+            email='viewer_bank@test.com',
+            password='Password@123',
+            role=Role.STAFF_VIEWER,
+            mobile_number='+919900000002',
+            is_staff=True,
+        )
+        self.distributor = User.objects.create_user(
+            username='bank_dist',
+            email='dist_bank@test.com',
+            password='Password@123',
+            role=Role.DISTRIBUTOR,
+            mobile_number='+919900000003',
+            parent=self.super_admin,
+        )
+        self.other_distributor = User.objects.create_user(
+            username='bank_other_dist',
+            email='other_dist@test.com',
+            password='Password@123',
+            role=Role.DISTRIBUTOR,
+            mobile_number='+919900000004',
+            parent=self.super_admin,
+        )
+        self.retailer = User.objects.create_user(
+            username='bank_retailer_1',
+            email='ret1_bank@test.com',
+            password='Password@123',
+            role=Role.RETAILER,
+            first_name='Ramesh',
+            last_name='Traders',
+            business_name='Ramesh Mobile Store',
+            mobile_number='+919855511111',
+            parent=self.distributor,
+        )
+        self.retailer_no_bank = User.objects.create_user(
+            username='bank_retailer_2',
+            email='ret2_bank@test.com',
+            password='Password@123',
+            role=Role.RETAILER,
+            first_name='Suresh',
+            last_name='Point',
+            mobile_number='+919855522222',
+            parent=self.distributor,
+        )
+        self.customer = User.objects.create_user(
+            username='bank_customer_1',
+            email='cust_bank@test.com',
+            password='Password@123',
+            role=Role.CUSTOMER,
+            mobile_number='+919855533333',
+            parent=self.retailer,
+        )
+
+    def _client_for(self, user):
+        c = APIClient()
+        c.force_authenticate(user=user)
+        return c
+
+    def test_bank_validation_and_optional_upi(self):
+        ret_client = self._client_for(self.retailer)
+
+        # Mismatched confirm_account_number rejected
+        bad_confirm = ret_client.post('/api/retailer/bank-details/', {
+            'account_holder_name': 'Ramesh Kumar',
+            'bank_name': 'HDFC Bank',
+            'account_number': '123456789012',
+            'confirm_account_number': '123456789999',
+            'ifsc_code': 'HDFC0001234',
+            'mobile_number': '9855511111',
+        }, format='json')
+        self.assertEqual(bad_confirm.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('confirm_account_number', bad_confirm.data)
+
+        # Invalid IFSC rejected
+        bad_ifsc = ret_client.post('/api/retailer/bank-details/', {
+            'account_holder_name': 'Ramesh Kumar',
+            'bank_name': 'HDFC Bank',
+            'account_number': '123456789012',
+            'confirm_account_number': '123456789012',
+            'ifsc_code': 'BADIFSC',
+            'mobile_number': '9855511111',
+        }, format='json')
+        self.assertEqual(bad_ifsc.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('ifsc_code', bad_ifsc.data)
+
+        # Invalid UPI rejected
+        bad_upi = ret_client.post('/api/retailer/bank-details/', {
+            'account_holder_name': 'Ramesh Kumar',
+            'bank_name': 'HDFC Bank',
+            'account_number': '123456789012',
+            'confirm_account_number': '123456789012',
+            'ifsc_code': 'HDFC0001234',
+            'upi_id': 'invalid_upi',
+            'mobile_number': '9855511111',
+        }, format='json')
+        self.assertEqual(bad_upi.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('upi_id', bad_upi.data)
+
+        # Submitting without optional UPI ID succeeds
+        no_upi = ret_client.post('/api/retailer/bank-details/', {
+            'account_holder_name': 'Ramesh Kumar',
+            'bank_name': 'HDFC Bank',
+            'account_number': '123456789012',
+            'confirm_account_number': '123456789012',
+            'ifsc_code': 'hdfc0001234',
+            'mobile_number': '9855511111',
+            'verify_now': False,
+        }, format='json')
+        self.assertEqual(no_upi.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(no_upi.data['bank_details']['ifsc_code'], 'HDFC0001234')
+        self.assertIsNone(no_upi.data['bank_details']['upi_id'])
+        self.assertIsNone(no_upi.data['bank_details']['upi_id_masked'])
+        self.assertEqual(no_upi.data['bank_details']['verification_status'], 'PENDING')
+
+    def test_auto_sync_to_admin_and_authorized_access_controls(self):
+        ret_client = self._client_for(self.retailer)
+        submit_resp = ret_client.post('/api/retailer/bank-details/', {
+            'account_holder_name': 'Ramesh Kumar',
+            'bank_name': 'State Bank of India',
+            'account_number': '50100123456789',
+            'confirm_account_number': '50100123456789',
+            'ifsc_code': 'SBIN0004321',
+            'upi_id': 'ramesh.store@okaxis',
+            'mobile_number': '+919855511111',
+            'verify_now': True,
+        }, format='json')
+        self.assertEqual(submit_resp.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(submit_resp.data['bank_details']['verification_status'], 'VERIFIED')
+        self.assertEqual(submit_resp.data['bank_details']['account_number_masked'], 'XXXXXXXXXX6789')
+        self.assertEqual(submit_resp.data['bank_details']['upi_id_masked'], 'ra**********@okaxis')
+
+        # Auto-synced onto Admin Retailer Profile (masked by default)
+        admin_client = self._client_for(self.super_admin)
+        profile_resp = admin_client.get(f'/api/retailers/{self.retailer.id}/')
+        self.assertEqual(profile_resp.status_code, status.HTTP_200_OK)
+        summary = profile_resp.data['bank_mandate_details']
+        self.assertEqual(summary['retailer_name'], 'Ramesh Traders')
+        self.assertEqual(summary['retailer_code'], f'RET-{self.retailer.id:04d}')
+        self.assertEqual(summary['account_holder_name'], 'Ramesh Kumar')
+        self.assertEqual(summary['bank_name'], 'State Bank of India')
+        self.assertEqual(summary['account_number_masked'], 'XXXXXXXXXX6789')
+        self.assertEqual(summary['upi_id_masked'], 'ra**********@okaxis')
+        self.assertEqual(summary['ifsc_code'], 'SBIN0004321')
+        self.assertEqual(summary['verification_status'], 'VERIFIED')
+        self.assertNotIn('account_number', summary)
+        self.assertNotIn('upi_id', summary)
+
+        # Unmasked access granted only to non-viewer company admin + audit logged
+        unmasked_resp = admin_client.get(f'/api/retailers/{self.retailer.id}/bank-details/?unmasked=true')
+        self.assertEqual(unmasked_resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(unmasked_resp.data['account_number'], '50100123456789')
+        self.assertEqual(unmasked_resp.data['upi_id'], 'ramesh.store@okaxis')
+        self.assertTrue(
+            self.AuditLog.objects.filter(user=self.super_admin, action='VIEWED_UNMASKED_RETAILER_BANK').exists()
+        )
+
+        # Parent distributor can view masked summary, denied unmasked
+        dist_client = self._client_for(self.distributor)
+        dist_bank = dist_client.get(f'/api/retailers/{self.retailer.id}/bank-details/')
+        self.assertEqual(dist_bank.status_code, status.HTTP_200_OK)
+        self.assertNotIn('account_number', dist_bank.data)
+        self.assertEqual(
+            dist_client.get(f'/api/retailers/{self.retailer.id}/bank-details/?unmasked=true').status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+
+        # Viewer staff can read masked details & history, cannot request unmasked or write verify-bank
+        viewer_client = self._client_for(self.staff_viewer)
+        self.assertEqual(
+            viewer_client.get(f'/api/retailers/{self.retailer.id}/bank-details/').status_code,
+            status.HTTP_200_OK,
+        )
+        self.assertEqual(
+            viewer_client.get(f'/api/retailers/{self.retailer.id}/bank-details/?unmasked=true').status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+        self.assertEqual(
+            viewer_client.post(f'/api/retailers/{self.retailer.id}/verify-bank/', {'action': 'VERIFY'}, format='json').status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+
+        # Unrelated distributor, other retailer, and customer denied access
+        other_dist_client = self._client_for(self.other_distributor)
+        self.assertIn(
+            other_dist_client.get(f'/api/retailers/{self.retailer.id}/bank-details/').status_code,
+            (status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND),
+        )
+        other_ret_client = self._client_for(self.retailer_no_bank)
+        self.assertIn(
+            other_ret_client.get(f'/api/retailers/{self.retailer.id}/bank-details/').status_code,
+            (status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND),
+        )
+        cust_client = self._client_for(self.customer)
+        self.assertEqual(cust_client.get('/api/retailer/bank-details/').status_code, status.HTTP_403_FORBIDDEN)
+        self.assertIn(
+            cust_client.post(f'/api/retailers/{self.retailer.id}/verify-bank/', {'action': 'VERIFY'}, format='json').status_code,
+            (status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND),
+        )
+
+    def test_mandate_lifecycle_admin_controls_filtering_and_webhooks(self):
+        ret_client = self._client_for(self.retailer)
+        admin_client = self._client_for(self.super_admin)
+
+        # 1. Submit bank details (without auto verify) then verify from Admin Controls
+        ret_client.post('/api/retailer/bank-details/', {
+            'account_holder_name': 'Ramesh Traders',
+            'bank_name': 'ICICI Bank',
+            'account_number': '001122334455',
+            'confirm_account_number': '001122334455',
+            'ifsc_code': 'ICIC0000112',
+            'upi_id': 'ramesh@icici',
+            'mobile_number': '9855511111',
+            'verify_now': False,
+        }, format='json')
+
+        # Admin rejects then verifies
+        fail_resp = admin_client.post(f'/api/retailers/{self.retailer.id}/verify-bank/', {
+            'action': 'FAILED',
+            'remarks': 'Passbook mismatch',
+        }, format='json')
+        self.assertEqual(fail_resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(fail_resp.data['bank_mandate_details']['verification_status'], 'FAILED')
+
+        verify_resp = admin_client.post(f'/api/retailers/{self.retailer.id}/verify-bank/', {
+            'action': 'VERIFY',
+            'remarks': 'Matched cancelled cheque',
+        }, format='json')
+        self.assertEqual(verify_resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(verify_resp.data['bank_mandate_details']['verification_status'], 'VERIFIED')
+
+        # Updating core bank account number resets verification back to PENDING
+        upd_resp = ret_client.patch('/api/retailer/bank-details/', {
+            'account_holder_name': 'Ramesh Traders',
+            'bank_name': 'ICICI Bank',
+            'account_number': '001122339988',
+            'confirm_account_number': '001122339988',
+            'ifsc_code': 'ICIC0000112',
+            'upi_id': 'ramesh@icici',
+            'mobile_number': '9855511111',
+            'verify_now': False,
+        }, format='json')
+        self.assertEqual(upd_resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(upd_resp.data['bank_details']['verification_status'], 'PENDING')
+
+        # Retailer triggers self-service verify
+        self_verify = ret_client.post('/api/retailer/bank-details/verify/', {}, format='json')
+        self.assertEqual(self_verify.status_code, status.HTTP_200_OK)
+        self.assertEqual(self_verify.data['verification_status'], 'VERIFIED')
+
+        # 2. Retailer initiates UPI e-Mandate
+        mandate_resp = ret_client.post('/api/retailer/upi-mandate/register/', {
+            'auth_mode': 'UPI',
+            'max_amount': '25000.00',
+        }, format='json')
+        self.assertEqual(mandate_resp.status_code, status.HTTP_201_CREATED)
+        mandate_id = mandate_resp.data['mandate_id']
+        self.assertTrue(mandate_id.startswith('ret_sub_sim_'))
+        self.assertEqual(mandate_resp.data['upi_mandate_status'], 'PENDING')
+
+        # Before mandate completion, filter by PENDING returns both retailers, COMPLETED returns none
+        pending_list = admin_client.get('/api/retailers/?mandate_status=PENDING')
+        self.assertEqual(pending_list.status_code, status.HTTP_200_OK)
+        pending_ids = [r['id'] for r in pending_list.data.get('results', pending_list.data)]
+        self.assertIn(self.retailer.id, pending_ids)
+        self.assertIn(self.retailer_no_bank.id, pending_ids)
+
+        completed_before = admin_client.get('/api/retailers/?mandate_status=COMPLETED')
+        completed_ids_before = [r['id'] for r in completed_before.data.get('results', completed_before.data)]
+        self.assertNotIn(self.retailer.id, completed_ids_before)
+
+        # 3. Admin checks UPI e-Mandate status -> simulation returns ACTIVE -> normalized COMPLETED
+        check_resp = admin_client.post(f'/api/retailers/{self.retailer.id}/check-mandate-status/', {}, format='json')
+        self.assertEqual(check_resp.status_code, status.HTTP_200_OK)
+        self.assertTrue(check_resp.data['synced'])
+        self.assertEqual(check_resp.data['mandate_status'], 'COMPLETED')
+        self.assertIsNotNone(check_resp.data['bank_mandate_details']['mandate_registration_date'])
+        self.assertTrue(check_resp.data['bank_mandate_details']['mandate_reference_id'].startswith('UMRN'))
+
+        # Filter by COMPLETED now includes retailer, PENDING excludes retailer
+        completed_after = admin_client.get('/api/retailers/?mandate_status=COMPLETED')
+        completed_ids_after = [r['id'] for r in completed_after.data.get('results', completed_after.data)]
+        self.assertIn(self.retailer.id, completed_ids_after)
+
+        # Retailer status endpoint reflects the same synced state
+        ret_status = ret_client.get('/api/retailer/upi-mandate/status/')
+        self.assertEqual(ret_status.status_code, status.HTTP_200_OK)
+        self.assertEqual(ret_status.data['mandate_status'], 'COMPLETED')
+
+        # 4. Cashfree Webhook: debit success then mandate failure
+        anon_client = APIClient()
+        debit_ok = anon_client.post('/api/emi/webhook/cashfree/', {
+            'type': 'SUBSCRIPTION_DEBIT_SUCCESS',
+            'data': {
+                'subscription': {'subscription_id': mandate_id, 'umrn': 'UMRN_CF_9001'},
+                'payment': {'cf_payment_id': 'cf_pay_9001', 'payment_amount': '1500.00'},
+            },
+        }, format='json')
+        self.assertEqual(debit_ok.status_code, status.HTTP_200_OK)
+
+        profile_after_debit = admin_client.get(f'/api/retailers/{self.retailer.id}/')
+        self.assertEqual(profile_after_debit.data['last_mandate_transaction_status'], 'SUCCESS')
+        self.assertEqual(profile_after_debit.data['mandate_reference_id'], 'UMRN_CF_9001')
+
+        mandate_fail = anon_client.post('/api/emi/webhook/cashfree/', {
+            'type': 'MANDATE_FAILED',
+            'data': {'subscription': {'subscription_id': mandate_id}},
+        }, format='json')
+        self.assertEqual(mandate_fail.status_code, status.HTTP_200_OK)
+
+        failed_list = admin_client.get('/api/retailers/?mandate_status=FAILED')
+        failed_ids = [r['id'] for r in failed_list.data.get('results', failed_list.data)]
+        self.assertEqual(failed_ids, [self.retailer.id])
+
+        # 5. Admin views complete Mandate History
+        hist_resp = admin_client.get(f'/api/retailers/{self.retailer.id}/mandate-history/')
+        self.assertEqual(hist_resp.status_code, status.HTTP_200_OK)
+        event_types = [h['event_type'] for h in hist_resp.data['history']]
+        self.assertIn('BANK_DETAILS_SUBMITTED', event_types)
+        self.assertIn('ADMIN_BANK_VERIFY', event_types)
+        self.assertIn('MANDATE_INITIATED', event_types)
+        self.assertIn('MANDATE_STATUS_CHECKED', event_types)
+        self.assertIn('SUBSCRIPTION_DEBIT_SUCCESS', event_types)
+        self.assertIn('MANDATE_FAILED', event_types)
+

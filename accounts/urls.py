@@ -26,7 +26,11 @@ from .views import (
     PlatformSettingsView,
     RetailerTermsAndConditionsView,
     WhatsAppCampaignView,
-    BannerViewSet
+    BannerViewSet,
+    RetailerBankDetailsView,
+    RetailerBankVerifyView,
+    RetailerUPIMandateRegisterView,
+    RetailerUPIMandateStatusView,
 )
 
 router = DefaultRouter()
@@ -54,6 +58,10 @@ urlpatterns = [
     path('auth/mpin/login/', MPINLoginView.as_view(), name='mpin_login'),
     path('auth/mpin/forgot/', MPINForgotView.as_view(), name='mpin_forgot'),
     path('auth/mpin/reset/', MPINResetView.as_view(), name='mpin_reset'),
+    path('retailer/bank-details/', RetailerBankDetailsView.as_view(), name='retailer_bank_details'),
+    path('retailer/bank-details/verify/', RetailerBankVerifyView.as_view(), name='retailer_bank_verify'),
+    path('retailer/upi-mandate/register/', RetailerUPIMandateRegisterView.as_view(), name='retailer_upi_mandate_register'),
+    path('retailer/upi-mandate/status/', RetailerUPIMandateStatusView.as_view(), name='retailer_upi_mandate_status'),
     path('dashboard/', DashboardView.as_view(), name='main-dashboard'),
     path('settings/', PlatformSettingsView.as_view(), name='platform_settings'),
     path('settings/terms-and-conditions/', RetailerTermsAndConditionsView.as_view(), name='retailer_terms_and_conditions'),

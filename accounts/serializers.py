@@ -300,12 +300,87 @@ class SubDistributorSerializer(SuperDistributorSerializer):
     """Inherits identical fields from SuperDistributorSerializer"""
     pass
 
+def build_retailer_bank_mandate_summary(retailer, include_unmasked=False):
+    """Builds synced bank & UPI e-Mandate summary for Retailer Profile and Admin Controls."""
+    from django.core.exceptions import ObjectDoesNotExist
+    retailer_name = f"{retailer.first_name} {retailer.last_name}".strip() or retailer.business_name or retailer.username
+    try:
+        bank_acct = retailer.bank_account
+    except ObjectDoesNotExist:
+        bank_acct = None
+
+    if not bank_acct:
+        return {
+            'retailer_id': retailer.id,
+            'retailer_code': f'RET-{retailer.id:04d}',
+            'retailer_name': retailer_name,
+            'mobile_number': retailer.mobile_number,
+            'has_bank_details': False,
+            'account_holder_name': None,
+            'bank_name': None,
+            'account_number_masked': None,
+            'ifsc_code': None,
+            'upi_id_masked': None,
+            'verification_status': 'PENDING',
+            'verified_at': None,
+            'verification_ref': None,
+            'verification_remarks': None,
+            'upi_mandate_status': 'PENDING',
+            'mandate_registration_date': None,
+            'mandate_reference_id': None,
+            'last_mandate_transaction_status': 'NONE',
+            'last_transaction_at': None,
+            'mandate_id': None,
+            'mandate_auth_url': None,
+        }
+
+    summary = {
+        'retailer_id': retailer.id,
+        'retailer_code': f'RET-{retailer.id:04d}',
+        'retailer_name': retailer_name,
+        'mobile_number': bank_acct.mobile_number or retailer.mobile_number,
+        'has_bank_details': True,
+        'account_holder_name': bank_acct.account_holder_name,
+        'bank_name': bank_acct.bank_name,
+        'account_number_masked': bank_acct.masked_account_number,
+        'ifsc_code': bank_acct.ifsc_code,
+        'upi_id_masked': bank_acct.masked_upi_id,
+        'verification_status': bank_acct.verification_status,
+        'verified_at': bank_acct.verified_at,
+        'verification_ref': bank_acct.verification_ref,
+        'verification_remarks': bank_acct.verification_remarks,
+        'upi_mandate_status': bank_acct.mandate_status,
+        'mandate_registration_date': bank_acct.mandate_registered_at,
+        'mandate_reference_id': bank_acct.mandate_reference_id,
+        'last_mandate_transaction_status': bank_acct.last_transaction_status,
+        'last_transaction_at': bank_acct.last_transaction_at,
+        'mandate_id': bank_acct.mandate_id,
+        'mandate_auth_url': bank_acct.mandate_auth_url,
+    }
+    if include_unmasked:
+        summary['account_number'] = bank_acct.account_number
+        summary['upi_id'] = bank_acct.upi_id
+    return summary
+
+
 class RetailerSerializer(SuperDistributorSerializer):
-    """Retailer uses similar fields plus store/device configurations"""
+    """Retailer uses similar fields plus store/device configurations and synced bank/mandate summary."""
     class Meta(SuperDistributorSerializer.Meta):
         fields = SuperDistributorSerializer.Meta.fields + [
             'store_phone', 'district', 'allowed_devices', 'grace_period', 'max_devices'
         ]
+
+    def to_representation(self, instance):
+        rep = super().to_representation(instance)
+        summary = build_retailer_bank_mandate_summary(instance, include_unmasked=False)
+        rep['retailer_code'] = summary['retailer_code']
+        rep['bank_verification_status'] = summary['verification_status']
+        rep['upi_mandate_status'] = summary['upi_mandate_status']
+        rep['mandate_reference_id'] = summary['mandate_reference_id']
+        rep['mandate_registration_date'] = summary['mandate_registration_date']
+        rep['last_mandate_transaction_status'] = summary['last_mandate_transaction_status']
+        rep['bank_mandate_details'] = summary
+        return rep
 
 class CustomerSerializer(serializers.ModelSerializer):
     full_name = serializers.CharField(write_only=True, required=False)
@@ -763,3 +838,103 @@ class BannerSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
 
+
+class RetailerBankAccountSubmitSerializer(serializers.Serializer):
+    account_holder_name = serializers.CharField(max_length=150, required=True)
+    bank_name = serializers.CharField(max_length=150, required=True)
+    account_number = serializers.CharField(max_length=34, required=True)
+    confirm_account_number = serializers.CharField(max_length=34, required=True, write_only=True)
+    ifsc_code = serializers.CharField(max_length=11, required=True)
+    upi_id = serializers.CharField(max_length=100, required=False, allow_blank=True, allow_null=True)
+    mobile_number = serializers.CharField(max_length=15, required=True)
+    verify_now = serializers.BooleanField(required=False, default=True)
+
+    def validate(self, attrs):
+        import re
+        holder = (attrs.get('account_holder_name') or '').strip()
+        bank_name = (attrs.get('bank_name') or '').strip()
+        acct = re.sub(r'\s+', '', str(attrs.get('account_number') or ''))
+        confirm_acct = re.sub(r'\s+', '', str(attrs.get('confirm_account_number') or ''))
+        ifsc = (attrs.get('ifsc_code') or '').strip().upper()
+        upi = (attrs.get('upi_id') or '').strip().lower() or None
+        mobile = (attrs.get('mobile_number') or '').strip()
+
+        if not holder:
+            raise serializers.ValidationError({'account_holder_name': 'Account holder name is required.'})
+        if not bank_name:
+            raise serializers.ValidationError({'bank_name': 'Bank name is required.'})
+        if not acct.isdigit() or not (9 <= len(acct) <= 18):
+            raise serializers.ValidationError({'account_number': 'Account number must contain 9 to 18 numeric digits.'})
+        if acct != confirm_acct:
+            raise serializers.ValidationError({'confirm_account_number': 'Account Number and Confirm Account Number do not match.'})
+        if not re.match(r'^[A-Z]{4}0[A-Z0-9]{6}$', ifsc):
+            raise serializers.ValidationError({'ifsc_code': 'Invalid IFSC code format (expected 11 characters, e.g. HDFC0001234).'})
+        if upi and not re.match(r'^[a-z0-9._\-]{2,}@[a-z0-9.\-]{2,}$', upi):
+            raise serializers.ValidationError({'upi_id': 'Invalid UPI ID format (e.g. store@okaxis).'})
+        mobile_digits = ''.join(ch for ch in mobile if ch.isdigit())
+        if len(mobile_digits) < 10:
+            raise serializers.ValidationError({'mobile_number': 'Valid 10-digit mobile number is required.'})
+
+        attrs['account_holder_name'] = holder
+        attrs['bank_name'] = bank_name
+        attrs['account_number'] = acct
+        attrs.pop('confirm_account_number', None)
+        attrs['ifsc_code'] = ifsc
+        attrs['upi_id'] = upi
+        attrs['mobile_number'] = mobile
+        return attrs
+
+
+class RetailerBankAccountOwnSerializer(serializers.ModelSerializer):
+    account_number_masked = serializers.CharField(source='masked_account_number', read_only=True)
+    upi_id_masked = serializers.CharField(source='masked_upi_id', read_only=True)
+    retailer_id = serializers.IntegerField(source='retailer.id', read_only=True)
+    retailer_code = serializers.SerializerMethodField(read_only=True)
+    retailer_name = serializers.SerializerMethodField(read_only=True)
+
+    class Meta:
+        from .models import RetailerBankAccount
+        model = RetailerBankAccount
+        fields = [
+            'id', 'retailer_id', 'retailer_code', 'retailer_name',
+            'account_holder_name', 'bank_name',
+            'account_number', 'account_number_masked',
+            'ifsc_code', 'upi_id', 'upi_id_masked', 'mobile_number',
+            'verification_status', 'verified_at', 'verification_ref', 'verification_remarks',
+            'mandate_status', 'mandate_id', 'mandate_reference_id',
+            'mandate_auth_url', 'mandate_registered_at',
+            'last_transaction_status', 'last_transaction_at',
+            'created_at', 'updated_at',
+        ]
+
+    def get_retailer_code(self, obj):
+        return f'RET-{obj.retailer_id:04d}'
+
+    def get_retailer_name(self, obj):
+        r = obj.retailer
+        return f"{r.first_name} {r.last_name}".strip() or r.business_name or r.username
+
+
+class RetailerBankVerifyAdminSerializer(serializers.Serializer):
+    action = serializers.ChoiceField(choices=['VERIFY', 'FAILED', 'REJECT'], required=False, default='VERIFY')
+    use_gateway = serializers.BooleanField(required=False, default=False)
+    remarks = serializers.CharField(required=False, allow_blank=True, default='')
+
+
+class RetailerMandateHistorySerializer(serializers.ModelSerializer):
+    performed_by_name = serializers.SerializerMethodField(read_only=True)
+
+    class Meta:
+        from .models import RetailerMandateHistory
+        model = RetailerMandateHistory
+        fields = [
+            'id', 'event_type', 'status', 'mandate_reference_id',
+            'transaction_ref', 'amount', 'notes',
+            'performed_by', 'performed_by_name', 'created_at',
+        ]
+
+    def get_performed_by_name(self, obj):
+        if not obj.performed_by:
+            return 'System / Webhook'
+        u = obj.performed_by
+        return f"{u.first_name} {u.last_name}".strip() or u.username

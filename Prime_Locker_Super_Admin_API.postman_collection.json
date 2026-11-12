@@ -2369,6 +2369,411 @@
           ]
         }
       ]
+    },
+    {
+      "name": "16. Retailer Bank Details & UPI e-Mandate",
+      "description": "Retailer Application bank account submission/verification and Cashfree UPI e-Mandate registration, automatically synced with Admin Panel profile, controls, history, and status filters.",
+      "item": [
+        {
+          "name": "A. Retailer Application",
+          "item": [
+            {
+              "name": "1. Get Own Bank Details & Mandate Status",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{access_token}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/retailer/bank-details/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "retailer",
+                    "bank-details",
+                    ""
+                  ]
+                },
+                "description": "Returns the authenticated retailer's saved bank account details, verification status, and UPI e-Mandate status."
+              }
+            },
+            {
+              "name": "2. Submit / Update & Verify Bank Details",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{access_token}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/retailer/bank-details/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "retailer",
+                    "bank-details",
+                    ""
+                  ]
+                },
+                "description": "Retailer adds/updates bank account details (account_holder_name, bank_name, account_number, confirm_account_number, ifsc_code, optional upi_id, mobile_number) and triggers verification. Auto-syncs to Admin Panel.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n    \"account_holder_name\": \"Ramesh Kumar\",\n    \"bank_name\": \"HDFC Bank\",\n    \"account_number\": \"50100123456789\",\n    \"confirm_account_number\": \"50100123456789\",\n    \"ifsc_code\": \"HDFC0001234\",\n    \"upi_id\": \"ramesh.store@okaxis\",\n    \"mobile_number\": \"9855511111\",\n    \"verify_now\": true\n}"
+                }
+              }
+            },
+            {
+              "name": "3. Re-Verify Saved Bank Details",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{access_token}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/retailer/bank-details/verify/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "retailer",
+                    "bank-details",
+                    "verify",
+                    ""
+                  ]
+                },
+                "description": "Triggers bank account verification via Cashfree Verification API / simulation.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{}"
+                }
+              }
+            },
+            {
+              "name": "4. Register UPI e-Mandate (Cashfree)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{access_token}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/retailer/upi-mandate/register/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "retailer",
+                    "upi-mandate",
+                    "register",
+                    ""
+                  ]
+                },
+                "description": "Initiates Cashfree UPI e-Mandate subscription for the retailer and stores mandate_id + auth_url.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n    \"auth_mode\": \"UPI\",\n    \"max_amount\": \"50000.00\",\n    \"return_url\": \"https://app.primelocker.com/mandate-callback\"\n}"
+                }
+              }
+            },
+            {
+              "name": "5. Check Own UPI e-Mandate Status",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{access_token}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/retailer/upi-mandate/status/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "retailer",
+                    "upi-mandate",
+                    "status",
+                    ""
+                  ]
+                },
+                "description": "Syncs and returns the retailer's UPI e-Mandate status and recent history."
+              }
+            }
+          ]
+        },
+        {
+          "name": "B. Admin Panel Controls",
+          "item": [
+            {
+              "name": "1. Filter Retailers by Mandate Status (COMPLETED / PENDING / FAILED)",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{access_token}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/retailers/?mandate_status=COMPLETED",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "retailers",
+                    ""
+                  ],
+                  "query": [
+                    {
+                      "key": "mandate_status",
+                      "value": "COMPLETED"
+                    }
+                  ]
+                },
+                "description": "Admin lists retailers filtered by UPI e-Mandate status: COMPLETED, PENDING, or FAILED."
+              }
+            },
+            {
+              "name": "2. Get Retailer Profile (Synced Bank & Mandate Summary)",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{access_token}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/retailers/{{retailer_id}}/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "retailers",
+                    "{{retailer_id}}",
+                    ""
+                  ]
+                },
+                "description": "Returns Retailer profile with auto-synced bank_mandate_details (masked account number, masked UPI ID, IFSC, mandate status, date, reference ID, last transaction status)."
+              }
+            },
+            {
+              "name": "3. View Retailer Bank Details (Authorized Masked / Unmasked)",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{access_token}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/retailers/{{retailer_id}}/bank-details/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "retailers",
+                    "{{retailer_id}}",
+                    "bank-details",
+                    ""
+                  ],
+                  "query": [
+                    {
+                      "key": "unmasked",
+                      "value": "true",
+                      "disabled": true
+                    }
+                  ]
+                },
+                "description": "Returns masked bank & mandate details by default. Non-viewer company admins/staff may pass ?unmasked=true (audit-logged)."
+              }
+            },
+            {
+              "name": "4. Verify / Reject Retailer Bank Details",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{access_token}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/retailers/{{retailer_id}}/verify-bank/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "retailers",
+                    "{{retailer_id}}",
+                    "verify-bank",
+                    ""
+                  ]
+                },
+                "description": "Admin verifies or marks failed a retailer's bank account details (action: VERIFY or FAILED).",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n    \"action\": \"VERIFY\",\n    \"use_gateway\": false,\n    \"remarks\": \"Verified against cancelled cheque\"\n}"
+                }
+              }
+            },
+            {
+              "name": "5. Check & Sync UPI e-Mandate Status",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{access_token}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/retailers/{{retailer_id}}/check-mandate-status/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "retailers",
+                    "{{retailer_id}}",
+                    "check-mandate-status",
+                    ""
+                  ]
+                },
+                "description": "Admin fetches live UPI e-Mandate status from Cashfree and updates the retailer profile + mandate history.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{}"
+                }
+              }
+            },
+            {
+              "name": "6. View Retailer Mandate History",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{access_token}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/retailers/{{retailer_id}}/mandate-history/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "retailers",
+                    "{{retailer_id}}",
+                    "mandate-history",
+                    ""
+                  ]
+                },
+                "description": "Returns chronological audit log of retailer bank submissions, verifications, mandate registrations, status checks, and webhook debits."
+              }
+            }
+          ]
+        },
+        {
+          "name": "C. Cashfree Webhook Simulation",
+          "item": [
+            {
+              "name": "1. Webhook - Mandate Debit Success",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/api/emi/webhook/cashfree/",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "emi",
+                    "webhook",
+                    "cashfree",
+                    ""
+                  ]
+                },
+                "description": "Simulates Cashfree mandate/subscription webhook event updating mandate_status, last_mandate_transaction_status, and RetailerMandateHistory.",
+                "auth": {
+                  "type": "noauth"
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n    \"type\": \"SUBSCRIPTION_DEBIT_SUCCESS\",\n    \"data\": {\n        \"subscription\": {\n            \"subscription_id\": \"ret_sub_sim_example\",\n            \"umrn\": \"UMRN_CF_DEMO_001\"\n        },\n        \"payment\": {\n            \"cf_payment_id\": \"cf_pay_demo_001\",\n            \"payment_amount\": \"1500.00\"\n        }\n    }\n}"
+                }
+              }
+            }
+          ]
+        }
+      ]
     }
   ]
 }

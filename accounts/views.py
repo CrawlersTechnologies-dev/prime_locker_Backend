@@ -27,9 +27,25 @@ from .serializers import (
     MPINResetSerializer,
     build_auth_user_payload,
     build_login_response_data,
-    AuditLogSerializer
+    AuditLogSerializer,
+    build_retailer_bank_mandate_summary,
+    RetailerBankAccountSubmitSerializer,
+    RetailerBankAccountOwnSerializer,
+    RetailerBankVerifyAdminSerializer,
+    RetailerMandateHistorySerializer,
 )
-from .models import AuditLog, PasswordResetOTP, is_company_user
+from .models import (
+    AuditLog,
+    PasswordResetOTP,
+    is_company_user,
+    BankVerificationStatus,
+    MandateStatus,
+    MandateTransactionStatus,
+    RetailerBankAccount,
+    RetailerMandateHistory,
+    NotificationType,
+)
+from .permissions import is_downstream_user
 import json
 import logging
 import random
@@ -198,9 +214,348 @@ class SubDistributorViewSet(BaseRoleViewSet):
     target_role = 'SUB_DISTRIBUTOR'
     serializer_class = SubDistributorSerializer
 
+def _require_admin_retailer_access(request, retailer, require_write=False):
+    """Verify authorized admin/hierarchy access to a retailer's bank and mandate controls."""
+    user = request.user
+    if user.role in ('RETAILER', 'CUSTOMER'):
+        return Response(
+            {"detail": "Retailers and customers cannot access admin bank controls."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    if not (is_company_user(user) or is_downstream_user(user, retailer)):
+        return Response(
+            {"detail": "You are not authorized to access this retailer's bank details."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    if require_write and user.role == 'STAFF_VIEWER':
+        return Response(
+            {"detail": "Viewer staff accounts have read-only access."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    return None
+
+
+def _apply_bank_verification_result(bank_account, result, actor=None, event_type='BANK_VERIFICATION', request=None):
+    """Applies gateway or admin bank verification outcome and records audit + mandate history."""
+    new_status = result.get('status') or BankVerificationStatus.PENDING
+    if new_status not in (
+        BankVerificationStatus.VERIFIED,
+        BankVerificationStatus.PENDING,
+        BankVerificationStatus.FAILED,
+    ):
+        new_status = BankVerificationStatus.PENDING
+
+    now = timezone.now()
+    bank_account.verification_status = new_status
+    if new_status == BankVerificationStatus.VERIFIED:
+        bank_account.verified_at = now
+        bank_account.verified_by = actor
+    elif new_status == BankVerificationStatus.FAILED:
+        bank_account.verified_at = None
+        bank_account.verified_by = actor
+    else:
+        bank_account.verified_at = None
+
+    if result.get('reference_id'):
+        bank_account.verification_ref = str(result['reference_id'])[:100]
+    remarks = result.get('message') or result.get('remarks')
+    if remarks:
+        bank_account.verification_remarks = remarks
+    bank_account.save()
+
+    RetailerMandateHistory.objects.create(
+        bank_account=bank_account,
+        retailer=bank_account.retailer,
+        event_type=event_type,
+        status=new_status,
+        mandate_reference_id=bank_account.mandate_reference_id,
+        transaction_ref=bank_account.verification_ref,
+        notes=remarks or f"Bank verification status updated to {new_status}.",
+        raw_payload=result,
+        performed_by=actor,
+    )
+
+    if actor:
+        AuditLog.objects.create(
+            user=actor,
+            action=f"RETAILER_BANK_{new_status}",
+            ip_address=get_client_ip(request) if request else None,
+            details={
+                "retailer_id": bank_account.retailer_id,
+                "retailer_username": bank_account.retailer.username,
+                "verification_status": new_status,
+                "verification_ref": bank_account.verification_ref,
+            },
+        )
+
+    if actor and actor.id != bank_account.retailer_id and new_status in (
+        BankVerificationStatus.VERIFIED,
+        BankVerificationStatus.FAILED,
+    ):
+        title = "Bank Details Verified" if new_status == BankVerificationStatus.VERIFIED else "Bank Verification Failed"
+        default_msg = (
+            f"Your bank account ({bank_account.masked_account_number}) has been verified."
+            if new_status == BankVerificationStatus.VERIFIED
+            else f"Your bank account verification failed: {remarks or 'Please check details and resubmit.'}"
+        )
+        send_system_notification(
+            recipient=bank_account.retailer,
+            title=title,
+            message=default_msg,
+            notification_type=NotificationType.SYSTEM,
+            reference_id=bank_account.id,
+            sender=actor,
+        )
+    return bank_account
+
+
+def _sync_retailer_mandate_status(bank_account, actor=None, request=None):
+    """Fetches live/simulated Cashfree UPI e-Mandate status and syncs DB + history."""
+    from emi.services.cashfree_service import CashfreeService
+
+    if not bank_account.mandate_id:
+        return {
+            "synced": False,
+            "mandate_status": bank_account.mandate_status,
+            "message": "No UPI e-Mandate has been registered for this retailer yet.",
+            "bank_mandate_details": build_retailer_bank_mandate_summary(bank_account.retailer),
+        }
+
+    res = CashfreeService.get_mandate_status(bank_account.mandate_id)
+    if not res.get('success'):
+        return {
+            "synced": False,
+            "mandate_status": bank_account.mandate_status,
+            "error": res.get('error') or "Failed to fetch mandate status from Cashfree.",
+            "bank_mandate_details": build_retailer_bank_mandate_summary(bank_account.retailer),
+        }
+
+    gateway_status = res.get('status')
+    normalized = CashfreeService.normalize_mandate_status(gateway_status)
+    bank_account.mandate_status = normalized
+    if res.get('umrn'):
+        bank_account.mandate_reference_id = str(res['umrn'])[:150]
+    elif not bank_account.mandate_reference_id:
+        bank_account.mandate_reference_id = bank_account.mandate_id
+    if normalized == MandateStatus.COMPLETED and not bank_account.mandate_registered_at:
+        bank_account.mandate_registered_at = timezone.now()
+    bank_account.save()
+
+    RetailerMandateHistory.objects.create(
+        bank_account=bank_account,
+        retailer=bank_account.retailer,
+        event_type='MANDATE_STATUS_CHECKED',
+        status=normalized,
+        mandate_reference_id=bank_account.mandate_reference_id,
+        notes=f"Synced UPI e-Mandate status ({gateway_status} -> {normalized}).",
+        raw_payload=res,
+        performed_by=actor,
+    )
+
+    if actor:
+        AuditLog.objects.create(
+            user=actor,
+            action="CHECKED_RETAILER_MANDATE_STATUS",
+            ip_address=get_client_ip(request) if request else None,
+            details={
+                "retailer_id": bank_account.retailer_id,
+                "mandate_id": bank_account.mandate_id,
+                "gateway_status": gateway_status,
+                "mandate_status": normalized,
+            },
+        )
+
+    return {
+        "synced": True,
+        "gateway_status": gateway_status,
+        "mandate_status": normalized,
+        "simulation": res.get('simulation', False),
+        "bank_mandate_details": build_retailer_bank_mandate_summary(bank_account.retailer),
+    }
+
+
 class RetailerViewSet(BaseRoleViewSet):
     target_role = 'RETAILER'
     serializer_class = RetailerSerializer
+
+    def get_queryset(self):
+        queryset = super().get_queryset().select_related('bank_account', 'parent')
+        mandate_status_param = (self.request.query_params.get('mandate_status') or '').strip().upper()
+        if mandate_status_param and mandate_status_param != 'ALL':
+            from django.db.models import Q
+            from emi.services.cashfree_service import CashfreeService
+
+            valid_statuses = {MandateStatus.COMPLETED, MandateStatus.PENDING, MandateStatus.FAILED}
+            alias_statuses = {
+                'ACTIVE', 'AUTHORIZED', 'AUTHENTICATED', 'SUCCESS', 'VERIFIED',
+                'FAILED', 'CANCELLED', 'REJECTED', 'EXPIRED', 'BANK_APPROVAL_FAILED',
+                'PENDING', 'PENDING_AUTH', 'INITIALIZED', 'INITIATED',
+            }
+            if mandate_status_param in valid_statuses:
+                target_status = mandate_status_param
+            elif mandate_status_param in alias_statuses:
+                target_status = CashfreeService.normalize_mandate_status(mandate_status_param)
+            else:
+                return queryset.none()
+
+            if target_status == MandateStatus.PENDING:
+                queryset = queryset.filter(
+                    Q(bank_account__mandate_status=MandateStatus.PENDING) | Q(bank_account__isnull=True)
+                )
+            else:
+                queryset = queryset.filter(bank_account__mandate_status=target_status)
+
+        bank_status_param = (self.request.query_params.get('bank_status') or '').strip().upper()
+        if bank_status_param and bank_status_param != 'ALL':
+            from django.db.models import Q
+
+            if bank_status_param == BankVerificationStatus.PENDING:
+                queryset = queryset.filter(
+                    Q(bank_account__verification_status=BankVerificationStatus.PENDING) | Q(bank_account__isnull=True)
+                )
+            elif bank_status_param in (BankVerificationStatus.VERIFIED, BankVerificationStatus.FAILED):
+                queryset = queryset.filter(bank_account__verification_status=bank_status_param)
+            else:
+                return queryset.none()
+
+        return queryset
+
+    @action(detail=True, methods=['get'], url_path='bank-details')
+    def bank_details(self, request, pk=None):
+        """Authorized admin endpoint to view a retailer's synced bank details and UPI e-Mandate status."""
+        retailer = self.get_object()
+        denied = _require_admin_retailer_access(request, retailer, require_write=False)
+        if denied:
+            return denied
+
+        include_unmasked = str(request.query_params.get('unmasked', '')).strip().lower() == 'true'
+        if include_unmasked:
+            if not is_company_user(request.user) or request.user.role == 'STAFF_VIEWER':
+                return Response(
+                    {"detail": "Only non-viewer company admins/staff can view unmasked bank details."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            AuditLog.objects.create(
+                user=request.user,
+                action="VIEWED_UNMASKED_RETAILER_BANK",
+                ip_address=get_client_ip(request),
+                details={"retailer_id": retailer.id, "retailer_username": retailer.username},
+            )
+
+        summary = build_retailer_bank_mandate_summary(retailer, include_unmasked=include_unmasked)
+        recent_qs = RetailerMandateHistory.objects.filter(retailer=retailer).select_related('performed_by')[:10]
+        summary['recent_history'] = RetailerMandateHistorySerializer(recent_qs, many=True).data
+        return Response(summary, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'], url_path='verify-bank')
+    def verify_bank(self, request, pk=None):
+        """Admin control to verify or reject a retailer's bank account details."""
+        retailer = self.get_object()
+        denied = _require_admin_retailer_access(request, retailer, require_write=True)
+        if denied:
+            return denied
+
+        bank_account = getattr(retailer, 'bank_account', None)
+        if not bank_account:
+            return Response(
+                {"detail": "Retailer has not submitted bank account details yet."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = RetailerBankVerifyAdminSerializer(data=request.data or {})
+        serializer.is_valid(raise_exception=True)
+        action_val = serializer.validated_data['action']
+        use_gateway = serializer.validated_data['use_gateway']
+        remarks = (serializer.validated_data.get('remarks') or '').strip()
+
+        result = None
+        if use_gateway:
+            from emi.services.cashfree_service import CashfreeService
+            gw_res = CashfreeService.verify_bank_account(
+                account_number=bank_account.account_number,
+                ifsc_code=bank_account.ifsc_code,
+                account_holder_name=bank_account.account_holder_name,
+                mobile_number=bank_account.mobile_number,
+            )
+            if gw_res.get('status') in (BankVerificationStatus.VERIFIED, BankVerificationStatus.FAILED):
+                result = gw_res
+                if remarks:
+                    result['message'] = remarks
+
+        if result is None:
+            target_status = (
+                BankVerificationStatus.VERIFIED
+                if action_val == 'VERIFY'
+                else BankVerificationStatus.FAILED
+            )
+            default_msg = (
+                "Bank account details verified by admin."
+                if target_status == BankVerificationStatus.VERIFIED
+                else "Bank account verification marked as failed by admin."
+            )
+            result = {
+                "success": target_status == BankVerificationStatus.VERIFIED,
+                "status": target_status,
+                "reference_id": bank_account.verification_ref or f"ADM-{request.user.id}-{retailer.id}",
+                "message": remarks or default_msg,
+            }
+
+        _apply_bank_verification_result(
+            bank_account,
+            result,
+            actor=request.user,
+            event_type='ADMIN_BANK_VERIFY',
+            request=request,
+        )
+        return Response(
+            {
+                "message": result.get('message'),
+                "bank_mandate_details": build_retailer_bank_mandate_summary(retailer),
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=True, methods=['get', 'post'], url_path='check-mandate-status')
+    def check_mandate_status(self, request, pk=None):
+        """Admin control to check and sync the retailer's UPI e-Mandate status with Cashfree."""
+        retailer = self.get_object()
+        denied = _require_admin_retailer_access(request, retailer, require_write=False)
+        if denied:
+            return denied
+
+        bank_account = getattr(retailer, 'bank_account', None)
+        if not bank_account:
+            return Response(
+                {
+                    "synced": False,
+                    "mandate_status": MandateStatus.PENDING,
+                    "message": "Retailer has not submitted bank account details yet.",
+                    "bank_mandate_details": build_retailer_bank_mandate_summary(retailer),
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        sync_data = _sync_retailer_mandate_status(bank_account, actor=request.user, request=request)
+        return Response(sync_data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['get'], url_path='mandate-history')
+    def mandate_history(self, request, pk=None):
+        """Admin control to view bank verification and UPI e-Mandate history for a retailer."""
+        retailer = self.get_object()
+        denied = _require_admin_retailer_access(request, retailer, require_write=False)
+        if denied:
+            return denied
+
+        history_qs = RetailerMandateHistory.objects.filter(retailer=retailer).select_related('performed_by')
+        return Response(
+            {
+                "retailer_id": retailer.id,
+                "retailer_code": f"RET-{retailer.id:04d}",
+                "count": history_qs.count(),
+                "history": RetailerMandateHistorySerializer(history_qs, many=True).data,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 class CustomerViewSet(BaseRoleViewSet):
     target_role = 'CUSTOMER'
@@ -2046,3 +2401,311 @@ class DeviceActivateAuthView(APIView):
             } if contract else None,
             "message": "Device successfully activated and linked."
         }, status=status.HTTP_200_OK)
+
+
+def _require_retailer_role(request):
+    """Ensures only Retailer App users invoke self-service bank/mandate endpoints."""
+    if request.user.role != 'RETAILER':
+        return Response(
+            {"detail": "Only Retailer accounts can manage retailer bank details and UPI e-Mandate."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    return None
+
+
+class RetailerBankDetailsView(APIView):
+    """
+    Retailer App endpoint to view, add, update, and verify bank account details.
+    Automatically syncs with the Admin Panel via RetailerBankAccount.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        denied = _require_retailer_role(request)
+        if denied:
+            return denied
+
+        bank_acct = RetailerBankAccount.objects.filter(retailer=request.user).first()
+        if not bank_acct:
+            return Response(
+                {
+                    "has_bank_details": False,
+                    **build_retailer_bank_mandate_summary(request.user),
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        return Response(
+            {
+                "has_bank_details": True,
+                **RetailerBankAccountOwnSerializer(bank_acct).data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    def _save_bank_details(self, request):
+        denied = _require_retailer_role(request)
+        if denied:
+            return denied
+
+        serializer = RetailerBankAccountSubmitSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        validated = dict(serializer.validated_data)
+        verify_now = validated.pop('verify_now', True)
+
+        with transaction.atomic():
+            existing = RetailerBankAccount.objects.filter(retailer=request.user).first()
+            created = existing is None
+            if created:
+                bank_acct = RetailerBankAccount.objects.create(retailer=request.user, **validated)
+                changed_core = True
+            else:
+                changed_core = (
+                    existing.account_number != validated['account_number']
+                    or existing.ifsc_code != validated['ifsc_code']
+                    or existing.account_holder_name != validated['account_holder_name']
+                    or existing.bank_name != validated['bank_name']
+                )
+                for field, value in validated.items():
+                    setattr(existing, field, value)
+                if changed_core:
+                    existing.verification_status = BankVerificationStatus.PENDING
+                    existing.verified_at = None
+                    existing.verified_by = None
+                    existing.verification_ref = None
+                    existing.verification_remarks = None
+                existing.save()
+                bank_acct = existing
+
+            RetailerMandateHistory.objects.create(
+                bank_account=bank_acct,
+                retailer=request.user,
+                event_type='BANK_DETAILS_SUBMITTED' if created else 'BANK_DETAILS_UPDATED',
+                status=bank_acct.verification_status,
+                mandate_reference_id=bank_acct.mandate_reference_id,
+                notes="Bank account details submitted from Retailer Application.",
+                performed_by=request.user,
+            )
+
+        AuditLog.objects.create(
+            user=request.user,
+            action='RETAILER_BANK_DETAILS_SUBMITTED' if created else 'RETAILER_BANK_DETAILS_UPDATED',
+            ip_address=get_client_ip(request),
+            details={
+                "bank_name": bank_acct.bank_name,
+                "account_number_masked": bank_acct.masked_account_number,
+                "ifsc_code": bank_acct.ifsc_code,
+            },
+        )
+
+        response_message = "Bank details saved successfully."
+        if verify_now:
+            from emi.services.cashfree_service import CashfreeService
+            verify_res = CashfreeService.verify_bank_account(
+                account_number=bank_acct.account_number,
+                ifsc_code=bank_acct.ifsc_code,
+                account_holder_name=bank_acct.account_holder_name,
+                mobile_number=bank_acct.mobile_number,
+            )
+            _apply_bank_verification_result(
+                bank_acct,
+                verify_res,
+                actor=request.user,
+                event_type='GATEWAY_BANK_VERIFY',
+                request=request,
+            )
+            response_message = verify_res.get('message') or response_message
+
+        retailer_ref = User.objects.select_related('bank_account').get(pk=request.user.pk)
+        return Response(
+            {
+                "has_bank_details": True,
+                "message": response_message,
+                "bank_details": RetailerBankAccountOwnSerializer(bank_acct).data,
+                "bank_mandate_details": build_retailer_bank_mandate_summary(retailer_ref),
+            },
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
+    def post(self, request):
+        return self._save_bank_details(request)
+
+    def put(self, request):
+        return self._save_bank_details(request)
+
+    def patch(self, request):
+        return self._save_bank_details(request)
+
+
+class RetailerBankVerifyView(APIView):
+    """Triggers verification of the retailer's saved bank account via Cashfree."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        denied = _require_retailer_role(request)
+        if denied:
+            return denied
+
+        bank_acct = RetailerBankAccount.objects.filter(retailer=request.user).first()
+        if not bank_acct:
+            return Response(
+                {"detail": "Please add your bank account details before verifying."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from emi.services.cashfree_service import CashfreeService
+        verify_res = CashfreeService.verify_bank_account(
+            account_number=bank_acct.account_number,
+            ifsc_code=bank_acct.ifsc_code,
+            account_holder_name=bank_acct.account_holder_name,
+            mobile_number=bank_acct.mobile_number,
+        )
+        _apply_bank_verification_result(
+            bank_acct,
+            verify_res,
+            actor=request.user,
+            event_type='GATEWAY_BANK_VERIFY',
+            request=request,
+        )
+        retailer_ref = User.objects.select_related('bank_account').get(pk=request.user.pk)
+        return Response(
+            {
+                "message": verify_res.get('message'),
+                "verification_status": bank_acct.verification_status,
+                "bank_details": RetailerBankAccountOwnSerializer(bank_acct).data,
+                "bank_mandate_details": build_retailer_bank_mandate_summary(retailer_ref),
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class RetailerUPIMandateRegisterView(APIView):
+    """Initiates a Cashfree UPI e-Mandate for the authenticated Retailer."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        denied = _require_retailer_role(request)
+        if denied:
+            return denied
+
+        bank_acct = RetailerBankAccount.objects.filter(retailer=request.user).first()
+        if not bank_acct:
+            return Response(
+                {"detail": "Please submit your bank account details before registering UPI e-Mandate."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        auth_mode = (request.data.get('auth_mode') or 'UPI').strip().upper()
+        return_url = request.data.get('return_url')
+        max_amount = str(request.data.get('max_amount') or '50000.00')
+
+        from emi.services.cashfree_service import CashfreeService
+        gw_res = CashfreeService.create_retailer_upi_mandate(
+            bank_acct,
+            auth_mode=auth_mode,
+            return_url=return_url,
+            max_amount=max_amount,
+        )
+
+        if not gw_res.get('success'):
+            bank_acct.mandate_status = MandateStatus.FAILED
+            bank_acct.save(update_fields=['mandate_status', 'updated_at'])
+            RetailerMandateHistory.objects.create(
+                bank_account=bank_acct,
+                retailer=request.user,
+                event_type='MANDATE_INITIATION_FAILED',
+                status=MandateStatus.FAILED,
+                mandate_reference_id=bank_acct.mandate_reference_id,
+                notes=gw_res.get('error') or "Failed to initiate UPI e-Mandate via Cashfree.",
+                raw_payload=gw_res,
+                performed_by=request.user,
+            )
+            return Response(
+                {
+                    "error": gw_res.get('error') or "Failed to initiate UPI e-Mandate.",
+                    "details": gw_res.get('details'),
+                    "bank_details": RetailerBankAccountOwnSerializer(bank_acct).data,
+                },
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        normalized = CashfreeService.normalize_mandate_status(gw_res.get('mandate_status', 'PENDING_AUTH'))
+        bank_acct.mandate_id = gw_res.get('mandate_id')
+        bank_acct.mandate_reference_id = gw_res.get('mandate_reference_id') or gw_res.get('mandate_id')
+        bank_acct.mandate_auth_url = gw_res.get('mandate_auth_url')
+        bank_acct.mandate_status = normalized
+        bank_acct.mandate_registered_at = timezone.now()
+        bank_acct.save()
+
+        RetailerMandateHistory.objects.create(
+            bank_account=bank_acct,
+            retailer=request.user,
+            event_type='MANDATE_INITIATED',
+            status=normalized,
+            mandate_reference_id=bank_acct.mandate_reference_id,
+            notes=gw_res.get('message') or "UPI e-Mandate registered with Cashfree.",
+            raw_payload=gw_res,
+            performed_by=request.user,
+        )
+
+        AuditLog.objects.create(
+            user=request.user,
+            action='RETAILER_UPI_MANDATE_INITIATED',
+            ip_address=get_client_ip(request),
+            details={
+                "mandate_id": bank_acct.mandate_id,
+                "mandate_reference_id": bank_acct.mandate_reference_id,
+                "mandate_status": normalized,
+            },
+        )
+
+        retailer_ref = User.objects.select_related('bank_account').get(pk=request.user.pk)
+        return Response(
+            {
+                **gw_res,
+                "upi_mandate_status": bank_acct.mandate_status,
+                "bank_details": RetailerBankAccountOwnSerializer(bank_acct).data,
+                "bank_mandate_details": build_retailer_bank_mandate_summary(retailer_ref),
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class RetailerUPIMandateStatusView(APIView):
+    """Checks and syncs the authenticated Retailer's UPI e-Mandate status."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def _handle(self, request):
+        denied = _require_retailer_role(request)
+        if denied:
+            return denied
+
+        bank_acct = RetailerBankAccount.objects.filter(retailer=request.user).first()
+        if not bank_acct:
+            return Response(
+                {
+                    "has_bank_details": False,
+                    "synced": False,
+                    **build_retailer_bank_mandate_summary(request.user),
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        sync_data = _sync_retailer_mandate_status(bank_acct, actor=request.user, request=request)
+        bank_acct.refresh_from_db()
+        history_qs = RetailerMandateHistory.objects.filter(retailer=request.user).select_related('performed_by')[:10]
+        return Response(
+            {
+                **sync_data,
+                "has_bank_details": True,
+                "bank_details": RetailerBankAccountOwnSerializer(bank_acct).data,
+                "history": RetailerMandateHistorySerializer(history_qs, many=True).data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    def get(self, request):
+        return self._handle(request)
+
+    def post(self, request):
+        return self._handle(request)

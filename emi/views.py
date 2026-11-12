@@ -918,17 +918,84 @@ class CashfreeWebhookView(APIView):
                 except EMIInstallment.DoesNotExist:
                     logger.warning(f"Cashfree Webhook: Installment #{installment_id} not found.")
 
-        elif event_type in ['MANDATE_SUCCESS', 'SUBSCRIPTION_ACTIVATED', 'MANDATE_REGISTERED', 'SUBSCRIPTION_AUTHENTICATED']:
+        elif event_type in [
+            'MANDATE_SUCCESS', 'SUBSCRIPTION_ACTIVATED', 'MANDATE_REGISTERED',
+            'SUBSCRIPTION_AUTHENTICATED', 'MANDATE_FAILED', 'SUBSCRIPTION_FAILED',
+            'SUBSCRIPTION_CANCELLED', 'SUBSCRIPTION_STATUS_CHANGED',
+            'SUBSCRIPTION_DEBIT_SUCCESS', 'SUBSCRIPTION_PAYMENT_SUCCESS',
+            'SUBSCRIPTION_DEBIT_FAILED', 'SUBSCRIPTION_PAYMENT_FAILED',
+        ]:
             data = payload.get('data', {})
             sub_info = data.get('subscription', {})
+            payment_info = data.get('payment', {})
             sub_id = sub_info.get('subscription_id') or payload.get('subscription_id') or payload.get('mandate_id')
-            umrn = sub_info.get('umrn') or data.get('umrn') or f"UMRN{uuid.uuid4().hex[:10].upper()}"
+            umrn = sub_info.get('umrn') or data.get('umrn')
+            raw_sub_status = sub_info.get('subscription_status') or data.get('status') or ''
             if sub_id:
-                CustomerEMIContract.objects.filter(mandate_id=sub_id).update(
-                    mandate_status='ACTIVE',
-                    mandate_umrn=umrn
+                is_success_event = event_type in (
+                    'MANDATE_SUCCESS', 'SUBSCRIPTION_ACTIVATED', 'MANDATE_REGISTERED',
+                    'SUBSCRIPTION_AUTHENTICATED', 'SUBSCRIPTION_DEBIT_SUCCESS', 'SUBSCRIPTION_PAYMENT_SUCCESS',
                 )
-                logger.info(f"Cashfree Webhook: Mandate {sub_id} activated with UMRN {umrn}")
+                is_fail_event = event_type in (
+                    'MANDATE_FAILED', 'SUBSCRIPTION_FAILED', 'SUBSCRIPTION_CANCELLED',
+                    'SUBSCRIPTION_DEBIT_FAILED', 'SUBSCRIPTION_PAYMENT_FAILED',
+                )
+
+                if is_success_event:
+                    CustomerEMIContract.objects.filter(mandate_id=sub_id).update(
+                        mandate_status='ACTIVE',
+                        mandate_umrn=umrn or f"UMRN{uuid.uuid4().hex[:10].upper()}"
+                    )
+                elif event_type in ('MANDATE_FAILED', 'SUBSCRIPTION_FAILED', 'SUBSCRIPTION_CANCELLED'):
+                    CustomerEMIContract.objects.filter(mandate_id=sub_id).update(mandate_status='FAILED')
+
+                # Sync Retailer Bank Account & e-Mandate History if matching retailer mandate
+                from accounts.models import (
+                    RetailerBankAccount, RetailerMandateHistory,
+                    MandateStatus, MandateTransactionStatus,
+                )
+                bank_acct = RetailerBankAccount.objects.filter(
+                    models.Q(mandate_id=sub_id) | models.Q(mandate_reference_id=sub_id)
+                ).first()
+                if bank_acct:
+                    now = timezone.now()
+                    if is_success_event:
+                        bank_acct.mandate_status = MandateStatus.COMPLETED
+                        bank_acct.last_transaction_status = MandateTransactionStatus.SUCCESS
+                    elif is_fail_event:
+                        if event_type in ('MANDATE_FAILED', 'SUBSCRIPTION_FAILED', 'SUBSCRIPTION_CANCELLED'):
+                            bank_acct.mandate_status = MandateStatus.FAILED
+                        bank_acct.last_transaction_status = MandateTransactionStatus.FAILED
+                    else:
+                        mapped = CashfreeService.normalize_mandate_status(raw_sub_status)
+                        bank_acct.mandate_status = mapped
+                        bank_acct.last_transaction_status = (
+                            MandateTransactionStatus.SUCCESS if mapped == 'COMPLETED'
+                            else MandateTransactionStatus.FAILED if mapped == 'FAILED'
+                            else MandateTransactionStatus.PENDING
+                        )
+
+                    if umrn:
+                        bank_acct.mandate_reference_id = umrn
+                    if bank_acct.mandate_status == MandateStatus.COMPLETED and not bank_acct.mandate_registered_at:
+                        bank_acct.mandate_registered_at = now
+                    bank_acct.last_transaction_at = now
+                    bank_acct.save()
+
+                    tx_ref = str(payment_info.get('cf_payment_id') or data.get('transaction_id') or sub_id)
+                    tx_amt = payment_info.get('payment_amount') or data.get('amount')
+                    RetailerMandateHistory.objects.create(
+                        bank_account=bank_acct,
+                        retailer=bank_acct.retailer,
+                        event_type=event_type,
+                        status=bank_acct.mandate_status,
+                        mandate_reference_id=bank_acct.mandate_reference_id,
+                        transaction_ref=tx_ref,
+                        amount=Decimal(str(tx_amt)) if tx_amt is not None else None,
+                        notes=f"Cashfree Webhook: {event_type}",
+                        raw_payload=payload,
+                    )
+                    logger.info(f"Cashfree Webhook: Retailer mandate {sub_id} synced to {bank_acct.mandate_status}")
 
         return Response({"status": "ok"}, status=status.HTTP_200_OK)
 

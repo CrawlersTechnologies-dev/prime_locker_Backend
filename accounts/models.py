@@ -282,3 +282,127 @@ class WhatsAppMessageLog(models.Model):
 
     def __str__(self):
         return f"{self.template_name} to {self.recipient_phone} ({self.status})"
+
+
+class BankVerificationStatus(models.TextChoices):
+    PENDING = 'PENDING', 'Pending'
+    VERIFIED = 'VERIFIED', 'Verified'
+    FAILED = 'FAILED', 'Failed'
+
+
+class MandateStatus(models.TextChoices):
+    PENDING = 'PENDING', 'Pending'
+    COMPLETED = 'COMPLETED', 'Completed'
+    FAILED = 'FAILED', 'Failed'
+
+
+class MandateTransactionStatus(models.TextChoices):
+    NONE = 'NONE', 'No Transaction'
+    PENDING = 'PENDING', 'Pending'
+    SUCCESS = 'SUCCESS', 'Success'
+    FAILED = 'FAILED', 'Failed'
+
+
+class RetailerBankAccount(models.Model):
+    """
+    Stores Retailer bank account details and Cashfree UPI e-Mandate state.
+    Shared directly between the Retailer Application and Admin Panel.
+    """
+    retailer = models.OneToOneField(User, on_delete=models.CASCADE, related_name='bank_account')
+    account_holder_name = models.CharField(max_length=150)
+    bank_name = models.CharField(max_length=150)
+    account_number = models.CharField(max_length=34)
+    ifsc_code = models.CharField(max_length=11)
+    upi_id = models.CharField(max_length=100, null=True, blank=True)
+    mobile_number = models.CharField(max_length=15)
+
+    verification_status = models.CharField(
+        max_length=20,
+        choices=BankVerificationStatus.choices,
+        default=BankVerificationStatus.PENDING,
+        db_index=True,
+    )
+    verified_at = models.DateTimeField(null=True, blank=True)
+    verified_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='verified_retailer_bank_accounts',
+    )
+    verification_ref = models.CharField(max_length=100, null=True, blank=True)
+    verification_remarks = models.TextField(null=True, blank=True)
+
+    mandate_status = models.CharField(
+        max_length=20,
+        choices=MandateStatus.choices,
+        default=MandateStatus.PENDING,
+        db_index=True,
+    )
+    mandate_id = models.CharField(max_length=150, null=True, blank=True, db_index=True)
+    mandate_reference_id = models.CharField(max_length=150, null=True, blank=True)
+    mandate_auth_url = models.URLField(max_length=500, null=True, blank=True)
+    mandate_registered_at = models.DateTimeField(null=True, blank=True)
+
+    last_transaction_status = models.CharField(
+        max_length=20,
+        choices=MandateTransactionStatus.choices,
+        default=MandateTransactionStatus.NONE,
+    )
+    last_transaction_at = models.DateTimeField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    @property
+    def masked_account_number(self):
+        raw = (self.account_number or '').strip()
+        if not raw:
+            return None
+        if len(raw) <= 4:
+            return '*' * len(raw)
+        return ('X' * (len(raw) - 4)) + raw[-4:]
+
+    @property
+    def masked_upi_id(self):
+        raw = (self.upi_id or '').strip()
+        if not raw:
+            return None
+        if '@' not in raw:
+            return ('X' * max(len(raw) - 4, 0)) + raw[-4:]
+        local, domain = raw.split('@', 1)
+        if len(local) <= 2:
+            masked_local = '*' * len(local)
+        else:
+            masked_local = local[:2] + ('*' * max(len(local) - 2, 2))
+        return f"{masked_local}@{domain}"
+
+    def __str__(self):
+        return f"{self.retailer.username} - {self.bank_name} ({self.masked_account_number})"
+
+
+class RetailerMandateHistory(models.Model):
+    """Audit/event history for retailer bank verification and UPI e-Mandate lifecycle."""
+    bank_account = models.ForeignKey(RetailerBankAccount, on_delete=models.CASCADE, related_name='mandate_history')
+    retailer = models.ForeignKey(User, on_delete=models.CASCADE, related_name='mandate_history')
+    event_type = models.CharField(max_length=60)
+    status = models.CharField(max_length=20, default='PENDING')
+    mandate_reference_id = models.CharField(max_length=150, null=True, blank=True)
+    transaction_ref = models.CharField(max_length=150, null=True, blank=True)
+    amount = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    notes = models.TextField(null=True, blank=True)
+    raw_payload = models.JSONField(null=True, blank=True)
+    performed_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='performed_retailer_mandate_events',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at', '-id']
+
+    def __str__(self):
+        return f"{self.retailer.username} - {self.event_type} ({self.status})"
