@@ -808,6 +808,69 @@ class PrimeLockerProRequirementsTests(TestCase):
         self.assertEqual(new_mpin_login.status_code, status.HTTP_200_OK)
         self.assertIn('access', new_mpin_login.data)
 
+    def test_jio_dlt_otp_sms_dispatch_and_validity(self):
+        """Verifies Jio DLT compliant OTP SMS format (PRLOCK / 1277179438043729654) and 5-min validity."""
+        from unittest.mock import patch
+        import json
+        from accounts.views import _send_otp_sms
+        from accounts.models import PasswordResetOTP
+        from django.utils import timezone
+        from datetime import timedelta
+
+        # 1. Test DLT payload structure and exact template text
+        captured_requests = []
+
+        class DummyResponse:
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                pass
+
+        def mock_urlopen(req, timeout=None):
+            captured_requests.append(req)
+            return DummyResponse()
+
+        with patch.dict('os.environ', {
+            'SMS_GATEWAY_URL': 'https://api.sms-gateway.test/v1/send',
+            'SMS_GATEWAY_KEY': 'test_dlt_key_123',
+            'SMS_SENDER_ID': 'PRLOCK',
+            'SMS_DLT_TEMPLATE_ID': '1277179438043729654',
+            'SMS_DLT_ENTITY_ID': '1001500000000007890',
+        }):
+            with patch('urllib.request.urlopen', side_effect=mock_urlopen):
+                success = _send_otp_sms('9855551234', '586215', 'PASSWORD_RESET')
+                self.assertTrue(success)
+                self.assertEqual(len(captured_requests), 1)
+
+                req = captured_requests[0]
+                self.assertEqual(req.full_url, 'https://api.sms-gateway.test/v1/send')
+                body = json.loads(req.data.decode('utf-8'))
+
+                # Verify exact Jio DLT Content Template text
+                self.assertEqual(
+                    body['message'],
+                    "PRIME LOCKER PRO: Your OTP for verification is 586215. This OTP is valid for 5 minutes. Do not share it with anyone."
+                )
+                self.assertEqual(body['sender'], 'PRLOCK')
+                self.assertEqual(body['template_id'], '1277179438043729654')
+                self.assertEqual(body['pe_id'], '1001500000000007890')
+                self.assertEqual(body['mobile'], '9855551234')
+                self.assertEqual(body['otp'], '586215')
+
+        # 2. Test 5-minute OTP validity window (300 seconds)
+        fresh_otp = PasswordResetOTP.objects.create(user=self.retailer, otp='112233', purpose='TEST')
+        self.assertTrue(fresh_otp.is_valid())
+
+        # At 4 minutes: still valid
+        fresh_otp.created_at = timezone.now() - timedelta(minutes=4)
+        fresh_otp.save()
+        self.assertTrue(fresh_otp.is_valid())
+
+        # At 6 minutes: expired
+        fresh_otp.created_at = timezone.now() - timedelta(minutes=6)
+        fresh_otp.save()
+        self.assertFalse(fresh_otp.is_valid())
+
 
 @override_settings(
     DEBUG=True,

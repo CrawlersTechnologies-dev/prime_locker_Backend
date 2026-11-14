@@ -1141,9 +1141,18 @@ def _find_user_by_identifier(identifier):
 
 
 def _send_otp_sms(mobile_number, otp_code, purpose):
-    """Dispatch OTP SMS via configured gateway, or log cleanly in non-SMS environments."""
+    """
+    Dispatch OTP SMS via configured gateway with Jio DLT compliance:
+    - Header / Sender ID: PRLOCK
+    - Content Template ID: 1277179438043729654 (PRIMELOCKERPROOTP)
+    - Template text: PRIME LOCKER PRO: Your OTP for verification is {#number#}. This OTP is valid for 5 minutes. Do not share it with anyone.
+    """
     sms_url = os.environ.get('SMS_GATEWAY_URL', '').strip()
     sms_key = os.environ.get('SMS_GATEWAY_KEY', '').strip()
+    sender_id = os.environ.get('SMS_SENDER_ID', 'PRLOCK').strip() or 'PRLOCK'
+    template_id = os.environ.get('SMS_DLT_TEMPLATE_ID', '1277179438043729654').strip() or '1277179438043729654'
+    entity_id = os.environ.get('SMS_DLT_ENTITY_ID', '').strip()
+
     is_configured = (
         sms_url
         and sms_key
@@ -1155,25 +1164,53 @@ def _send_otp_sms(mobile_number, otp_code, purpose):
         logger.info("OTP SMS skipped (gateway unconfigured) for purpose=%s", purpose)
         return False
 
-    purpose_label = 'MPIN reset' if purpose == 'MPIN_RESET' else 'password reset'
-    payload = json.dumps({
+    # Exact approved Jio DLT Content Template text
+    message_text = f"PRIME LOCKER PRO: Your OTP for verification is {otp_code}. This OTP is valid for 5 minutes. Do not share it with anyone."
+
+    digits_only = ''.join(ch for ch in str(mobile_number) if ch.isdigit())
+    clean_phone_10 = digits_only[-10:] if len(digits_only) >= 10 else digits_only
+    phone_91 = f"91{clean_phone_10}"
+
+    payload_dict = {
         'to': mobile_number,
-        'message': f"Your Prime Locker Pro {purpose_label} OTP is {otp_code}. Valid for 10 minutes.",
-    }).encode('utf-8')
+        'mobile': clean_phone_10,
+        'phone': clean_phone_10,
+        'mobiles': phone_91,
+        'message': message_text,
+        'text': message_text,
+        'msg': message_text,
+        'sender': sender_id,
+        'sender_id': sender_id,
+        'header': sender_id,
+        'template_id': template_id,
+        'dlt_template_id': template_id,
+        'dlt_te_id': template_id,
+        'otp': str(otp_code),
+        'route': 'T',
+    }
+    if entity_id:
+        payload_dict['pe_id'] = entity_id
+        payload_dict['entity_id'] = entity_id
+
+    payload = json.dumps(payload_dict).encode('utf-8')
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': f'Bearer {sms_key}',
+        'apikey': sms_key,
+        'authkey': sms_key,
+    }
     req = urllib.request.Request(
         sms_url,
         data=payload,
-        headers={
-            'Content-Type': 'application/json',
-            'Authorization': f'Bearer {sms_key}',
-        },
+        headers=headers,
         method='POST',
     )
     try:
-        with urllib.request.urlopen(req, timeout=5):
+        with urllib.request.urlopen(req, timeout=8):
+            logger.info("Dispatched Jio DLT OTP SMS to %s (purpose=%s)", mobile_number, purpose)
             return True
     except Exception as exc:
-        logger.warning("Failed to dispatch %s OTP SMS: %s", purpose, exc)
+        logger.warning("Failed to dispatch %s OTP SMS via gateway: %s", purpose, exc)
         return False
 
 

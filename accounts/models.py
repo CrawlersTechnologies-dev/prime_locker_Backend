@@ -159,8 +159,8 @@ class PasswordResetOTP(models.Model):
     is_used = models.BooleanField(default=False)
 
     def is_valid(self):
-        # OTP is valid for 10 minutes (600 seconds)
-        return not self.is_used and (timezone.now() - self.created_at).total_seconds() < 600
+        # OTP is valid for 5 minutes (300 seconds) to match approved Jio DLT template
+        return not self.is_used and (timezone.now() - self.created_at).total_seconds() < 300
 
     def __str__(self):
         return f"{self.purpose} OTP for {self.user.username}"
