@@ -18,12 +18,14 @@ from django.contrib import admin
 from django.urls import path, include
 from accounts.views import ProtectedMediaView, DeviceActivateAuthView
 from devices.views import PublicAppDownloadView
+from emi.views import CashfreeMandateCheckoutView
 
 urlpatterns = [
     path('app-versions/download/<str:slug>/', PublicAppDownloadView.as_view(), name='root_public_app_download'),
     path('auth/device-activate/', DeviceActivateAuthView.as_view(), name='root_device_activate_auth'),
     path('admin/', admin.site.urls),
     path('media/<path:file_path>', ProtectedMediaView.as_view(), name='protected-media'),
+    path('emi/mandate/checkout/<str:mandate_id>/', CashfreeMandateCheckoutView.as_view(), name='root_cashfree_mandate_checkout'),
     path('api/', include('accounts.urls')),
     path('api/', include('keys.urls')),
     path('api/', include('emi.urls')),

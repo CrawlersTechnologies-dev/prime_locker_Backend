@@ -110,6 +110,7 @@ class CustomerEMIContractSerializer(serializers.ModelSerializer):
     total_remaining = serializers.ReadOnlyField()
     paid_installments_count = serializers.ReadOnlyField()
     remaining_installments_count = serializers.ReadOnlyField()
+    mandate_auth_url = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = CustomerEMIContract
@@ -181,6 +182,20 @@ class CustomerEMIContractSerializer(serializers.ModelSerializer):
             'business_name': r.business_name,
             'mobile_number': r.mobile_number
         }
+
+    def get_mandate_auth_url(self, obj):
+        url = obj.mandate_auth_url
+        request = self.context.get('request') if hasattr(self, 'context') else None
+        if not url:
+            if obj.mandate_id and obj.mandate_status not in ('ACTIVE', 'COMPLETED', 'CANCELLED'):
+                checkout_path = f"/api/emi/mandate/checkout/{obj.mandate_id}/"
+                if request:
+                    return request.build_absolute_uri(checkout_path)
+                return checkout_path
+            return None
+        if url.startswith('/') and request:
+            return request.build_absolute_uri(url)
+        return url
 
     def validate(self, attrs):
         total_amount = attrs.get('total_amount')

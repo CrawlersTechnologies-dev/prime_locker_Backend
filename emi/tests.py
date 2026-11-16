@@ -453,3 +453,55 @@ class EMIBackendTests(TestCase):
             self.contract.refresh_from_db()
             self.assertEqual(self.contract.mandate_status, 'ACTIVE')
             self.assertEqual(self.contract.mandate_umrn, 'UMRNTEST998877')
+
+    def test_cashfree_mandate_checkout_view_and_simulation(self):
+        mandate_id = f"sub_sim_{self.contract.id}_abc123"
+        self.contract.mandate_id = mandate_id
+        self.contract.mandate_status = 'PENDING_AUTH'
+        self.contract.mandate_auth_url = None
+        self.contract.save()
+
+        # 1. Serializer resolves non-null checkout URL even when mandate_auth_url was None in DB
+        contract_url = f'/api/emi-contracts/{self.contract.id}/'
+        resp = self.client.get(contract_url)
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertIsNotNone(resp.data.get('mandate_auth_url'))
+        self.assertIn(f'/api/emi/mandate/checkout/{mandate_id}/', resp.data['mandate_auth_url'])
+
+        # 2. Checkout view renders HTML page with simulation mode
+        checkout_url = f'/api/emi/mandate/checkout/{mandate_id}/'
+        resp = self.client.get(checkout_url)
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn('text/html', resp['Content-Type'])
+        self.assertIn('Prime Locker', resp.content.decode('utf-8'))
+        self.assertIn('Simulation Test Mode', resp.content.decode('utf-8'))
+
+        # 3. Simulate customer approval via POST
+        post_resp = self.client.post(checkout_url, {'simulate_approve': '1'})
+        self.assertEqual(post_resp.status_code, 200)
+        self.contract.refresh_from_db()
+        self.assertEqual(self.contract.mandate_status, 'ACTIVE')
+        self.assertTrue(bool(self.contract.mandate_umrn))
+
+        # 4. Status query auto-populates absolute mandate_auth_url
+        status_url = f'/api/emi-contracts/{self.contract.id}/mandate-status/'
+        stat_resp = self.client.get(status_url)
+        self.assertEqual(stat_resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(stat_resp.data['mandate_status'], 'ACTIVE')
+        self.assertIsNotNone(stat_resp.data.get('mandate_auth_url'))
+        self.assertTrue(stat_resp.data['mandate_auth_url'].startswith(('http://', 'https://')))
+
+    def test_cashfree_mandate_checkout_view_sdk_rendering(self):
+        mandate_id = f"sub_{self.contract.id}_real999"
+        self.contract.mandate_id = mandate_id
+        self.contract.mandate_status = 'PENDING_AUTH'
+        self.contract.save()
+
+        checkout_url = f'/api/emi/mandate/checkout/{mandate_id}/?session_id=sub_session_real_mock_123'
+        with override_settings(CASHFREE_CONFIG={'APP_ID': 'test_app', 'SECRET_KEY': 'test_sec', 'ENV': 'TEST'}):
+            resp = self.client.get(checkout_url)
+            self.assertEqual(resp.status_code, 200)
+            content = resp.content.decode('utf-8')
+            self.assertIn('https://sdk.cashfree.com/js/v3/cashfree.js', content)
+            self.assertIn('sub_session_real_mock_123', content)
+            self.assertIn('Open UPI AutoPay', content)

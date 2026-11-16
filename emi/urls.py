@@ -6,6 +6,7 @@ from .views import (
     EMIInstallmentViewSet,
     OverdueEMIsViewSet,
     CashfreeWebhookView,
+    CashfreeMandateCheckoutView,
     PaymentViewSet
 )
 
@@ -19,4 +20,5 @@ router.register(r'payments', PaymentViewSet, basename='payments')
 urlpatterns = [
     path('', include(router.urls)),
     path('emi/webhook/cashfree/', CashfreeWebhookView.as_view(), name='cashfree-webhook'),
+    path('emi/mandate/checkout/<str:mandate_id>/', CashfreeMandateCheckoutView.as_view(), name='cashfree-mandate-checkout'),
 ]

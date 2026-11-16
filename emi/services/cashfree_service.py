@@ -517,6 +517,19 @@ class CashfreeService:
             logger.warning(f"Cashfree Plan creation warning: {exc}")
 
     @classmethod
+    def build_checkout_url(cls, mandate_id, session_id=None, request=None):
+        """Constructs hosted checkout URL for Cashfree UPI AutoPay mandate."""
+        path = f"/api/emi/mandate/checkout/{mandate_id}/"
+        if session_id:
+            path += f"?session_id={session_id}"
+        if request:
+            return request.build_absolute_uri(path)
+        base = getattr(settings, 'BACKEND_URL', None) or os.getenv('BACKEND_BASE_URL', '') or os.getenv('SITE_URL', '')
+        if base:
+            return f"{base.rstrip('/')}{path}"
+        return path
+
+    @classmethod
     def _submit_subscription_mandate(
         cls,
         mandate_id,
@@ -530,7 +543,8 @@ class CashfreeService:
         """Shared helper to create a Cashfree Subscription / UPI e-Mandate in simulation or live mode."""
         config = cls.get_config()
         if cls.is_simulation():
-            sim_auth_url = f"https://sandbox.cashfree.com/pg/orders/mandate/{mandate_id}?auth_mode={auth_mode}"
+            sim_sub_session = f"sub_session_sim_{uuid.uuid4().hex[:16]}"
+            sim_auth_url = f"/api/emi/mandate/checkout/{mandate_id}/?session_id={sim_sub_session}"
             sim_umrn = f"UMRN{uuid.uuid4().hex[:10].upper()}"
             logger.info(f"[SIMULATION] Cashfree UPI Mandate created: {mandate_id} (UMRN: {sim_umrn})")
             return {
@@ -540,7 +554,7 @@ class CashfreeService:
                 "mandate_reference_id": sim_umrn,
                 "mandate_status": "PENDING_AUTH",
                 "mandate_auth_url": sim_auth_url,
-                "subscription_session_id": f"sub_session_sim_{uuid.uuid4().hex[:16]}",
+                "subscription_session_id": sim_sub_session,
                 "mandate_umrn": sim_umrn,
                 "auth_mode": auth_mode,
                 "max_amount": str(max_amount),
@@ -597,6 +611,12 @@ class CashfreeService:
                 auth_link = data.get('auth_link') or data.get('sub_auth_url') or data.get('payment_link') or None
                 sub_id = data.get('subscription_id', mandate_id)
                 cf_sub_id = str(data.get('cf_subscription_id') or '')
+                sub_session_id = data.get('subscription_session_id')
+                if not auth_link and sub_session_id:
+                    auth_link = f"/api/emi/mandate/checkout/{sub_id}/?session_id={sub_session_id}"
+                elif not auth_link:
+                    auth_link = f"/api/emi/mandate/checkout/{sub_id}/"
+
                 return {
                     "success": True,
                     "gateway": "CASHFREE",
@@ -604,7 +624,7 @@ class CashfreeService:
                     "mandate_reference_id": data.get('umrn') or cf_sub_id or sub_id,
                     "mandate_status": "PENDING_AUTH",
                     "mandate_auth_url": auth_link,
-                    "subscription_session_id": data.get('subscription_session_id'),
+                    "subscription_session_id": sub_session_id,
                     "cf_subscription_id": cf_sub_id,
                     "auth_mode": auth_mode,
                     "max_amount": str(max_amount),
@@ -689,6 +709,7 @@ class CashfreeService:
                 "mandate_id": mandate_id,
                 "status": "ACTIVE",
                 "umrn": f"UMRN{uuid.uuid4().hex[:10].upper()}",
+                "subscription_session_id": f"sub_session_sim_{uuid.uuid4().hex[:16]}",
                 "simulation": True
             }
 
@@ -704,11 +725,13 @@ class CashfreeService:
             if resp.status_code == 200:
                 data = resp.json()
                 auth_ref = (data.get('authorization_details') or {}).get('authorization_reference')
+                sub_session_id = data.get('subscription_session_id')
                 return {
                     "success": True,
                     "mandate_id": mandate_id,
                     "status": data.get('subscription_status', 'PENDING_AUTH'),
                     "umrn": data.get('umrn') or auth_ref or data.get('cf_subscription_id'),
+                    "subscription_session_id": sub_session_id,
                     "data": data
                 }
             return {"success": False, "status_code": resp.status_code, "error": resp.text}

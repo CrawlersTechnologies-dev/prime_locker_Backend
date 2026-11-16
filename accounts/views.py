@@ -339,6 +339,13 @@ def _sync_retailer_mandate_status(bank_account, actor=None, request=None):
         bank_account.mandate_reference_id = bank_account.mandate_id
     if normalized == MandateStatus.COMPLETED and not bank_account.mandate_registered_at:
         bank_account.mandate_registered_at = timezone.now()
+
+    if request and (not bank_account.mandate_auth_url or bank_account.mandate_auth_url.startswith('/')):
+        sub_sess = res.get('subscription_session_id') or (res.get('data') or {}).get('subscription_session_id')
+        qs = f"?session_id={sub_sess}" if sub_sess else ""
+        checkout_path = f"/api/emi/mandate/checkout/{bank_account.mandate_id}/{qs}"
+        bank_account.mandate_auth_url = request.build_absolute_uri(checkout_path)
+
     bank_account.save()
 
     RetailerMandateHistory.objects.create(
@@ -2669,7 +2676,14 @@ class RetailerUPIMandateRegisterView(APIView):
         normalized = CashfreeService.normalize_mandate_status(gw_res.get('mandate_status', 'PENDING_AUTH'))
         bank_acct.mandate_id = gw_res.get('mandate_id')
         bank_acct.mandate_reference_id = gw_res.get('mandate_reference_id') or gw_res.get('mandate_id')
-        bank_acct.mandate_auth_url = gw_res.get('mandate_auth_url')
+        auth_url = gw_res.get('mandate_auth_url')
+        if auth_url and auth_url.startswith('/'):
+            auth_url = request.build_absolute_uri(auth_url)
+            gw_res['mandate_auth_url'] = auth_url
+        if not auth_url and bank_acct.mandate_id:
+            auth_url = request.build_absolute_uri(f"/api/emi/mandate/checkout/{bank_acct.mandate_id}/")
+            gw_res['mandate_auth_url'] = auth_url
+        bank_acct.mandate_auth_url = auth_url
         bank_acct.mandate_status = normalized
         bank_acct.mandate_registered_at = timezone.now()
         bank_acct.save()

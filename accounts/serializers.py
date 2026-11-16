@@ -355,7 +355,7 @@ def build_retailer_bank_mandate_summary(retailer, include_unmasked=False):
         'last_mandate_transaction_status': bank_acct.last_transaction_status,
         'last_transaction_at': bank_acct.last_transaction_at,
         'mandate_id': bank_acct.mandate_id,
-        'mandate_auth_url': bank_acct.mandate_auth_url,
+        'mandate_auth_url': bank_acct.mandate_auth_url or (f"/api/emi/mandate/checkout/{bank_acct.mandate_id}/" if bank_acct.mandate_id and bank_acct.mandate_status not in ('COMPLETED', 'ACTIVE', 'REVOKED', 'CANCELLED') else None),
     }
     if include_unmasked:
         summary['account_number'] = bank_acct.account_number
@@ -891,6 +891,7 @@ class RetailerBankAccountOwnSerializer(serializers.ModelSerializer):
     retailer_id = serializers.IntegerField(source='retailer.id', read_only=True)
     retailer_code = serializers.SerializerMethodField(read_only=True)
     retailer_name = serializers.SerializerMethodField(read_only=True)
+    mandate_auth_url = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         from .models import RetailerBankAccount
@@ -913,6 +914,20 @@ class RetailerBankAccountOwnSerializer(serializers.ModelSerializer):
     def get_retailer_name(self, obj):
         r = obj.retailer
         return f"{r.first_name} {r.last_name}".strip() or r.business_name or r.username
+
+    def get_mandate_auth_url(self, obj):
+        url = obj.mandate_auth_url
+        request = self.context.get('request') if hasattr(self, 'context') else None
+        if not url:
+            if obj.mandate_id and obj.mandate_status not in ('COMPLETED', 'ACTIVE', 'REVOKED', 'CANCELLED'):
+                checkout_path = f"/api/emi/mandate/checkout/{obj.mandate_id}/"
+                if request:
+                    return request.build_absolute_uri(checkout_path)
+                return checkout_path
+            return None
+        if url.startswith('/') and request:
+            return request.build_absolute_uri(url)
+        return url
 
 
 class RetailerBankVerifyAdminSerializer(serializers.Serializer):

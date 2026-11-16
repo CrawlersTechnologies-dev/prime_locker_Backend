@@ -1,9 +1,12 @@
 import json
 import logging
+import uuid
 from decimal import Decimal
 from datetime import timedelta
 from django.db import transaction, models
 from django.utils import timezone
+from django.views import View
+from django.shortcuts import render
 from rest_framework import viewsets, permissions, status
 from rest_framework.views import APIView
 from rest_framework.decorators import action
@@ -393,9 +396,18 @@ class CustomerEMIContractViewSet(viewsets.ModelViewSet):
         if not res.get('success'):
             return Response(res, status=status.HTTP_400_BAD_REQUEST)
 
+        auth_url = res.get('mandate_auth_url')
+        if auth_url and auth_url.startswith('/'):
+            auth_url = request.build_absolute_uri(auth_url)
+            res['mandate_auth_url'] = auth_url
+
+        if not auth_url and res.get('mandate_id'):
+            auth_url = request.build_absolute_uri(f"/api/emi/mandate/checkout/{res['mandate_id']}/")
+            res['mandate_auth_url'] = auth_url
+
         contract.mandate_id = res['mandate_id']
         contract.mandate_status = res['mandate_status']
-        contract.mandate_auth_url = res.get('mandate_auth_url')
+        contract.mandate_auth_url = auth_url
         if res.get('mandate_umrn') and res['mandate_status'] == 'ACTIVE':
             contract.mandate_umrn = res.get('mandate_umrn')
         contract.save(update_fields=['mandate_id', 'mandate_status', 'mandate_auth_url', 'mandate_umrn'])
@@ -422,6 +434,15 @@ class CustomerEMIContractViewSet(viewsets.ModelViewSet):
             if res.get('umrn'):
                 contract.mandate_umrn = res['umrn']
             contract.save(update_fields=['mandate_status', 'mandate_umrn'])
+
+        # Ensure contract has valid absolute mandate_auth_url for mobile app
+        if not contract.mandate_auth_url or contract.mandate_auth_url.startswith('/'):
+            sub_sess = res.get('subscription_session_id') or (res.get('data') or {}).get('subscription_session_id')
+            qs = f"?session_id={sub_sess}" if sub_sess else ""
+            checkout_path = f"/api/emi/mandate/checkout/{contract.mandate_id}/{qs}"
+            contract.mandate_auth_url = request.build_absolute_uri(checkout_path)
+            contract.save(update_fields=['mandate_auth_url'])
+
         return Response({
             "contract_id": contract.id,
             "mandate_id": contract.mandate_id,
@@ -998,6 +1019,90 @@ class CashfreeWebhookView(APIView):
                     logger.info(f"Cashfree Webhook: Retailer mandate {sub_id} synced to {bank_acct.mandate_status}")
 
         return Response({"status": "ok"}, status=status.HTTP_200_OK)
+
+
+class CashfreeMandateCheckoutView(View):
+    """
+    Hosted checkout page for Cashfree Subscriptions / UPI AutoPay mandates.
+    Renders Cashfree JS SDK v3 initialized with subscriptionSessionId.
+    Accessible without authentication so customers can approve via mobile browser / UPI app.
+    """
+    def get(self, request, mandate_id):
+        return self._handle(request, mandate_id)
+
+    def post(self, request, mandate_id):
+        return self._handle(request, mandate_id)
+
+    def _handle(self, request, mandate_id):
+        mandate_id = str(mandate_id).strip()
+        contract = CustomerEMIContract.objects.filter(mandate_id=mandate_id).first()
+        from accounts.models import RetailerBankAccount
+        bank_acct = RetailerBankAccount.objects.filter(mandate_id=mandate_id).first() if not contract else None
+
+        is_sim = CashfreeService.is_simulation() or mandate_id.startswith(('sub_sim_', 'ret_sub_sim_'))
+        simulate_approve = request.GET.get('simulate_approve') == '1' or request.POST.get('simulate_approve') == '1'
+
+        if simulate_approve and is_sim:
+            sim_umrn = f"UMRN{uuid.uuid4().hex[:10].upper()}"
+            if contract:
+                contract.mandate_status = 'ACTIVE'
+                contract.mandate_umrn = contract.mandate_umrn or sim_umrn
+                contract.save(update_fields=['mandate_status', 'mandate_umrn'])
+            elif bank_acct:
+                bank_acct.mandate_status = 'COMPLETED'
+                bank_acct.mandate_reference_id = bank_acct.mandate_reference_id or sim_umrn
+                bank_acct.save(update_fields=['mandate_status', 'mandate_reference_id'])
+
+        is_already_active = False
+        umrn = ''
+        if contract and contract.mandate_status == 'ACTIVE':
+            is_already_active = True
+            umrn = contract.mandate_umrn or ''
+        elif bank_acct and bank_acct.mandate_status in ('ACTIVE', 'COMPLETED'):
+            is_already_active = True
+            umrn = bank_acct.mandate_reference_id or ''
+
+        session_id = request.GET.get('session_id') or request.POST.get('session_id')
+        if not session_id and not is_already_active and not is_sim:
+            res = CashfreeService.get_mandate_status(mandate_id)
+            if res.get('status') == 'ACTIVE':
+                is_already_active = True
+                umrn = res.get('umrn') or ''
+                if contract:
+                    contract.mandate_status = 'ACTIVE'
+                    contract.mandate_umrn = umrn
+                    contract.save(update_fields=['mandate_status', 'mandate_umrn'])
+                elif bank_acct:
+                    bank_acct.mandate_status = 'COMPLETED'
+                    bank_acct.mandate_reference_id = umrn
+                    bank_acct.save(update_fields=['mandate_status', 'mandate_reference_id'])
+            else:
+                session_id = res.get('subscription_session_id') or (res.get('data') or {}).get('subscription_session_id')
+
+        customer_name = "Prime Locker Customer"
+        amount = "0.00"
+        if contract:
+            c = contract.customer
+            customer_name = f"{c.first_name} {c.last_name}".strip() or c.username
+            amount = str(contract.monthly_emi_amount)
+        elif bank_acct:
+            customer_name = bank_acct.account_holder_name or bank_acct.retailer.username
+            amount = "50000.00"
+
+        config = CashfreeService.get_config()
+        cf_mode = 'production' if config.get('ENV') == 'PROD' else 'sandbox'
+
+        context = {
+            'mandate_id': mandate_id,
+            'session_id': session_id or '',
+            'customer_name': customer_name,
+            'amount': amount,
+            'is_already_active': is_already_active,
+            'umrn': umrn,
+            'is_simulation': is_sim,
+            'cf_mode': cf_mode,
+        }
+        return render(request, 'emi/cashfree_checkout.html', context)
 
 
 class PaymentViewSet(viewsets.ReadOnlyModelViewSet):
