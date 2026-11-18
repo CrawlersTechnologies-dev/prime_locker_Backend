@@ -158,3 +158,60 @@ class KeyServiceBalanceTests(TestCase):
             bal_resp = self.ret_client.get(f'/api/keys/check-balance/?service={service_code}')
             self.assertEqual(bal_resp.data['available_balance'], 1)
             self.assertTrue(bal_resp.data['can_enroll'])
+
+    def test_allocate_mobile_family_and_service_aliases(self):
+        # Generate ANDROID, DLC, IOS, and TV keys
+        self.admin_client.post('/api/keys/generate/', {'prefix': 'AND', 'device_type': 'ANDROID', 'quantity': 5}, format='json')
+        self.admin_client.post('/api/keys/generate/', {'prefix': 'DLC', 'device_type': 'DLC', 'quantity': 5}, format='json')
+        self.admin_client.post('/api/keys/generate/', {'prefix': 'IOS', 'device_type': 'IOS', 'quantity': 5}, format='json')
+        self.admin_client.post('/api/keys/generate/', {'prefix': 'TV', 'device_type': 'TV', 'quantity': 5}, format='json')
+
+        # 1. Allocate using device_type='MOBILE' -> should transfer Android/iOS mobile keys
+        alloc_mobile = self.admin_client.post('/api/keys/allocate/', {
+            'target_user_id': self.retailer.id,
+            'device_type': 'MOBILE',
+            'quantity': 2,
+        }, format='json')
+        self.assertEqual(alloc_mobile.status_code, status.HTTP_200_OK)
+        self.assertGreater(alloc_mobile.data['your_remaining_available_keys'], 0)
+
+        # 2. Allocate using alias 'ANDROID_MDM'
+        alloc_and = self.admin_client.post('/api/keys/allocate/', {
+            'target_user_id': self.retailer.id,
+            'device_type': 'ANDROID_MDM',
+            'quantity': 1,
+        }, format='json')
+        self.assertEqual(alloc_and.status_code, status.HTTP_200_OK)
+
+        # 3. Allocate using alias 'ANDROID_DLC'
+        alloc_dlc = self.admin_client.post('/api/keys/allocate/', {
+            'target_user_id': self.retailer.id,
+            'device_type': 'ANDROID_DLC',
+            'quantity': 2,
+        }, format='json')
+        self.assertEqual(alloc_dlc.status_code, status.HTTP_200_OK)
+
+        # 4. Allocate using alias 'IOS_LOCKER'
+        alloc_ios = self.admin_client.post('/api/keys/allocate/', {
+            'target_user_id': self.retailer.id,
+            'device_type': 'IOS_LOCKER',
+            'quantity': 2,
+        }, format='json')
+        self.assertEqual(alloc_ios.status_code, status.HTTP_200_OK)
+
+        # 5. Allocate using alias 'SMART_TV'
+        alloc_tv = self.admin_client.post('/api/keys/allocate/', {
+            'target_user_id': self.retailer.id,
+            'device_type': 'SMART_TV',
+            'quantity': 2,
+        }, format='json')
+        self.assertEqual(alloc_tv.status_code, status.HTTP_200_OK)
+
+        # 6. Reclaim using device_type='MOBILE'
+        reclaim_mobile = self.admin_client.post('/api/keys/reclaim/', {
+            'target_user_id': self.retailer.id,
+            'device_type': 'MOBILE',
+            'quantity': 1,
+        }, format='json')
+        self.assertEqual(reclaim_mobile.status_code, status.HTTP_200_OK)
+        self.assertGreater(reclaim_mobile.data['your_total_available_keys'], 0)

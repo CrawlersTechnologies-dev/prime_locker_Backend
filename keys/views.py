@@ -44,6 +44,38 @@ def is_downstream_user(ancestor, target):
     return False
 
 
+def _get_device_type_q_filter(device_type):
+    """
+    Builds the Q filter for device keys matching device_type and service code aliases:
+    - DLC: ['DLC', 'DLC_LOCKER', 'ANDROID_DLC', 'ANDROID_DLC_LOCKER', 'ROCKETPAY']
+    - IOS: ['IOS', 'IPHONE', 'MOBILE_IOS', 'IOS_LOCKER', 'APPLE_MDM', 'IOS_AGENT']
+    - ANDROID: ['ANDROID', 'MOBILE_ANDROID', 'ANDROID_MDM', 'MDM', 'PARTNER_MDM', 'DPC']
+    - TV: ['TV', 'SMART_TV', 'TV_LOCKER']
+    - MOBILE / ALL: matches Android + iOS mobile family
+    """
+    from django.db.models import Q
+    dev_type_upper = (device_type or '').strip().upper()
+    if dev_type_upper in ['DLC', 'DLC_LOCKER', 'ANDROID_DLC', 'ANDROID_DLC_LOCKER', 'ROCKETPAY']:
+        return Q(device_type__iexact='DLC') | Q(key_string__istartswith='DLC-')
+    elif dev_type_upper in ['IOS', 'IPHONE', 'MOBILE_IOS', 'IOS_LOCKER', 'APPLE_MDM', 'IOS_AGENT']:
+        return Q(device_type__iexact='IOS') | Q(key_string__istartswith='IOS-')
+    elif dev_type_upper in ['ANDROID', 'MOBILE_ANDROID', 'ANDROID_MDM', 'MDM', 'PARTNER_MDM', 'DPC']:
+        return (
+            (Q(device_type__iexact='ANDROID') | Q(key_string__istartswith='AND-'))
+            & ~Q(key_string__istartswith='DLC-') & ~Q(key_string__istartswith='IOS-') & ~Q(key_string__istartswith='TV-')
+        )
+    elif dev_type_upper in ['TV', 'SMART_TV', 'TV_LOCKER']:
+        return Q(device_type__iexact='TV') | Q(key_string__istartswith='TV-')
+    elif dev_type_upper in ['MOBILE', 'ALL']:
+        return (
+            Q(device_type__iexact='ANDROID') | Q(key_string__istartswith='AND-')
+            | Q(device_type__iexact='IOS') | Q(key_string__istartswith='IOS-')
+            | Q(device_type__iexact='MOBILE')
+        )
+    else:
+        return Q(device_type__iexact=device_type)
+
+
 class KeyViewSet(viewsets.GenericViewSet, viewsets.mixins.ListModelMixin, viewsets.mixins.RetrieveModelMixin):
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = DeviceKeySerializer
@@ -267,17 +299,7 @@ class KeyViewSet(viewsets.GenericViewSet, viewsets.mixins.ListModelMixin, viewse
         for u in users_qs:
             keys_qs = DeviceKey.objects.filter(current_owner=u, status=KeyStatus.AVAILABLE)
             if device_type:
-                if device_type.upper() == 'DLC':
-                    keys_qs = keys_qs.filter(Q(device_type__iexact='DLC') | Q(key_string__istartswith='DLC-'))
-                elif device_type.upper() == 'IOS':
-                    keys_qs = keys_qs.filter(Q(device_type__iexact='IOS') | Q(key_string__istartswith='IOS-'))
-                elif device_type.upper() == 'ANDROID':
-                    keys_qs = keys_qs.filter(
-                        (Q(device_type__iexact='ANDROID') | Q(key_string__istartswith='AND-')) &
-                        ~Q(key_string__istartswith='DLC-') & ~Q(key_string__istartswith='IOS-')
-                    )
-                else:
-                    keys_qs = keys_qs.filter(device_type=device_type)
+                keys_qs = keys_qs.filter(_get_device_type_q_filter(device_type))
             keys_count = keys_qs.count()
 
             u_avail = DeviceKey.objects.filter(current_owner=u, status=KeyStatus.AVAILABLE)
@@ -359,20 +381,9 @@ class KeyViewSet(viewsets.GenericViewSet, viewsets.mixins.ListModelMixin, viewse
                 }, status=status.HTTP_403_FORBIDDEN)
                 
             target_name = f"{target_user.first_name} {target_user.last_name}".strip() or target_user.username
+            dev_type_q = _get_device_type_q_filter(device_type)
             with transaction.atomic():
-                from django.db.models import Q
-                dev_type_upper = device_type.upper()
-                q_filter = models.Q(current_owner=request.user, status=KeyStatus.AVAILABLE)
-                if dev_type_upper in ['DLC', 'DLC_LOCKER']:
-                    q_filter &= (models.Q(device_type__iexact='DLC') | models.Q(key_string__istartswith='DLC-'))
-                elif dev_type_upper in ['IOS', 'IPHONE', 'MOBILE_IOS']:
-                    q_filter &= (models.Q(device_type__iexact='IOS') | models.Q(key_string__istartswith='IOS-'))
-                elif dev_type_upper in ['ANDROID', 'MOBILE_ANDROID']:
-                    q_filter &= (models.Q(device_type__iexact='ANDROID') | models.Q(key_string__istartswith='AND-'))
-                    q_filter &= ~models.Q(key_string__istartswith='DLC-') & ~models.Q(key_string__istartswith='IOS-')
-                else:
-                    q_filter &= models.Q(device_type__iexact=device_type)
-
+                q_filter = models.Q(current_owner=request.user, status=KeyStatus.AVAILABLE) & dev_type_q
                 available_keys = DeviceKey.objects.filter(q_filter)[:quantity]
                 
                 if len(available_keys) < quantity:
@@ -396,9 +407,7 @@ class KeyViewSet(viewsets.GenericViewSet, viewsets.mixins.ListModelMixin, viewse
                 KeyTransaction.objects.bulk_create(transactions)
                 
             remaining_count = DeviceKey.objects.filter(
-                current_owner=request.user,
-                device_type=device_type,
-                status=KeyStatus.AVAILABLE
+                models.Q(current_owner=request.user, status=KeyStatus.AVAILABLE) & dev_type_q
             ).count()
 
             AuditLog.objects.create(
@@ -463,12 +472,10 @@ class KeyViewSet(viewsets.GenericViewSet, viewsets.mixins.ListModelMixin, viewse
                 
             target_name = f"{target_user.first_name} {target_user.last_name}".strip() or target_user.username
             reason = request.data.get('reason', '').strip()
+            dev_type_q = _get_device_type_q_filter(device_type)
             with transaction.atomic():
-                available_keys = DeviceKey.objects.filter(
-                    current_owner=target_user,
-                    device_type=device_type,
-                    status=KeyStatus.AVAILABLE
-                )[:quantity]
+                q_filter = models.Q(current_owner=target_user, status=KeyStatus.AVAILABLE) & dev_type_q
+                available_keys = DeviceKey.objects.filter(q_filter)[:quantity]
                 
                 if len(available_keys) < quantity:
                     return Response({
@@ -491,9 +498,7 @@ class KeyViewSet(viewsets.GenericViewSet, viewsets.mixins.ListModelMixin, viewse
                 KeyTransaction.objects.bulk_create(transactions)
 
             your_total = DeviceKey.objects.filter(
-                current_owner=request.user,
-                device_type=device_type,
-                status=KeyStatus.AVAILABLE
+                models.Q(current_owner=request.user, status=KeyStatus.AVAILABLE) & dev_type_q
             ).count()
 
             AuditLog.objects.create(
