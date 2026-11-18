@@ -255,6 +255,7 @@ class Banner(models.Model):
     link = models.URLField(blank=True, null=True)
     target_role = models.CharField(max_length=50, choices=TARGET_ROLES, default='ALL')
     is_active = models.BooleanField(default=True)
+    is_popup = models.BooleanField(default=False)
     order = models.PositiveIntegerField(default=0)
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='created_banners')
     created_at = models.DateTimeField(auto_now_add=True)

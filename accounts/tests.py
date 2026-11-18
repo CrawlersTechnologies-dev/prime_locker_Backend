@@ -1224,3 +1224,103 @@ class RetailerBankAndMandateTests(TestCase):
         self.assertIn('SUBSCRIPTION_DEBIT_SUCCESS', event_types)
         self.assertIn('MANDATE_FAILED', event_types)
 
+
+class BannerTests(TestCase):
+    def setUp(self):
+        from accounts.models import User, Banner
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        self.User = User
+        self.Banner = Banner
+
+        self.super_admin = User.objects.create_user(
+            username='admin_banner',
+            email='admin_banner@primelocker.pro',
+            password='Password@123',
+            role='SUPER_ADMIN',
+            mobile_number='9876543201',
+        )
+        self.retailer = User.objects.create_user(
+            username='ret_banner',
+            email='ret_banner@primelocker.pro',
+            password='Password@123',
+            role='RETAILER',
+            mobile_number='9876543202',
+        )
+
+        test_image = SimpleUploadedFile(
+            name='test_banner.jpg',
+            content=b'\x47\x49\x46\x38\x39\x61\x01\x00\x01\x00\x80\x00\x00\xff\xff\xff\x00\x00\x00\x21\xf9\x04\x01\x00\x00\x00\x00\x2c\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02\x44\x01\x00\x3b',
+            content_type='image/jpeg'
+        )
+        self.banner_normal = Banner.objects.create(
+            title='Normal Offer Banner',
+            image=test_image,
+            target_role='ALL',
+            is_active=True,
+            is_popup=False,
+            order=1,
+            created_by=self.super_admin,
+        )
+        self.banner_popup = Banner.objects.create(
+            title='Popup Offer Banner',
+            image=test_image,
+            target_role='RETAILER',
+            is_active=True,
+            is_popup=True,
+            order=2,
+            created_by=self.super_admin,
+        )
+
+    def _client_for(self, user):
+        from rest_framework.test import APIClient
+        c = APIClient()
+        c.force_authenticate(user=user)
+        return c
+
+    def test_banner_list_exposes_is_popup(self):
+        ret_client = self._client_for(self.retailer)
+        resp = ret_client.get('/api/banners/')
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        banners = resp.data.get('results', resp.data)
+        self.assertEqual(len(banners), 2)
+
+        # Check that is_popup is exposed on every banner
+        b_map = {b['id']: b for b in banners}
+        self.assertIn(self.banner_normal.id, b_map)
+        self.assertIn(self.banner_popup.id, b_map)
+        self.assertFalse(b_map[self.banner_normal.id]['is_popup'])
+        self.assertTrue(b_map[self.banner_popup.id]['is_popup'])
+
+    def test_admin_can_create_and_update_is_popup(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        admin_client = self._client_for(self.super_admin)
+        img = SimpleUploadedFile('new_popup.jpg', b'dummy content', content_type='image/jpeg')
+
+        # Create with is_popup=True
+        create_resp = admin_client.post('/api/banners/', {
+            'title': 'Diwali Offer Popup',
+            'image': img,
+            'target_role': 'ALL',
+            'is_active': True,
+            'is_popup': True,
+            'order': 0,
+        }, format='multipart')
+        self.assertEqual(create_resp.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(create_resp.data['is_popup'])
+        new_banner_id = create_resp.data['id']
+
+        # Update is_popup to False
+        patch_resp = admin_client.patch(f'/api/banners/{new_banner_id}/', {
+            'is_popup': False
+        }, format='json')
+        self.assertEqual(patch_resp.status_code, status.HTTP_200_OK)
+        self.assertFalse(patch_resp.data['is_popup'])
+
+    def test_retailer_cannot_modify_banners(self):
+        ret_client = self._client_for(self.retailer)
+        patch_resp = ret_client.patch(f'/api/banners/{self.banner_popup.id}/', {
+            'is_popup': False
+        }, format='json')
+        self.assertEqual(patch_resp.status_code, status.HTTP_403_FORBIDDEN)
+
+
