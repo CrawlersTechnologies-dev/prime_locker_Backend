@@ -420,11 +420,15 @@ class RocketPayService:
             details={"event": event, "device_id": device.id, "imei": device.imei, "payload": data}
         )
 
+        # Webhook from provider confirms physical device connectivity
+        device.last_online_at = timezone.now()
+        device.is_activated = True
+
         if event in ['locked', 'device.locked', 'key.locked']:
             device.status = DeviceLockStatus.LOCKED
             device.provider_status = "LOCKED"
             device.provider_error = None
-            device.save(update_fields=['status', 'provider_status', 'provider_error'])
+            device.save(update_fields=['status', 'provider_status', 'provider_error', 'last_online_at', 'is_activated'])
             send_system_notification(
                 recipient=device.retailer,
                 title="RocketPay Device Locked",
@@ -436,7 +440,7 @@ class RocketPayService:
             device.status = DeviceLockStatus.ACTIVE
             device.provider_status = "UNLOCKED"
             device.provider_error = None
-            device.save(update_fields=['status', 'provider_status', 'provider_error'])
+            device.save(update_fields=['status', 'provider_status', 'provider_error', 'last_online_at', 'is_activated'])
             send_system_notification(
                 recipient=device.retailer,
                 title="RocketPay Device Unlocked",
@@ -447,7 +451,7 @@ class RocketPayService:
         elif event in ['enrolled', 'registered', 'device.enrolled', 'key.registered']:
             device.provider_status = "ENROLLED"
             device.provider_error = None
-            device.save(update_fields=['provider_status', 'provider_error'])
+            device.save(update_fields=['provider_status', 'provider_error', 'last_online_at', 'is_activated'])
         elif event in ['deregistered', 'unregistered', 'released', 'key.deregistered']:
             device.provider_status = "UNENROLLED"
             device.status = DeviceLockStatus.UNENROLLED
@@ -456,7 +460,7 @@ class RocketPayService:
             device.status = DeviceLockStatus.LOCKED
             device.provider_status = "TAMPERED"
             device.provider_error = "Device tamper reported by RocketPay OEM."
-            device.save(update_fields=['status', 'provider_status', 'provider_error'])
+            device.save(update_fields=['status', 'provider_status', 'provider_error', 'last_online_at', 'is_activated'])
             send_system_notification(
                 recipient=device.retailer,
                 title="⚠️ RocketPay Tamper Alert",
@@ -467,7 +471,7 @@ class RocketPayService:
         elif event in ['failed', 'device.failed']:
             device.provider_status = "FAILED"
             device.provider_error = data.get('message') or data.get('error') or "RocketPay command failed"
-            device.save(update_fields=['provider_status', 'provider_error'])
+            device.save(update_fields=['provider_status', 'provider_error', 'last_online_at', 'is_activated'])
 
         return {"status": "processed", "device_id": device.id, "device_status": device.status}
 
@@ -573,7 +577,9 @@ class RocketPayService:
                     device.status = DeviceLockStatus.ACTIVE
                 device.provider_status = "UNLOCKED"
 
-        device.save(update_fields=['status', 'provider_status', 'provider_error'])
+        device.last_online_at = timezone.now()
+        device.is_activated = True
+        device.save(update_fields=['status', 'provider_status', 'provider_error', 'last_online_at', 'is_activated'])
         return {
             "success": True,
             "device_status": device.status,

@@ -22,6 +22,7 @@ urlpatterns = [
     path('app-versions/download/<str:slug>/', PublicAppDownloadView.as_view(), name='public_app_download'),
     path('devices/ping/', DeviceHeartbeatView.as_view(), name='device-heartbeat'),
     path('devices/check-in/', DeviceHeartbeatView.as_view(), name='device-checkin-alias'),
+    path('devices/heartbeat/', DeviceHeartbeatView.as_view(), name='device-heartbeat-alias'),
     path('devices/rocketpay/webhook/', RocketPayWebhookView.as_view(), name='rocketpay-webhook-alias'),
     path('integrations/rocketpay/webhook/', RocketPayWebhookView.as_view(), name='rocketpay-webhook'),
     path('', include(router.urls)),

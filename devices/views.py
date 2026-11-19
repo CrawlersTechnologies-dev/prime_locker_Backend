@@ -299,11 +299,13 @@ class DeviceViewSet(viewsets.ModelViewSet):
         Transitions status from INACTIVE -> ACTIVE, locks customer editing.
         """
         device = self.get_object()
+        now = timezone.now()
         device.is_activated = True
-        device.activated_at = timezone.now()
+        device.activated_at = now
+        device.last_online_at = now
         if device.status == DeviceLockStatus.INACTIVE:
             device.status = DeviceLockStatus.ACTIVE
-        device.save(update_fields=['is_activated', 'activated_at', 'status'])
+        device.save(update_fields=['is_activated', 'activated_at', 'last_online_at', 'status'])
 
         AuditLog.objects.create(
             user=request.user,
@@ -315,7 +317,35 @@ class DeviceViewSet(viewsets.ModelViewSet):
             "message": f"Device {device.imei} activated successfully.",
             "status": device.status,
             "is_activated": device.is_activated,
-            "activated_at": device.activated_at
+            "is_online": device.is_online,
+            "activated_at": device.activated_at,
+            "last_online_at": device.last_online_at
+        })
+
+    @action(detail=True, methods=['post', 'get'], url_path='ping')
+    def device_ping(self, request, pk=None):
+        """
+        Direct Ping endpoint for a specific device: POST /api/devices/{id}/ping/
+        Immediately marks device as online and updates telemetry.
+        """
+        device = self.get_object()
+        device.last_online_at = timezone.now()
+        device.is_activated = True
+        if device.status == DeviceLockStatus.INACTIVE:
+            device.status = DeviceLockStatus.ACTIVE
+        battery = request.data.get('battery_level') or request.query_params.get('battery_level')
+        if battery is not None:
+            try:
+                device.battery_level = int(battery)
+            except (ValueError, TypeError):
+                pass
+        device.save(update_fields=['last_online_at', 'is_activated', 'status', 'battery_level'])
+        return Response({
+            "message": f"Device {device.imei} pinged successfully.",
+            "is_online": device.is_online,
+            "last_online_at": device.last_online_at,
+            "battery_level": device.battery_level,
+            "status": device.status
         })
 
     @action(detail=True, methods=['post'], url_path='uninstall')
@@ -1363,11 +1393,19 @@ class DeviceHeartbeatView(APIView):
     """
     Silent Heartbeat Ping API for the Android Locker APK or TV App.
     Pings periodically to update online status, report GPS, and fetch lock status / policies.
+    Supports both POST and GET query methods.
     """
     permission_classes = [permissions.AllowAny]
 
+    def get(self, request):
+        data = request.query_params.dict()
+        return self._process_heartbeat(request, data)
+
     def post(self, request):
-        serializer = DeviceHeartbeatSerializer(data=request.data)
+        return self._process_heartbeat(request, request.data)
+
+    def _process_heartbeat(self, request, raw_data):
+        serializer = DeviceHeartbeatSerializer(data=raw_data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
