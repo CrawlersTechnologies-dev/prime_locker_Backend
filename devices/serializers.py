@@ -33,6 +33,7 @@ class DeviceSerializer(serializers.ModelSerializer):
     qr_service_app = serializers.SerializerMethodField(read_only=True)
     qr_running_device = serializers.SerializerMethodField(read_only=True)
     qr_test_dpc = serializers.SerializerMethodField(read_only=True)
+    sim_details = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = Device
@@ -110,13 +111,22 @@ class DeviceSerializer(serializers.ModelSerializer):
             'sim_serial',
             'sim_operator_2',
             'sim_number_2',
+            'sim_changed',
+            'sim_change_detected_at',
+            'sim_history',
+            'sim_details',
             'created_at',
             'updated_at'
         ]
         read_only_fields = [
             'id', 'retailer', 'activation_key', 'emi_contract', 'offline_unlock_code',
-            'last_online_at', 'ip_address', 'last_location_at', 'created_at', 'updated_at'
+            'last_online_at', 'ip_address', 'last_location_at',
+            'sim_changed', 'sim_change_detected_at', 'sim_history', 'sim_details',
+            'created_at', 'updated_at'
         ]
+
+    def get_sim_details(self, obj):
+        return obj.get_sim_details()
 
     def get_qr_service_app(self, obj):
         codes = getattr(obj, 'qr_codes', None) or {}

@@ -988,6 +988,30 @@ class DeviceViewSet(viewsets.ModelViewSet):
             "synced_device_contacts": device.synced_contacts or []
         })
 
+    @action(detail=True, methods=['post'], url_path='acknowledge-sim-change')
+    def acknowledge_sim_change(self, request, pk=None):
+        """
+        Admin or Retailer acknowledges and clears the SIM change warning flag for a device.
+        """
+        denied = self._block_customer(request)
+        if denied:
+            return denied
+        device = self.get_object()
+        device.sim_changed = False
+        device.save(update_fields=['sim_changed'])
+
+        AuditLog.objects.create(
+            user=request.user,
+            action="SIM_CHANGE_ACKNOWLEDGED",
+            ip_address=get_client_ip(request),
+            details={"device_id": device.id, "imei": device.imei}
+        )
+        return Response({
+            "message": f"SIM change alert for device {device.imei} has been cleared.",
+            "sim_changed": False,
+            "sim_details": device.get_sim_details()
+        }, status=status.HTTP_200_OK)
+
     @action(detail=True, methods=['post'], url_path='attach-emi')
     def attach_emi(self, request, pk=None):
         """
@@ -1386,6 +1410,62 @@ class DeviceHeartbeatView(APIView):
 
         if 'synced_contacts' in serializer.validated_data:
             device.synced_contacts = serializer.validated_data['synced_contacts']
+
+        # Check for SIM swap / change
+        incoming_serial = serializer.validated_data.get('sim_serial')
+        incoming_operator = serializer.validated_data.get('sim_operator')
+        incoming_number = serializer.validated_data.get('sim_number')
+
+        sim_swap_detected = False
+        if device.sim_serial and incoming_serial and (device.sim_serial.strip() != incoming_serial.strip()):
+            sim_swap_detected = True
+        elif not device.sim_serial and device.sim_number and incoming_number and (device.sim_number.strip() != incoming_number.strip()):
+            sim_swap_detected = True
+
+        if sim_swap_detected:
+            device.sim_changed = True
+            device.sim_change_detected_at = timezone.now()
+            if not isinstance(device.sim_history, list):
+                device.sim_history = []
+            device.sim_history.append({
+                "timestamp": timezone.now().isoformat(),
+                "previous_sim": {
+                    "operator": device.sim_operator,
+                    "number": device.sim_number,
+                    "serial": device.sim_serial
+                },
+                "new_sim": {
+                    "operator": incoming_operator or device.sim_operator,
+                    "number": incoming_number or device.sim_number,
+                    "serial": incoming_serial or device.sim_serial
+                },
+                "reason": "SIM swap detected via device telemetry"
+            })
+            AuditLog.objects.create(
+                user=device.customer or device.retailer,
+                action="DEVICE_SIM_CHANGED",
+                ip_address=get_client_ip(request),
+                details={
+                    "device_id": device.id,
+                    "imei": device.imei,
+                    "previous_sim_operator": device.sim_operator,
+                    "previous_sim_serial": device.sim_serial,
+                    "new_sim_operator": incoming_operator,
+                    "new_sim_serial": incoming_serial
+                }
+            )
+            if device.retailer:
+                try:
+                    from accounts.views import send_system_notification
+                    send_system_notification(
+                        recipient=device.retailer,
+                        title="⚠️ SIM Change Detected",
+                        message=f"Device {device.device_name or device.imei} has changed SIM to {incoming_operator or 'New SIM'}.",
+                        notification_type='SYSTEM',
+                        reference_id=device.id
+                    )
+                except Exception:
+                    pass
 
         for sim_f in ['sim_operator', 'sim_number', 'sim_serial', 'sim_operator_2', 'sim_number_2']:
             if sim_f in serializer.validated_data and serializer.validated_data[sim_f]:

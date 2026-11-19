@@ -40,6 +40,11 @@
       "key": "customer_id",
       "value": "1",
       "type": "string"
+    },
+    {
+      "key": "device_id",
+      "value": "1",
+      "type": "string"
     }
   ],
   "item": [
@@ -652,6 +657,91 @@
               ]
             },
             "description": "Fetches customer details including the documents block with direct links to photo, digital signature, and auto-generated EMI agreement."
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. SIM Card Information & Anti-Fraud (Admin & Retailer)",
+      "item": [
+        {
+          "name": "5.1 Get Device Details (Includes Structured sim_details)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/devices/{{device_id}}/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "devices",
+                "{{device_id}}",
+                ""
+              ]
+            },
+            "description": "Returns device details including structured sim_details (slot_1, slot_2, is_dual_sim, sim_changed alert flag, and sim_history timeline)."
+          }
+        },
+        {
+          "name": "5.2 Heartbeat Telemetry Ping (Simulate SIM & Location Report)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"imei\": \"867530900000001\",\n  \"battery_level\": 92,\n  \"sim_operator\": \"Airtel 5G\",\n  \"sim_number\": \"+919876543210\",\n  \"sim_serial\": \"8991000123456789012F\",\n  \"sim_operator_2\": \"Jio True 5G\",\n  \"sim_number_2\": \"+919812345678\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/devices/ping/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "devices",
+                "ping",
+                ""
+              ]
+            },
+            "description": "Heartbeat ping API called periodically by the phone app to report SIM info, battery, and location. If SIM ICCID changes, backend automatically flags sim_changed=True and logs to sim_history."
+          }
+        },
+        {
+          "name": "5.3 Acknowledge / Clear SIM Change Alert",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/devices/{{device_id}}/acknowledge-sim-change/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "devices",
+                "{{device_id}}",
+                "acknowledge-sim-change",
+                ""
+              ]
+            },
+            "description": "Admin or Retailer clears the red warning badge after verifying an authorized SIM change with the customer."
           }
         }
       ]

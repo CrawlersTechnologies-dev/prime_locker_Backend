@@ -482,6 +482,59 @@ class PartnerMDMBackendTests(TestCase):
         self.assertEqual(self.pm_device.sim_operator_2, "Jio True 5G")
         self.assertEqual(self.pm_device.sim_number_2, "+919812345678")
 
+    def test_sim_change_detection_and_history_logging(self):
+        """Verify that SIM change is detected, logged, and surfaced in sim_details"""
+        client = APIClient()
+        # 1. Initial SIM (Airtel)
+        initial_payload = {
+            "imei": self.pm_device.imei,
+            "sim_operator": "Airtel 5G",
+            "sim_number": "+919876543210",
+            "sim_serial": "8991000123456789012F"
+        }
+        resp1 = client.post('/api/devices/ping/', initial_payload, format='json')
+        self.assertEqual(resp1.status_code, status.HTTP_200_OK)
+        self.pm_device.refresh_from_db()
+        self.assertFalse(self.pm_device.sim_changed)
+
+        # 2. Swap SIM to Vi with new serial
+        swap_payload = {
+            "imei": self.pm_device.imei,
+            "sim_operator": "Vodafone Idea 4G",
+            "sim_number": "+919800000000",
+            "sim_serial": "8991999999999999999F"
+        }
+        resp2 = client.post('/api/devices/ping/', swap_payload, format='json')
+        self.assertEqual(resp2.status_code, status.HTTP_200_OK)
+        self.pm_device.refresh_from_db()
+
+        # Check SIM change flags and history
+        self.assertTrue(self.pm_device.sim_changed)
+        self.assertIsNotNone(self.pm_device.sim_change_detected_at)
+        self.assertEqual(len(self.pm_device.sim_history), 1)
+        self.assertEqual(self.pm_device.sim_history[0]['previous_sim']['operator'], "Airtel 5G")
+        self.assertEqual(self.pm_device.sim_history[0]['new_sim']['operator'], "Vodafone Idea 4G")
+
+        # 3. Check Device detail API includes structured sim_details
+        auth_client = APIClient()
+        auth_client.force_authenticate(user=self.retailer)
+        dev_resp = auth_client.get(f'/api/devices/{self.pm_device.id}/')
+        self.assertEqual(dev_resp.status_code, status.HTTP_200_OK)
+        self.assertIn('sim_details', dev_resp.data)
+        sim_data = dev_resp.data['sim_details']
+        self.assertTrue(sim_data['has_sim'])
+        self.assertTrue(sim_data['sim_changed'])
+        self.assertEqual(sim_data['slot_1']['carrier'], "Vodafone Idea 4G")
+        self.assertEqual(sim_data['slot_1']['iccid'], "8991999999999999999F")
+        self.assertEqual(len(sim_data['sim_history']), 1)
+
+        # 4. Acknowledge and clear the SIM change alert
+        ack_resp = auth_client.post(f'/api/devices/{self.pm_device.id}/acknowledge-sim-change/')
+        self.assertEqual(ack_resp.status_code, status.HTTP_200_OK)
+        self.assertFalse(ack_resp.data['sim_changed'])
+        self.pm_device.refresh_from_db()
+        self.assertFalse(self.pm_device.sim_changed)
+
     def test_partner_mdm_qr_extraction_nesting(self):
         """Verify _extract_qr_url finds and prioritizes QR codes across provider response formats"""
         # 1. Live provider response format with 3 QRs (qr_service_app must be prioritized)

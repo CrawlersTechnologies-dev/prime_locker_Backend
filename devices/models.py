@@ -175,6 +175,38 @@ class Device(models.Model):
     sim_serial = models.CharField(max_length=50, blank=True, null=True, help_text="SIM ICCID / Serial Number")
     sim_operator_2 = models.CharField(max_length=100, blank=True, null=True, help_text="Secondary SIM Carrier")
     sim_number_2 = models.CharField(max_length=30, blank=True, null=True, help_text="Secondary SIM phone number")
+    sim_changed = models.BooleanField(default=False, help_text="Flag indicating if a SIM card change was detected")
+    sim_change_detected_at = models.DateTimeField(null=True, blank=True, help_text="Timestamp of latest SIM change")
+    sim_history = models.JSONField(default=list, blank=True, help_text="Audit history of SIM cards detected on this device")
+
+    def get_sim_details(self):
+        slot_1 = {
+            "slot": 1,
+            "carrier": self.sim_operator or "Unknown Carrier",
+            "phone_number": self.sim_number or "",
+            "iccid": self.sim_serial or "",
+            "status": "INSERTED" if (self.sim_operator or self.sim_serial or self.sim_number) else "EMPTY"
+        }
+        slot_2 = {
+            "slot": 2,
+            "carrier": self.sim_operator_2 or "",
+            "phone_number": self.sim_number_2 or "",
+            "iccid": "",
+            "status": "INSERTED" if (self.sim_operator_2 or self.sim_number_2) else "EMPTY"
+        }
+        is_dual_sim = bool(slot_2["status"] == "INSERTED")
+        has_sim = bool(slot_1["status"] == "INSERTED" or is_dual_sim)
+        
+        return {
+            "has_sim": has_sim,
+            "is_dual_sim": is_dual_sim,
+            "sim_changed": getattr(self, 'sim_changed', False),
+            "sim_change_detected_at": self.sim_change_detected_at,
+            "total_sim_changes": len(getattr(self, 'sim_history', []) or []),
+            "slot_1": slot_1,
+            "slot_2": slot_2,
+            "sim_history": getattr(self, 'sim_history', []) or []
+        }
 
     # Wallpaper & Screen Reminders
     wallpaper_locked = models.BooleanField(default=False)

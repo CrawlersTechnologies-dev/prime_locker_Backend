@@ -491,7 +491,10 @@ class CustomerSerializer(serializers.ModelSerializer):
             "sim_number": getattr(device, 'sim_number', None),
             "sim_serial": getattr(device, 'sim_serial', None),
             "sim_operator_2": getattr(device, 'sim_operator_2', None),
-            "sim_number_2": getattr(device, 'sim_number_2', None)
+            "sim_number_2": getattr(device, 'sim_number_2', None),
+            "sim_changed": getattr(device, 'sim_changed', False),
+            "sim_change_detected_at": getattr(device, 'sim_change_detected_at', None),
+            "sim_details": device.get_sim_details() if hasattr(device, 'get_sim_details') else None
         }
 
     def get_contract_summary(self, obj):
