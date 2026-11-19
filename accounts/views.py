@@ -1149,16 +1149,20 @@ def _find_user_by_identifier(identifier):
 
 def _send_otp_sms(mobile_number, otp_code, purpose):
     """
-    Dispatch OTP SMS via configured gateway with Jio DLT compliance:
+    Dispatch OTP SMS via configured gateway with DLT compliance:
+    - Gateway: APITxT (https://apitxt.com/api/sendMsg)
     - Header / Sender ID: PRLOCK
     - Content Template ID: 1277179438043729654 (PRIMELOCKERPROOTP)
+    - Entity ID (PE ID): 1201179275669531017
+    - Telemarketer ID (TM ID): 1202162934973074727 (APITXT)
     - Template text: PRIME LOCKER PRO: Your OTP for verification is {#number#}. This OTP is valid for 5 minutes. Do not share it with anyone.
     """
-    sms_url = os.environ.get('SMS_GATEWAY_URL', '').strip()
+    sms_url = os.environ.get('SMS_GATEWAY_URL', 'https://apitxt.com/api/sendMsg').strip() or 'https://apitxt.com/api/sendMsg'
     sms_key = os.environ.get('SMS_GATEWAY_KEY', '').strip()
     sender_id = os.environ.get('SMS_SENDER_ID', 'PRLOCK').strip() or 'PRLOCK'
     template_id = os.environ.get('SMS_DLT_TEMPLATE_ID', '1277179438043729654').strip() or '1277179438043729654'
-    entity_id = os.environ.get('SMS_DLT_ENTITY_ID', '').strip()
+    entity_id = os.environ.get('SMS_DLT_ENTITY_ID', '1201179275669531017').strip() or '1201179275669531017'
+    tm_id = os.environ.get('SMS_DLT_TM_ID', '1202162934973074727').strip() or '1202162934973074727'
 
     is_configured = (
         sms_url
@@ -1171,7 +1175,7 @@ def _send_otp_sms(mobile_number, otp_code, purpose):
         logger.info("OTP SMS skipped (gateway unconfigured) for purpose=%s", purpose)
         return False
 
-    # Exact approved Jio DLT Content Template text
+    # Exact approved DLT Content Template text
     message_text = f"PRIME LOCKER PRO: Your OTP for verification is {otp_code}. This OTP is valid for 5 minutes. Do not share it with anyone."
 
     digits_only = ''.join(ch for ch in str(mobile_number) if ch.isdigit())
@@ -1179,10 +1183,12 @@ def _send_otp_sms(mobile_number, otp_code, purpose):
     phone_91 = f"91{clean_phone_10}"
 
     payload_dict = {
+        'authkey': sms_key,
+        'apikey': sms_key,
         'to': mobile_number,
         'mobile': clean_phone_10,
         'phone': clean_phone_10,
-        'mobiles': phone_91,
+        'mobiles': clean_phone_10,
         'message': message_text,
         'text': message_text,
         'msg': message_text,
@@ -1193,15 +1199,25 @@ def _send_otp_sms(mobile_number, otp_code, purpose):
         'dlt_template_id': template_id,
         'dlt_te_id': template_id,
         'otp': str(otp_code),
-        'route': 'T',
+        'route': '4',
     }
     if entity_id:
         payload_dict['pe_id'] = entity_id
         payload_dict['entity_id'] = entity_id
+    if tm_id:
+        payload_dict['tm_id'] = tm_id
+        payload_dict['telemarketer_id'] = tm_id
 
-    payload = json.dumps(payload_dict).encode('utf-8')
+    # If APITxT, format as application/x-www-form-urlencoded as per official API documentation
+    if 'apitxt.com' in sms_url.lower():
+        payload = urllib.parse.urlencode(payload_dict).encode('utf-8')
+        content_type = 'application/x-www-form-urlencoded'
+    else:
+        payload = json.dumps(payload_dict).encode('utf-8')
+        content_type = 'application/json'
+
     headers = {
-        'Content-Type': 'application/json',
+        'Content-Type': content_type,
         'Authorization': f'Bearer {sms_key}',
         'apikey': sms_key,
         'authkey': sms_key,
@@ -1213,8 +1229,9 @@ def _send_otp_sms(mobile_number, otp_code, purpose):
         method='POST',
     )
     try:
-        with urllib.request.urlopen(req, timeout=8):
-            logger.info("Dispatched Jio DLT OTP SMS to %s (purpose=%s)", mobile_number, purpose)
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            resp_body = resp.read().decode('utf-8', errors='ignore') if hasattr(resp, 'read') else ''
+            logger.info("Dispatched DLT OTP SMS to %s (purpose=%s, resp=%s)", mobile_number, purpose, resp_body[:100])
             return True
     except Exception as exc:
         logger.warning("Failed to dispatch %s OTP SMS via gateway: %s", purpose, exc)
