@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EMI Loan Agreement - #PLP-AGR-01042</title>
+  <style>
+    :root {
+      --primary: #0f172a;
+      --accent: #b45309;
+      --accent-soft: #fef3c7;
+      --text: #1e293b;
+      --text-muted: #64748b;
+      --border: #cbd5e1;
+      --bg-page: #f1f5f9;
+      --bg-card: #ffffff;
+      --bg-subtle: #f8fafc;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+
+    body {
+      background-color: var(--bg-page);
+      color: var(--text);
+      padding: 24px 16px;
+      line-height: 1.5;
+      font-size: 13.5px;
+    }
+
+    .action-bar {
+      max-width: 860px;
+      margin: 0 auto 16px auto;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 9px 18px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      text-decoration: none;
+      transition: background-color 0.2s ease;
+    }
+
+    .btn-print {
+      background-color: var(--primary);
+      color: #ffffff;
+    }
+    .btn-print:hover {
+      background-color: #1e293b;
+    }
+
+    .btn-back {
+      background-color: #ffffff;
+      color: var(--primary);
+      border: 1px solid var(--border);
+    }
+
+    .agreement-container {
+      max-width: 860px;
+      margin: 0 auto;
+      background: var(--bg-card);
+      border-radius: 10px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
+      padding: 38px 46px;
+    }
+
+    /* Header */
+    .doc-header {
+      border-bottom: 2px solid var(--primary);
+      padding-bottom: 12px;
+      margin-bottom: 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+    }
+
+    .brand-title {
+      font-size: 21px;
+      font-weight: 800;
+      color: var(--primary);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      letter-spacing: 0.5px;
+    }
+
+    .brand-badge {
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 4px;
+      border: 1px solid #fcd34d;
+    }
+
+    .doc-subtitle {
+      font-size: 12px;
+      color: var(--accent);
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      margin-top: 4px;
+    }
+
+    .doc-meta {
+      text-align: right;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .doc-meta-id {
+      font-size: 14.5px;
+      font-weight: 700;
+      color: var(--primary);
+      font-family: monospace;
+    }
+
+    .doc-preamble {
+      font-size: 12.5px;
+      color: var(--text-muted);
+      margin-bottom: 16px;
+      line-height: 1.5;
+      font-style: italic;
+    }
+
+    /* Section Headings */
+    .section-title {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--primary);
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      margin: 16px 0 8px 0;
+      padding-bottom: 4px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .section-title::before {
+      content: "";
+      display: inline-block;
+      width: 4px;
+      height: 13px;
+      background-color: var(--accent);
+      border-radius: 2px;
+    }
+
+    /* 2-Column Grid Layouts (No Table) */
+    .two-col-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 14px;
+    }
+
+    .info-card {
+      background-color: var(--bg-subtle);
+      border-radius: 6px;
+      padding: 12px 16px;
+      border: 1px solid var(--border);
+    }
+
+    .card-tag {
+      font-size: 10.5px;
+      font-weight: 700;
+      text-transform: uppercase;
+      color: var(--accent);
+      letter-spacing: 0.5px;
+      margin-bottom: 6px;
+    }
+
+    .card-name {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--primary);
+      margin-bottom: 5px;
+    }
+
+    .card-line {
+      font-size: 12px;
+      margin-bottom: 3px;
+      color: var(--text);
+    }
+
+    .card-line span {
+      color: var(--text-muted);
+      min-width: 80px;
+      display: inline-block;
+    }
+
+    /* Labeled Spec List */
+    .spec-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 12px;
+      padding: 4px 0;
+      border-bottom: 1px dashed #e2e8f0;
+    }
+
+    .spec-item:last-child {
+      border-bottom: none;
+    }
+
+    .spec-label {
+      color: var(--text-muted);
+    }
+
+    .spec-value {
+      font-weight: 600;
+      color: var(--primary);
+    }
+
+    .spec-highlight {
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    /* Clauses */
+    .clauses-container {
+      margin-bottom: 14px;
+    }
+
+    .clause-item {
+      margin-bottom: 6px;
+      font-size: 12px;
+      line-height: 1.5;
+      color: var(--text);
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+    }
+
+    .clause-number {
+      font-weight: 700;
+      color: var(--primary);
+      min-width: 16px;
+    }
+
+    /* Undertaking & Sole Signature Block Side-by-Side */
+    .bottom-layout {
+      display: grid;
+      grid-template-columns: 1.25fr 1fr;
+      gap: 16px;
+      align-items: center;
+      margin-top: 14px;
+    }
+
+    .declaration-card {
+      background: #fffbeb;
+      border: 1px solid #fde68a;
+      border-radius: 6px;
+      padding: 12px 14px;
+      font-size: 11.5px;
+      line-height: 1.55;
+      color: #78350f;
+    }
+
+    .sole-signature-box {
+      border: 1.5px solid var(--primary);
+      border-radius: 8px;
+      background-color: #ffffff;
+      padding: 12px 16px;
+      text-align: center;
+    }
+
+    .sig-role {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      color: var(--accent);
+      margin-bottom: 6px;
+      text-align: left;
+    }
+
+    .sig-cursive {
+      font-family: "Brush Script MT", "Caveat", cursive, sans-serif;
+      font-size: 26px;
+      color: #1e3a8a;
+      line-height: 1.3;
+    }
+
+    .sig-divider {
+      width: 100%;
+      height: 1px;
+      background-color: var(--border);
+      margin: 6px 0;
+    }
+
+    .sig-name {
+      font-size: 13.5px;
+      font-weight: 700;
+      color: var(--primary);
+    }
+
+    .sig-meta {
+      font-size: 10.5px;
+      color: var(--text-muted);
+    }
+
+    .doc-footer {
+      margin-top: 16px;
+      padding-top: 8px;
+      border-top: 1px solid var(--border);
+      text-align: center;
+      font-size: 10.5px;
+      color: var(--text-muted);
+      line-height: 1.4;
+    }
+
+    @page {
+      size: A4 portrait;
+      margin: 10mm 12mm;
+    }
+
+    @media print {
+      body {
+        background: #ffffff;
+        padding: 0;
+        font-size: 11px;
+      }
+      .action-bar {
+        display: none !important;
+      }
+      .agreement-container {
+        box-shadow: none;
+        padding: 0;
+        max-width: 100%;
+        border-radius: 0;
+      }
+      .btn {
+        display: none !important;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="action-bar">
+    <button class="btn btn-back" onclick="window.history.back();">← Back</button>
+    <div style="display: flex; gap: 8px;">
+      <a href="sample_agreement.pdf" class="btn btn-print" download>📥 Download PDF (1 Page)</a>
+      <button class="btn btn-print" onclick="window.print();">🖨️ Print / Save as PDF</button>
+    </div>
+  </div>
+
+  <div class="agreement-container">
+    <!-- Header -->
+    <div class="doc-header">
+      <div>
+        <div class="brand-title">
+          PRIME LOCKER <span class="brand-badge">PRO</span>
+        </div>
+        <div class="doc-subtitle">Device Financing &amp; Collateral Locking Undertaking</div>
+      </div>
+      <div class="doc-meta">
+        <div class="doc-meta-id">PLP-AGR-01042</div>
+        <div>Date: <strong>19 Nov 2026</strong></div>
+        <div>Status: <strong style="color: #16a34a;">ACTIVE</strong></div>
+      </div>
+    </div>
+
+    <!-- Preamble -->
+    <div class="doc-preamble">
+      This Agreement is executed on <strong>19 Nov 2026</strong> between the Authorized Retailer and the Customer/Borrower as specified below:
+    </div>
+
+    <!-- Section 1: Contracting Parties (No Tables) -->
+    <div class="section-title">1. Contracting Parties</div>
+    <div class="two-col-grid">
+      <div class="info-card">
+        <div class="card-tag">Financing Partner / Retailer</div>
+        <div class="card-name">Prime Mobile &amp; Electronics</div>
+        <div class="card-line"><span>Rep:</span> Suresh Patel | <span>Phone:</span> +91 98765 43210</div>
+        <div class="card-line"><span>GSTIN:</span> 29ABCDE1234F1Z5</div>
+        <div class="card-line"><span>Address:</span> Shop 14, MG Road Market, Bangalore</div>
+      </div>
+
+      <div class="info-card">
+        <div class="card-tag">Borrower / Customer</div>
+        <div class="card-name">Ramesh Kumar</div>
+        <div class="card-line"><span>Mobile:</span> +91 88675 38192 | <span>ID:</span> PLP-CUST-8867</div>
+        <div class="card-line"><span>ID Proof:</span> Aadhaar - XXXX-XXXX-4921</div>
+        <div class="card-line"><span>Address:</span> Flat 204, Green View Apartments, Indiranagar</div>
+      </div>
+    </div>
+
+    <!-- Section 2: Financed Item & Financial Terms -->
+    <div class="section-title">2. Financed Asset &amp; EMI Repayment Schedule</div>
+    <div class="two-col-grid">
+      <div class="info-card">
+        <div class="card-tag">Collateral Handset Specifications</div>
+        <div class="spec-item">
+          <span class="spec-label">Financed Product</span>
+          <span class="spec-value">Samsung Galaxy A15 5G</span>
+        </div>
+        <div class="spec-item">
+          <span class="spec-label">Serial / Ref</span>
+          <span class="spec-value">SM-A156B-88392</span>
+        </div>
+        <div class="spec-item">
+          <span class="spec-label">Collateral IMEI</span>
+          <span class="spec-value" style="font-family: monospace; font-weight: 700;">866671060012345</span>
+        </div>
+        <div class="spec-item">
+          <span class="spec-label">Device State / MDM</span>
+          <span class="spec-value" style="color: #16a34a; font-weight: 700;">NEW (Knox / OEM Active)</span>
+        </div>
+      </div>
+
+      <div class="info-card">
+        <div class="card-tag">Loan &amp; EMI Terms</div>
+        <div class="spec-item">
+          <span class="spec-label">Total Handset Cost</span>
+          <span class="spec-value">₹18,500.00 (DP Paid: ₹3,500.00)</span>
+        </div>
+        <div class="spec-item">
+          <span class="spec-label">Financed Principal</span>
+          <span class="spec-value spec-highlight">₹15,000.00 (Fee: ₹500.00)</span>
+        </div>
+        <div class="spec-item">
+          <span class="spec-label">Monthly EMI Obligation</span>
+          <span class="spec-value spec-highlight">₹1,500.00 / mo (10 Months)</span>
+        </div>
+        <div class="spec-item">
+          <span class="spec-label">Due Date &amp; Grace</span>
+          <span class="spec-value">05 Dec 2026 (3 Days Grace Period)</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Section 3: Terms & Remote Locking Covenants -->
+    <div class="section-title">3. Terms &amp; Device Locking Covenants</div>
+    <div class="clauses-container">
+      <div class="clause-item">
+        <div class="clause-number">1.</div>
+        <div><strong>Repayment Undertaking:</strong> The Borrower acknowledges receipt of the financed device in working condition and undertakes to pay each monthly installment of <strong>₹1,500.00</strong> on or before each scheduled monthly due date for <strong>10 months</strong>.</div>
+      </div>
+      <div class="clause-item">
+        <div class="clause-number">2.</div>
+        <div><strong>Collateral Enrolment:</strong> The Borrower authorizes Prime Locker Pro MDM application to be installed as security manager on collateral device (IMEI: <strong>866671060012345</strong>).</div>
+      </div>
+      <div class="clause-item">
+        <div class="clause-number">3.</div>
+        <div><strong>Remote Locking Consent:</strong> If any installment remains unpaid past the grace period (<strong>3 days</strong>), Borrower grants unequivocal consent for device to be remotely locked, restricting usage until settled.</div>
+      </div>
+      <div class="clause-item">
+        <div class="clause-number">4.</div>
+        <div><strong>Instant Automated Restoration:</strong> Upon verified receipt of overdue EMI (via UPI, AutoPay, Netbanking, or Store Cashier), device is automatically restored to active state without delay.</div>
+      </div>
+      <div class="clause-item">
+        <div class="clause-number">5.</div>
+        <div><strong>Anti-Tamper Warranty:</strong> Borrower agrees not to uninstall MDM, flash custom ROMs, root, or bypass security policies until full loan repayment certificate is issued.</div>
+      </div>
+    </div>
+
+    <!-- Section 4: Undertaking Declaration & Sole Digital Signature Side-by-Side -->
+    <div class="section-title">4. Borrower Undertaking &amp; Digital Signature</div>
+    <div class="bottom-layout">
+      <div class="declaration-card">
+        <strong>Borrower Sole Declaration &amp; Acceptance:</strong><br>
+        "I, the undersigned Borrower, hereby affirm that I have read, understood, and agreed to all terms, conditions, and collateral locking provisions specified in this Agreement. I confirm receipt of the financed device and willingly execute this undertaking with my digital signature."
+      </div>
+
+      <div class="sole-signature-box">
+        <div class="sig-role">Borrower Digital Signature</div>
+        <div class="sig-cursive">Ramesh Kumar</div>
+        <div class="sig-divider"></div>
+        <div class="sig-name">Ramesh Kumar</div>
+        <div class="sig-meta">Digitally Signed via Prime Locker Pro MDM</div>
+        <div class="sig-meta">Date: 19 Nov 2026 | Ref: PLP-AGR-01042</div>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="doc-footer">
+      Digitally executed and archived legal record under Prime Locker Pro Platform | Agreement: PLP-AGR-01042 | Date of Execution: 19 Nov 2026
+    </div>
+  </div>
+
+</body>
+</html>
