@@ -215,3 +215,76 @@ class KeyServiceBalanceTests(TestCase):
         }, format='json')
         self.assertEqual(reclaim_mobile.status_code, status.HTTP_200_OK)
         self.assertGreater(reclaim_mobile.data['your_total_available_keys'], 0)
+
+
+class KeyTransactionGroupedCountTests(TestCase):
+    def setUp(self):
+        self.admin = User.objects.create_superuser(
+            username='grp_admin',
+            email='grp_admin@test.com',
+            password='AdminPassword@123',
+            role='SUPER_ADMIN'
+        )
+        self.distributor = User.objects.create_user(
+            username='grp_distributor',
+            email='dist@test.com',
+            password='DistPassword@123',
+            role='DISTRIBUTOR',
+            parent=self.admin
+        )
+        self.admin_client = APIClient()
+        self.admin_client.force_authenticate(user=self.admin)
+
+    def test_grouped_transactions_show_whole_count(self):
+        # 1. Admin generates 10 DLC keys
+        gen_resp = self.admin_client.post('/api/keys/generate/', {
+            'prefix': 'DLC',
+            'device_type': 'DLC',
+            'quantity': 10
+        }, format='json')
+        self.assertEqual(gen_resp.status_code, status.HTTP_201_CREATED)
+
+        # 2. Admin allocates 5 DLC keys to distributor
+        alloc_resp = self.admin_client.post('/api/keys/allocate/', {
+            'target_user_id': self.distributor.id,
+            'device_type': 'DLC',
+            'quantity': 5,
+            'reference_note': 'Test batch allocation of 5 keys'
+        }, format='json')
+        self.assertEqual(alloc_resp.status_code, status.HTTP_200_OK)
+
+        # 3. Query transactions default view (grouped whole count)
+        tx_resp = self.admin_client.get('/api/keys/transactions/')
+        self.assertEqual(tx_resp.status_code, status.HTTP_200_OK)
+        
+        # Results should be grouped batches, not 15 individual rows!
+        results = tx_resp.data.get('results', tx_resp.data)
+        self.assertEqual(len(results), 2)  # Exactly 2 batches: 1 ALLOCATED, 1 GENERATED
+
+        # Check ALLOCATED batch (most recent)
+        allocated_batch = results[0]
+        self.assertEqual(allocated_batch['action'], 'ALLOCATED')
+        self.assertEqual(allocated_batch['quantity'], 5)
+        self.assertIn('(+4 more)', allocated_batch['key_string'])
+        self.assertEqual(len(allocated_batch['keys']), 5)
+        self.assertEqual(allocated_batch['to_user'], self.distributor.id)
+
+        # Check GENERATED batch
+        generated_batch = results[1]
+        self.assertEqual(generated_batch['action'], 'GENERATED')
+        self.assertEqual(generated_batch['quantity'], 10)
+        self.assertIn('(+9 more)', generated_batch['key_string'])
+        self.assertEqual(len(generated_batch['keys']), 10)
+
+        # 4. Query detailed/raw view (should return individual 15 rows)
+        detailed_resp = self.admin_client.get('/api/keys/transactions/?view=detailed')
+        self.assertEqual(detailed_resp.status_code, status.HTTP_200_OK)
+        detailed_results = detailed_resp.data.get('results', detailed_resp.data)
+        self.assertEqual(len(detailed_results), 15)  # 5 allocated + 10 generated
+        self.assertEqual(detailed_results[0]['quantity'], 1)
+
+        # 5. CSV export in grouped mode
+        csv_resp = self.admin_client.get('/api/keys/transactions/?export=csv')
+        self.assertEqual(csv_resp.status_code, status.HTTP_200_OK)
+        self.assertIn(b'Quantity', csv_resp.content)
+

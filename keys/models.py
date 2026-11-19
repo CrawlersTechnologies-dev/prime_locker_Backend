@@ -43,6 +43,7 @@ class KeyAction(models.TextChoices):
     ACTIVATED = 'ACTIVATED', 'Activated'
 
 class KeyTransaction(models.Model):
+    batch_id = models.UUIDField(null=True, blank=True, db_index=True)
     key = models.ForeignKey(DeviceKey, on_delete=models.CASCADE, related_name='transactions')
     from_user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='transfers_out')
     to_user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='transfers_in')

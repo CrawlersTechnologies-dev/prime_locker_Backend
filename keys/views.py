@@ -133,6 +133,7 @@ class KeyViewSet(viewsets.GenericViewSet, viewsets.mixins.ListModelMixin, viewse
                 created_keys = DeviceKey.objects.filter(batch_id=batch_id)
                 transactions = [
                     KeyTransaction(
+                        batch_id=batch_id,
                         key=k,
                         from_user=request.user,
                         to_user=request.user,
@@ -382,6 +383,7 @@ class KeyViewSet(viewsets.GenericViewSet, viewsets.mixins.ListModelMixin, viewse
                 
             target_name = f"{target_user.first_name} {target_user.last_name}".strip() or target_user.username
             dev_type_q = _get_device_type_q_filter(device_type)
+            batch_id = uuid.uuid4()
             with transaction.atomic():
                 q_filter = models.Q(current_owner=request.user, status=KeyStatus.AVAILABLE) & dev_type_q
                 available_keys = DeviceKey.objects.filter(q_filter)[:quantity]
@@ -397,6 +399,7 @@ class KeyViewSet(viewsets.GenericViewSet, viewsets.mixins.ListModelMixin, viewse
                 
                 transactions = [
                     KeyTransaction(
+                        batch_id=batch_id,
                         key_id=k_id, 
                         from_user=request.user, 
                         to_user=target_user, 
@@ -473,6 +476,7 @@ class KeyViewSet(viewsets.GenericViewSet, viewsets.mixins.ListModelMixin, viewse
             target_name = f"{target_user.first_name} {target_user.last_name}".strip() or target_user.username
             reason = request.data.get('reason', '').strip()
             dev_type_q = _get_device_type_q_filter(device_type)
+            batch_id = uuid.uuid4()
             with transaction.atomic():
                 q_filter = models.Q(current_owner=target_user, status=KeyStatus.AVAILABLE) & dev_type_q
                 available_keys = DeviceKey.objects.filter(q_filter)[:quantity]
@@ -488,6 +492,7 @@ class KeyViewSet(viewsets.GenericViewSet, viewsets.mixins.ListModelMixin, viewse
                 
                 transactions = [
                     KeyTransaction(
+                        batch_id=batch_id,
                         key_id=k_id, 
                         from_user=target_user, 
                         to_user=request.user, 
@@ -558,6 +563,7 @@ class KeyViewSet(viewsets.GenericViewSet, viewsets.mixins.ListModelMixin, viewse
                 key.save()
                 
                 KeyTransaction.objects.create(
+                    batch_id=uuid.uuid4(),
                     key=key,
                     from_user=request.user,
                     to_user=customer,
@@ -576,7 +582,7 @@ class KeyViewSet(viewsets.GenericViewSet, viewsets.mixins.ListModelMixin, viewse
         Filters: ?type=, ?device_type=, ?start_date=, ?end_date=, ?search=, ?export=csv
         """
         user = request.user
-        qs = KeyTransaction.objects.select_related('key', 'from_user', 'to_user').order_by('-timestamp')
+        qs = KeyTransaction.objects.select_related('key', 'from_user', 'to_user').order_by('-timestamp', '-id')
 
         if user.role != 'SUPER_ADMIN':
             subordinates = user.get_all_subordinates()
@@ -630,31 +636,121 @@ class KeyViewSet(viewsets.GenericViewSet, viewsets.mixins.ListModelMixin, viewse
             else:
                 qs = qs.order_by('-timestamp', '-id')
 
+        # Check if caller requested individual/detailed rows or default whole-count grouping
+        view_mode = request.query_params.get('view', '').lower()
+        raw_mode = request.query_params.get('raw', '').lower() in ['true', '1', 'yes']
+        group_mode = request.query_params.get('group', 'true').lower() not in ['false', '0', 'no']
+
+        if view_mode == 'detailed' or raw_mode or not group_mode:
+            if request.query_params.get('export') == 'csv':
+                from reports.utils import generate_csv_response
+                headers = ["ID", "Batch ID", "Key String", "Device Type", "Action", "From User", "To User", "Date Time", "Notes"]
+                rows = []
+                for t in qs[:5000]:
+                    f_name = (f"{t.from_user.first_name} {t.from_user.last_name}".strip() or t.from_user.username) if t.from_user else "System"
+                    t_name = (f"{t.to_user.first_name} {t.to_user.last_name}".strip() or t.to_user.username) if t.to_user else "N/A"
+                    rows.append([
+                        t.id,
+                        str(t.batch_id or ""),
+                        t.key.key_string if t.key else "",
+                        t.key.device_type if t.key else "",
+                        t.action,
+                        f_name,
+                        t_name,
+                        t.timestamp.strftime('%Y-%m-%d %H:%M:%S'),
+                        t.notes or ""
+                    ])
+                return generate_csv_response("key_transactions_report.csv", headers, rows)
+
+            page = self.paginate_queryset(qs)
+            if page is not None:
+                serializer = KeyTransactionSerializer(page, many=True)
+                return self.get_paginated_response(serializer.data)
+
+            serializer = KeyTransactionSerializer(qs, many=True)
+            return Response(serializer.data)
+
+        # Default: Grouped Whole Count view (e.g. +50 Keys instead of 50 individual +1 rows)
+        grouped = {}
+        for t in qs:
+            group_key = t.batch_id if t.batch_id else (
+                t.action,
+                t.from_user_id,
+                t.to_user_id,
+                t.key.device_type if t.key else None,
+                t.timestamp.strftime('%Y-%m-%d %H:%M:%S'),
+                t.notes
+            )
+            if group_key not in grouped:
+                from_details = None
+                if t.from_user:
+                    u = t.from_user
+                    name = f"{u.first_name} {u.last_name}".strip() or u.username
+                    from_details = {"id": u.id, "name": name, "role": u.role, "business_name": u.business_name}
+
+                to_details = None
+                if t.to_user:
+                    u = t.to_user
+                    name = f"{u.first_name} {u.last_name}".strip() or u.username
+                    to_details = {"id": u.id, "name": name, "role": u.role, "business_name": u.business_name}
+
+                dev_type = t.key.device_type if t.key else ""
+                grouped[group_key] = {
+                    "id": t.id,
+                    "batch_id": str(t.batch_id) if t.batch_id else None,
+                    "action": t.action,
+                    "device_type": dev_type,
+                    "quantity": 0,
+                    "first_key": t.key.key_string if t.key else "",
+                    "key_string": "",
+                    "keys": [],
+                    "from_user": t.from_user_id,
+                    "from_user_details": from_details,
+                    "to_user": t.to_user_id,
+                    "to_user_details": to_details,
+                    "notes": t.notes,
+                    "timestamp": t.timestamp.isoformat(),
+                }
+
+            grouped[group_key]["quantity"] += 1
+            if t.key:
+                grouped[group_key]["keys"].append(t.key.key_string)
+
+        grouped_list = list(grouped.values())
+        for item in grouped_list:
+            qty = item["quantity"]
+            first = item["first_key"]
+            if qty > 1:
+                item["key_string"] = f"{first} (+{qty - 1} more)"
+            else:
+                item["key_string"] = first
+
         if request.query_params.get('export') == 'csv':
             from reports.utils import generate_csv_response
-            headers = ["ID", "Key String", "Device Type", "Action", "From User", "To User", "Date Time"]
+            headers = ["ID", "Batch ID", "Key String", "Quantity", "Device Type", "Action", "From User", "To User", "Date Time", "Notes"]
             rows = []
-            for t in qs[:5000]:
-                f_name = (f"{t.from_user.first_name} {t.from_user.last_name}".strip() or t.from_user.username) if t.from_user else "System"
-                t_name = (f"{t.to_user.first_name} {t.to_user.last_name}".strip() or t.to_user.username) if t.to_user else "N/A"
+            for item in grouped_list[:5000]:
+                f_name = item['from_user_details']['name'] if item['from_user_details'] else "System"
+                t_name = item['to_user_details']['name'] if item['to_user_details'] else "N/A"
                 rows.append([
-                    t.id,
-                    t.key.key_string,
-                    t.key.device_type,
-                    t.action,
+                    item['id'],
+                    item['batch_id'] or "",
+                    item['key_string'],
+                    item['quantity'],
+                    item['device_type'],
+                    item['action'],
                     f_name,
                     t_name,
-                    t.timestamp.strftime('%Y-%m-%d %H:%M:%S')
+                    item['timestamp'],
+                    item['notes'] or ""
                 ])
-            return generate_csv_response("key_transactions_report.csv", headers, rows)
+            return generate_csv_response("key_transactions_summary.csv", headers, rows)
 
-        page = self.paginate_queryset(qs)
+        page = self.paginate_queryset(grouped_list)
         if page is not None:
-            serializer = KeyTransactionSerializer(page, many=True)
-            return self.get_paginated_response(serializer.data)
+            return self.get_paginated_response(page)
 
-        serializer = KeyTransactionSerializer(qs, many=True)
-        return Response(serializer.data)
+        return Response(grouped_list)
 
 
 class KeyRequestViewSet(viewsets.ModelViewSet):
@@ -765,11 +861,13 @@ class KeyRequestViewSet(viewsets.ModelViewSet):
                     "detail": f"You do not have enough {requested_target} keys available to fulfill this request. Available: {len(available_keys)}, Requested: {approve_qty}."
                 }, status=status.HTTP_400_BAD_REQUEST)
                 
+            batch_id = uuid.uuid4()
             key_ids = [k.id for k in available_keys]
             DeviceKey.objects.filter(id__in=key_ids).update(current_owner=key_req.requester)
             
             transactions = [
                 KeyTransaction(
+                    batch_id=batch_id,
                     key_id=k_id, 
                     from_user=request.user, 
                     to_user=key_req.requester, 

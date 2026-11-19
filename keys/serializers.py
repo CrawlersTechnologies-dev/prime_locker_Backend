@@ -39,6 +39,8 @@ class DeviceKeySerializer(serializers.ModelSerializer):
         return representation
 
 class KeyTransactionSerializer(serializers.ModelSerializer):
+    batch_id = serializers.UUIDField(read_only=True)
+    quantity = serializers.IntegerField(default=1, read_only=True)
     key_string = serializers.CharField(source='key.key_string', read_only=True)
     device_type = serializers.CharField(source='key.device_type', read_only=True)
     from_user_details = serializers.SerializerMethodField(read_only=True)
@@ -48,6 +50,8 @@ class KeyTransactionSerializer(serializers.ModelSerializer):
         model = KeyTransaction
         fields = [
             'id',
+            'batch_id',
+            'quantity',
             'key',
             'key_string',
             'device_type',

@@ -745,6 +745,100 @@
           }
         }
       ]
+    },
+    {
+      "name": "6. Key Ledger & Whole-Count Transfers (Screen N-07)",
+      "item": [
+        {
+          "name": "6.1 Key Transactions Ledger (Grouped Whole Count - Default)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/keys/transactions/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "keys",
+                "transactions",
+                ""
+              ]
+            },
+            "description": "Screen N-07: Key history ledger grouped by batch. Displays whole count (e.g. quantity: 50, key_string: DLC-1001 (+49 more)) instead of spamming 50 individual +1 rows."
+          }
+        },
+        {
+          "name": "6.2 Key Transactions Ledger (Detailed Raw View)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/keys/transactions/?view=detailed",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "keys",
+                "transactions",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "view",
+                  "value": "detailed",
+                  "description": "Return individual single-key rows"
+                }
+              ]
+            },
+            "description": "Returns individual serial key transaction rows (each with quantity: 1) when individual serial inspection is needed."
+          }
+        },
+        {
+          "name": "6.3 Key Transactions CSV Export",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/keys/transactions/?export=csv",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "keys",
+                "transactions",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "export",
+                  "value": "csv",
+                  "description": "Export ledger to CSV with Quantity column"
+                }
+              ]
+            },
+            "description": "Downloads CSV report of key transactions including Quantity and Batch ID columns."
+          }
+        }
+      ]
     }
   ]
 }

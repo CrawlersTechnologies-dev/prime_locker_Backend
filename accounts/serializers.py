@@ -212,11 +212,14 @@ class SuperDistributorSerializer(serializers.ModelSerializer):
                     DeviceKey.objects.bulk_create(new_keys)
                     creator_keys = list(DeviceKey.objects.filter(current_owner=creator, status=KeyStatus.AVAILABLE)[:opening_keys])
 
+                import uuid
+                opening_batch_id = uuid.uuid4()
                 keys_to_transfer = creator_keys[:opening_keys]
                 for k in keys_to_transfer:
                     k.current_owner = user
                     k.save(update_fields=['current_owner'])
                     KeyTransaction.objects.create(
+                        batch_id=opening_batch_id,
                         key=k,
                         from_user=creator,
                         to_user=user,
