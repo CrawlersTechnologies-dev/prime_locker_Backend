@@ -111,6 +111,7 @@ class CustomerEMIContractSerializer(serializers.ModelSerializer):
     paid_installments_count = serializers.ReadOnlyField()
     remaining_installments_count = serializers.ReadOnlyField()
     mandate_auth_url = serializers.SerializerMethodField(read_only=True)
+    agreement_url = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = CustomerEMIContract
@@ -153,6 +154,7 @@ class CustomerEMIContractSerializer(serializers.ModelSerializer):
             'mandate_status',
             'mandate_umrn',
             'mandate_auth_url',
+            'agreement_url',
             'total_paid',
             'total_remaining',
             'paid_installments_count',
@@ -160,7 +162,7 @@ class CustomerEMIContractSerializer(serializers.ModelSerializer):
             'created_at',
             'updated_at'
         ]
-        read_only_fields = ['id', 'retailer', 'financed_amount', 'monthly_emi_amount', 'mandate_id', 'mandate_status', 'mandate_umrn', 'mandate_auth_url', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'retailer', 'financed_amount', 'monthly_emi_amount', 'mandate_id', 'mandate_status', 'mandate_umrn', 'mandate_auth_url', 'agreement_url', 'created_at', 'updated_at']
 
     def get_customer_details(self, obj):
         c = obj.customer
@@ -196,6 +198,13 @@ class CustomerEMIContractSerializer(serializers.ModelSerializer):
         if url.startswith('/') and request:
             return request.build_absolute_uri(url)
         return url
+
+    def get_agreement_url(self, obj):
+        request = self.context.get('request') if hasattr(self, 'context') else None
+        path = f"/api/emi/contracts/{obj.id}/agreement/"
+        if request:
+            return request.build_absolute_uri(path)
+        return path
 
     def validate(self, attrs):
         total_amount = attrs.get('total_amount')

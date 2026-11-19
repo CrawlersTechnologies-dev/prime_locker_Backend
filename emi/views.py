@@ -7,6 +7,7 @@ from django.db import transaction, models
 from django.utils import timezone
 from django.views import View
 from django.shortcuts import render
+from django.http import HttpResponse
 from rest_framework import viewsets, permissions, status
 from rest_framework.views import APIView
 from rest_framework.decorators import action
@@ -513,6 +514,156 @@ class CustomerEMIContractViewSet(viewsets.ModelViewSet):
             "lock_device_imei": target_device.imei,
             "product_type": contract.product_type
         })
+
+    @action(detail=True, methods=['get'], url_path='agreement')
+    def agreement(self, request, pk=None):
+        """
+        Auto-generates the dynamic EMI Financing & Device Collateral Agreement.
+        Populates retailer name, store details, customer name, date, financed item,
+        IMEI, and customer's digital signature.
+        Supports HTML view (browser/webview/print) or JSON format (?format=json).
+        """
+        contract = self.get_object()
+
+        # Permission check: Retailer, Customer of this contract, or Staff/Admin
+        if request.user.role == 'CUSTOMER' and contract.customer != request.user:
+            return Response({"detail": "You do not have permission to view this agreement."}, status=status.HTTP_403_FORBIDDEN)
+        if request.user.role == 'RETAILER' and contract.retailer != request.user:
+            if not getattr(request.user, 'is_staff', False) and not getattr(request.user, 'is_superuser', False):
+                return Response({"detail": "You do not have permission to view this agreement."}, status=status.HTTP_403_FORBIDDEN)
+
+        customer = contract.customer
+        retailer = contract.retailer
+
+        customer_name = f"{customer.first_name} {customer.last_name}".strip() or customer.username
+        retailer_name = f"{retailer.first_name} {retailer.last_name}".strip() or retailer.username
+
+        # Resolve signature URL
+        customer_signature_url = None
+        if customer.customer_signature:
+            try:
+                sig_url = customer.customer_signature.url
+                customer_signature_url = request.build_absolute_uri(sig_url) if sig_url.startswith('/') else sig_url
+            except Exception:
+                customer_signature_url = None
+
+        agreement_date = contract.created_at.strftime('%d %b %Y') if contract.created_at else timezone.now().strftime('%d %b %Y')
+
+        # PDF binary download support if requested via ?download=pdf
+        if request.query_params.get('download') == 'pdf':
+            from emi.services.agreement_service import generate_contract_pdf
+            pdf_bytes = generate_contract_pdf(
+                contract=contract,
+                customer=customer,
+                retailer=retailer,
+                customer_name=customer_name,
+                retailer_name=retailer_name,
+                agreement_date=agreement_date
+            )
+            response = HttpResponse(pdf_bytes, content_type='application/pdf')
+            filename = f"EMI_Agreement_PLP_AGR_{contract.id:05d}.pdf"
+            response['Content-Disposition'] = f'inline; filename="{filename}"'
+            return response
+
+        # JSON response support if explicitly requested via ?format=json
+        if request.query_params.get('format') == 'json':
+            return Response({
+                "agreement_number": f"PLP-AGR-{contract.id:05d}",
+                "agreement_date": agreement_date,
+                "contract_id": contract.id,
+                "status": contract.status,
+                "retailer": {
+                    "id": retailer.id,
+                    "name": retailer_name,
+                    "business_name": retailer.business_name or retailer_name,
+                    "mobile_number": retailer.mobile_number,
+                    "store_phone": retailer.store_phone or retailer.mobile_number,
+                    "gst_number": retailer.gst_number,
+                    "address": retailer.address or retailer.city or ""
+                },
+                "customer": {
+                    "id": customer.id,
+                    "name": customer_name,
+                    "mobile_number": customer.mobile_number,
+                    "customer_code": customer.customer_code,
+                    "id_type": customer.id_type,
+                    "id_number": customer.id_number,
+                    "address": customer.address or customer.city or "",
+                    "signature_url": customer_signature_url,
+                    "signed_flag": customer.signed_emi_agreement_flag
+                },
+                "financed_product": {
+                    "product_type": contract.product_type,
+                    "product_brand": contract.product_brand or contract.device_brand,
+                    "product_model": contract.product_model or contract.device_model,
+                    "product_serial_number": contract.product_serial_number,
+                    "product_price": str(contract.total_amount)
+                },
+                "collateral_device": {
+                    "device_brand": contract.device_brand,
+                    "device_model": contract.device_model,
+                    "device_imei": contract.device_imei,
+                    "device_state": contract.device_state
+                },
+                "financial_terms": {
+                    "total_amount": str(contract.total_amount),
+                    "down_payment": str(contract.down_payment),
+                    "processing_fee": str(contract.processing_fee),
+                    "financed_amount": str(contract.financed_amount),
+                    "tenure_months": contract.tenure_months,
+                    "monthly_emi_amount": str(contract.monthly_emi_amount),
+                    "first_emi_date": str(contract.first_emi_date),
+                    "grace_period_days": contract.grace_period_days,
+                    "mandate_id": contract.mandate_id,
+                    "mandate_status": contract.mandate_status
+                }
+            })
+
+        context = {
+            'contract': contract,
+            'customer': customer,
+            'retailer': retailer,
+            'customer_name': customer_name,
+            'retailer_name': retailer_name,
+            'customer_signature_url': customer_signature_url,
+            'agreement_date': agreement_date,
+        }
+        return render(request, 'emi/customer_agreement.html', context)
+
+    @action(detail=True, methods=['get'], url_path='agreement-pdf')
+    def agreement_pdf(self, request, pk=None):
+        """
+        Direct PDF download endpoint for the EMI financing agreement.
+        Accessible via GET /api/emi-contracts/{id}/agreement-pdf/
+        """
+        contract = self.get_object()
+
+        # Permission check: Retailer, Customer of this contract, or Staff/Admin
+        if request.user.role == 'CUSTOMER' and contract.customer != request.user:
+            return Response({"detail": "You do not have permission to view this agreement."}, status=status.HTTP_403_FORBIDDEN)
+        if request.user.role == 'RETAILER' and contract.retailer != request.user:
+            if not getattr(request.user, 'is_staff', False) and not getattr(request.user, 'is_superuser', False):
+                return Response({"detail": "You do not have permission to view this agreement."}, status=status.HTTP_403_FORBIDDEN)
+
+        customer = contract.customer
+        retailer = contract.retailer
+        customer_name = f"{customer.first_name} {customer.last_name}".strip() or customer.username
+        retailer_name = f"{retailer.first_name} {retailer.last_name}".strip() or retailer.username
+        agreement_date = contract.created_at.strftime('%d %b %Y') if contract.created_at else timezone.now().strftime('%d %b %Y')
+
+        from emi.services.agreement_service import generate_contract_pdf
+        pdf_bytes = generate_contract_pdf(
+            contract=contract,
+            customer=customer,
+            retailer=retailer,
+            customer_name=customer_name,
+            retailer_name=retailer_name,
+            agreement_date=agreement_date
+        )
+        response = HttpResponse(pdf_bytes, content_type='application/pdf')
+        filename = f"EMI_Agreement_PLP_AGR_{contract.id:05d}.pdf"
+        response['Content-Disposition'] = f'inline; filename="{filename}"'
+        return response
 
 
 

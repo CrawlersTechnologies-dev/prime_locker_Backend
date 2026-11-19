@@ -505,3 +505,98 @@ class EMIBackendTests(TestCase):
             self.assertIn('https://sdk.cashfree.com/js/v3/cashfree.js', content)
             self.assertIn('sub_session_real_mock_123', content)
             self.assertIn('Open UPI AutoPay', content)
+
+    def test_auto_generated_agreement_html_and_signature_rendering(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        # Attach digital signature to customer
+        fake_sig = SimpleUploadedFile("sig.png", b"fake_png_signature_bytes", content_type="image/png")
+        self.customer.customer_signature = fake_sig
+        self.customer.first_name = "Ramesh"
+        self.customer.last_name = "Kumar"
+        self.customer.id_type = "Aadhaar"
+        self.customer.id_number = "9876-5432-1098"
+        self.customer.save()
+
+        self.retailer.business_name = "Ramesh Electronics & Mobiles"
+        self.retailer.first_name = "Suresh"
+        self.retailer.last_name = "Patel"
+        self.retailer.save()
+
+        # Authenticate as retailer
+        self.client.force_authenticate(user=self.retailer)
+        url = f'/api/emi-contracts/{self.contract.id}/agreement/'
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+        html = resp.content.decode('utf-8')
+        # Check dynamic customer & retailer fields
+        self.assertIn("Ramesh Electronics", html)
+        self.assertIn("Ramesh Kumar", html)
+        self.assertIn("9876-5432-1098", html)
+        # Check contract metadata
+        self.assertIn(f"PLP-AGR-{self.contract.id:05d}", html)
+        self.assertIn(str(self.contract.device_imei), html)
+        self.assertIn(str(self.contract.monthly_emi_amount), html)
+        # Check consent terms
+        self.assertIn("Device Locking", html)
+        self.assertIn("remotely locked", html)
+        # Check customer signature is present
+        self.assertIn("Borrower Digital Signature", html)
+        self.assertIn("sig", html)
+        # Verify retailer signature is removed and no table elements used
+        self.assertNotIn("Authorized Signatory", html)
+        self.assertNotIn("Retailer Signature", html)
+        self.assertNotIn("<table", html)
+
+    def test_auto_generated_agreement_json_format_and_serializer_url(self):
+        self.client.force_authenticate(user=self.retailer)
+        # Test JSON endpoint
+        url = f'/api/emi-contracts/{self.contract.id}/agreement/?format=json'
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        data = resp.data
+        self.assertEqual(data['agreement_number'], f"PLP-AGR-{self.contract.id:05d}")
+        self.assertIn('retailer', data)
+        self.assertIn('customer', data)
+        self.assertIn('financed_product', data)
+        self.assertIn('collateral_device', data)
+        self.assertIn('financial_terms', data)
+        self.assertEqual(data['collateral_device']['device_imei'], self.contract.device_imei)
+
+        # Test contract serializer exposes agreement_url
+        contract_url = f'/api/emi-contracts/{self.contract.id}/'
+        c_resp = self.client.get(contract_url)
+        self.assertEqual(c_resp.status_code, status.HTTP_200_OK)
+        self.assertIn('agreement_url', c_resp.data)
+        self.assertTrue(c_resp.data['agreement_url'].endswith(f'/api/emi/contracts/{self.contract.id}/agreement/'))
+
+    def test_auto_generated_agreement_pdf_download(self):
+        self.client.force_authenticate(user=self.retailer)
+        # Test direct PDF endpoint
+        url = f'/api/emi-contracts/{self.contract.id}/agreement-pdf/'
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp['Content-Type'], 'application/pdf')
+        self.assertIn('inline; filename="EMI_Agreement_PLP_AGR_', resp['Content-Disposition'])
+        self.assertTrue(resp.content.startswith(b'%PDF-'))
+        self.assertGreater(len(resp.content), 1000)
+
+        # Test query param ?download=pdf
+        url_param = f'/api/emi-contracts/{self.contract.id}/agreement/?download=pdf'
+        resp_param = self.client.get(url_param)
+        self.assertEqual(resp_param.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp_param['Content-Type'], 'application/pdf')
+        self.assertTrue(resp_param.content.startswith(b'%PDF-'))
+
+    def test_agreement_permission_enforcement(self):
+        # Create unrelated customer
+        other_customer = User.objects.create_user(
+            username='intruder_customer',
+            email='intruder@customer.com',
+            role='CUSTOMER',
+            password='Password123!'
+        )
+        self.client.force_authenticate(user=other_customer)
+        url = f'/api/emi-contracts/{self.contract.id}/agreement/'
+        resp = self.client.get(url)
+        self.assertIn(resp.status_code, [status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND])
