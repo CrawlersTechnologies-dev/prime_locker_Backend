@@ -1149,20 +1149,16 @@ def _find_user_by_identifier(identifier):
 
 def _send_otp_sms(mobile_number, otp_code, purpose):
     """
-    Dispatch OTP SMS via configured gateway with DLT compliance:
-    - Gateway: APITxT (https://apitxt.com/api/sendMsg)
-    - Header / Sender ID: PRLOCK
-    - Content Template ID: 1277179438043729654 (PRIMELOCKERPROOTP)
-    - Entity ID (PE ID): 1201179275669531017
-    - Telemarketer ID (TM ID): 1202162934973074727 (APITXT)
-    - Template text: PRIME LOCKER PRO: Your OTP for verification is {#number#}. This OTP is valid for 5 minutes. Do not share it with anyone.
+    Dispatch OTP SMS via configured SMS gateway with DLT compliance.
+    All gateway configuration (URL, API Key, Sender ID, DLT Template ID, PE ID, TM ID)
+    is securely read from environment variables (.env).
     """
-    sms_url = os.environ.get('SMS_GATEWAY_URL', 'https://apitxt.com/api/sendMsg').strip() or 'https://apitxt.com/api/sendMsg'
+    sms_url = os.environ.get('SMS_GATEWAY_URL', '').strip()
     sms_key = os.environ.get('SMS_GATEWAY_KEY', '').strip()
-    sender_id = os.environ.get('SMS_SENDER_ID', 'PRLOCK').strip() or 'PRLOCK'
-    template_id = os.environ.get('SMS_DLT_TEMPLATE_ID', '1277179438043729654').strip() or '1277179438043729654'
-    entity_id = os.environ.get('SMS_DLT_ENTITY_ID', '1201179275669531017').strip() or '1201179275669531017'
-    tm_id = os.environ.get('SMS_DLT_TM_ID', '1202162934973074727').strip() or '1202162934973074727'
+    sender_id = os.environ.get('SMS_SENDER_ID', '').strip()
+    template_id = os.environ.get('SMS_DLT_TEMPLATE_ID', '').strip()
+    entity_id = os.environ.get('SMS_DLT_ENTITY_ID', '').strip()
+    tm_id = os.environ.get('SMS_DLT_TM_ID', '').strip()
 
     is_configured = (
         sms_url
