@@ -1124,6 +1124,174 @@ class CustomerViewSet(BaseRoleViewSet):
             "temporary_password": new_password
         }, status=status.HTTP_200_OK)
 
+    @action(detail=True, methods=['post', 'put', 'patch', 'delete'], url_path='edit-photo')
+    def edit_photo(self, request, pk=None):
+        """
+        Customer Photo Edit Option for Admin and Authorized Managers.
+        Endpoint: POST/PUT/PATCH/DELETE /api/customers/{id}/edit-photo/
+        Accepts: multipart/form-data with 'customer_photo' (or 'photo') OR base64 image string.
+        DELETE: Clears customer photo.
+        Super Admin / Company Admin can edit at any time.
+        """
+        customer = self.get_object()
+        user = request.user
+
+        # Permission check:
+        # Super Admin and Company Admin have unrestricted permission to edit customer photo.
+        from .models import is_company_user
+        if not is_company_user(user):
+            if user.role != 'SUPER_ADMIN':
+                if user.role == 'RETAILER':
+                    from devices.models import DeviceLockStatus
+                    device = customer.registered_devices.first()
+                    if device and (getattr(device, 'is_activated', False) or device.status in [DeviceLockStatus.ACTIVE, DeviceLockStatus.LOCKED]):
+                        return Response(
+                            {"detail": "Customer photo cannot be modified once the device is activated."},
+                            status=status.HTTP_400_BAD_REQUEST
+                        )
+                # Check hierarchy
+                if customer != user and customer not in user.get_all_subordinates():
+                    return Response(
+                        {"detail": "You do not have permission to edit this customer's photo."},
+                        status=status.HTTP_403_FORBIDDEN
+                    )
+
+        # Handle DELETE: remove photo
+        if request.method == 'DELETE':
+            if customer.customer_photo:
+                try:
+                    if hasattr(customer.customer_photo, 'path') and os.path.isfile(customer.customer_photo.path):
+                        os.remove(customer.customer_photo.path)
+                except Exception:
+                    pass
+                customer.customer_photo = None
+                customer.save(update_fields=['customer_photo'])
+
+                AuditLog.objects.create(
+                    user=user,
+                    action="CUSTOMER_PHOTO_REMOVED",
+                    ip_address=get_client_ip(request),
+                    details={
+                        "customer_id": customer.id,
+                        "customer_code": customer.customer_code,
+                        "removed_by": user.username,
+                        "role": user.role
+                    }
+                )
+
+            return Response({
+                "success": True,
+                "message": "Customer photo removed successfully.",
+                "customer_id": customer.id,
+                "customer_photo": None
+            }, status=status.HTTP_200_OK)
+
+        # Handle POST/PUT/PATCH: upload or replace photo
+        new_photo = request.FILES.get('customer_photo') or request.FILES.get('photo') or request.FILES.get('image')
+        
+        # Support base64 image string in request.data if not sent as multipart file
+        if not new_photo and isinstance(request.data.get('customer_photo') or request.data.get('photo'), str):
+            raw_b64 = request.data.get('customer_photo') or request.data.get('photo')
+            import base64
+            from django.core.files.base import ContentFile
+            try:
+                format_ext = 'jpg'
+                if ';base64,' in raw_b64:
+                    header, b64_data = raw_b64.split(';base64,', 1)
+                    if 'png' in header:
+                        format_ext = 'png'
+                    elif 'webp' in header:
+                        format_ext = 'webp'
+                else:
+                    b64_data = raw_b64
+                decoded_file = base64.b64decode(b64_data)
+                filename = f"cust_{customer.id}_photo.{format_ext}"
+                new_photo = ContentFile(decoded_file, name=filename)
+            except Exception:
+                return Response(
+                    {"detail": "Invalid base64 image data provided."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+        if not new_photo:
+            return Response(
+                {"detail": "No photo file provided. Please send 'customer_photo' as multipart form-data or base64 string."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Validate file extension
+        valid_extensions = ['.jpg', '.jpeg', '.png', '.webp', '.bmp']
+        ext = os.path.splitext(new_photo.name)[1].lower() if new_photo.name else '.jpg'
+        content_type = getattr(new_photo, 'content_type', '') or ''
+        if ext not in valid_extensions and not content_type.startswith('image/'):
+            return Response(
+                {"detail": f"Invalid image format '{ext}'. Allowed formats: JPG, JPEG, PNG, WEBP, BMP."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Remove previous photo file from disk if present
+        old_photo = customer.customer_photo
+        if old_photo:
+            try:
+                if hasattr(old_photo, 'path') and os.path.isfile(old_photo.path):
+                    os.remove(old_photo.path)
+            except Exception:
+                pass
+
+        customer.customer_photo = new_photo
+        customer.save(update_fields=['customer_photo'])
+
+        AuditLog.objects.create(
+            user=user,
+            action="CUSTOMER_PHOTO_UPDATED",
+            ip_address=get_client_ip(request),
+            details={
+                "customer_id": customer.id,
+                "customer_code": customer.customer_code,
+                "customer_name": f"{customer.first_name} {customer.last_name}".strip(),
+                "photo_name": getattr(new_photo, 'name', 'updated_photo'),
+                "updated_by": user.username,
+                "updated_by_role": user.role
+            }
+        )
+
+        photo_url = request.build_absolute_uri(customer.customer_photo.url) if request else customer.customer_photo.url
+        sig_url = request.build_absolute_uri(customer.customer_signature.url) if customer.customer_signature and request else (customer.customer_signature.url if customer.customer_signature else None)
+
+        contract = getattr(customer, 'emi_contracts', None) and customer.emi_contracts.first()
+        agr_url = None
+        agr_pdf_url = None
+        if contract:
+            from django.urls import reverse
+            try:
+                base_agr = reverse('customeremicontract-agreement', kwargs={'pk': contract.pk})
+                base_pdf = reverse('customeremicontract-agreement-pdf', kwargs={'pk': contract.pk})
+                agr_url = request.build_absolute_uri(base_agr) if request else base_agr
+                agr_pdf_url = request.build_absolute_uri(base_pdf) if request else base_pdf
+            except Exception:
+                agr_url = f"/api/emi/contracts/{contract.pk}/agreement/"
+                agr_pdf_url = f"/api/emi/contracts/{contract.pk}/agreement-pdf/"
+
+        return Response({
+            "success": True,
+            "message": "Customer photo updated successfully.",
+            "customer_id": customer.id,
+            "customer_code": customer.customer_code,
+            "customer_name": f"{customer.first_name} {customer.last_name}".strip() or customer.username,
+            "customer_photo": photo_url,
+            "documents": {
+                "customer_photo": photo_url,
+                "customer_signature": sig_url,
+                "agreement_url": agr_url,
+                "agreement_pdf_url": agr_pdf_url
+            }
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post', 'put', 'patch', 'delete'], url_path='photo')
+    def photo(self, request, pk=None):
+        """Alias for edit-photo endpoint."""
+        return self.edit_photo(request, pk)
+
 def _find_user_by_identifier(identifier):
     """Resolve a user by username, email, or normalized mobile number."""
     raw = (identifier or '').strip()

@@ -1,429 +1,660 @@
 {
-	"info": {
-		"_postman_id": "7b8e5192-341a-4c91-9e20-8e5033c4f7a1",
-		"name": "Prime Locker - Agreement & DLT SMS API",
-		"description": "Postman collection for testing Prime Locker Pro DLT SMS dispatch, auto-generated single-page EMI collateral agreements (HTML, PDF, JSON), and contract lifecycle operations.",
-		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
-	},
-	"variable": [
-		{
-			"key": "base_url",
-			"value": "http://127.0.0.1:8000",
-			"type": "string"
-		},
-		{
-			"key": "access_token",
-			"value": "",
-			"type": "string"
-		},
-		{
-			"key": "contract_id",
-			"value": "1",
-			"type": "string"
-		},
-		{
-			"key": "installment_id",
-			"value": "1",
-			"type": "string"
-		},
-		{
-			"key": "mobile_number",
-			"value": "8867538192",
-			"type": "string"
-		},
-		{
-			"key": "otp_code",
-			"value": "112233",
-			"type": "string"
-		}
-	],
-	"item": [
-		{
-			"name": "1. Authentication & Live DLT SMS",
-			"item": [
-				{
-					"name": "1.1 Login (Obtain JWT Token)",
-					"event": [
-						{
-							"listen": "test",
-							"script": {
-								"exec": [
-									"var jsonData = pm.response.json();",
-									"if (jsonData.access) {",
-									"    pm.collectionVariables.set('access_token', jsonData.access);",
-									"    console.log('Access token set successfully');",
-									"}"
-								],
-								"type": "text/javascript"
-							}
-						}
-					],
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"username\": \"superadmin\",\n    \"password\": \"Admin@123\"\n}"
-						},
-						"url": {
-							"raw": "{{base_url}}/api/auth/login/",
-							"host": ["{{base_url}}"],
-							"path": ["api", "auth", "login", ""]
-						},
-						"description": "Authenticates user and auto-saves the JWT access token in the collection variable {{access_token}}."
-					},
-					"response": []
-				},
-				{
-					"name": "1.2 Request MPIN Reset OTP (Live Jio DLT SMS)",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"mobile_number\": \"{{mobile_number}}\"\n}"
-						},
-						"url": {
-							"raw": "{{base_url}}/api/auth/mpin/request-otp/",
-							"host": ["{{base_url}}"],
-							"path": ["api", "auth", "mpin", "request-otp", ""]
-						},
-						"description": "Dispatches live DLT OTP SMS via APITxT using Header PRLOCK, Template ID 1277179438043729654, Entity ID 1201179275669531017, and Telemarketer ID 1202162934973074727."
-					},
-					"response": []
-				},
-				{
-					"name": "1.3 Verify MPIN Reset OTP & Set New MPIN",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"mobile_number\": \"{{mobile_number}}\",\n    \"otp\": \"{{otp_code}}\",\n    \"new_mpin\": \"123456\",\n    \"confirm_mpin\": \"123456\"\n}"
-						},
-						"url": {
-							"raw": "{{base_url}}/api/auth/mpin/verify-otp/",
-							"host": ["{{base_url}}"],
-							"path": ["api", "auth", "mpin", "verify-otp", ""]
-						},
-						"description": "Verifies the 6-digit OTP received on mobile and updates user MPIN."
-					},
-					"response": []
-				},
-				{
-					"name": "1.4 Request Password Reset OTP (Live Jio DLT SMS)",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"identifier\": \"{{mobile_number}}\"\n}"
-						},
-						"url": {
-							"raw": "{{base_url}}/api/auth/password-reset/request-otp/",
-							"host": ["{{base_url}}"],
-							"path": ["api", "auth", "password-reset", "request-otp", ""]
-						},
-						"description": "Sends live password reset OTP SMS via Jio DLT PRLOCK route."
-					},
-					"response": []
-				}
-			]
-		},
-		{
-			"name": "2. EMI Loan Agreement (New Features)",
-			"item": [
-				{
-					"name": "2.1 View Agreement HTML (Webview / Print Preview)",
-					"request": {
-						"auth": {
-							"type": "bearer",
-							"bearer": [
-								{
-									"key": "token",
-									"value": "{{access_token}}",
-									"type": "string"
-								}
-							]
-						},
-						"method": "GET",
-						"header": [
-							{
-								"key": "Accept",
-								"value": "text/html"
-							}
-						],
-						"url": {
-							"raw": "{{base_url}}/api/emi-contracts/{{contract_id}}/agreement/",
-							"host": ["{{base_url}}"],
-							"path": ["api", "emi-contracts", "{{contract_id}}", "agreement", ""]
-						},
-						"description": "Returns responsive, table-free, 1-page A4 legal agreement HTML view. Features contracting parties, collateral IMEI, repayment terms, covenants, and sole borrower digital signature. Includes print button (window.print()) and PDF download link."
-					},
-					"response": []
-				},
-				{
-					"name": "2.2 Download Agreement PDF (Action Endpoint)",
-					"request": {
-						"auth": {
-							"type": "bearer",
-							"bearer": [
-								{
-									"key": "token",
-									"value": "{{access_token}}",
-									"type": "string"
-								}
-							]
-						},
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{base_url}}/api/emi-contracts/{{contract_id}}/agreement-pdf/",
-							"host": ["{{base_url}}"],
-							"path": ["api", "emi-contracts", "{{contract_id}}", "agreement-pdf", ""]
-						},
-						"description": "Directly streams and downloads a 1-page A4 legal agreement PDF binary generated via ReportLab (Content-Type: application/pdf)."
-					},
-					"response": []
-				},
-				{
-					"name": "2.3 Download Agreement PDF (Query Param ?download=pdf)",
-					"request": {
-						"auth": {
-							"type": "bearer",
-							"bearer": [
-								{
-									"key": "token",
-									"value": "{{access_token}}",
-									"type": "string"
-								}
-							]
-						},
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{base_url}}/api/emi-contracts/{{contract_id}}/agreement/?download=pdf",
-							"host": ["{{base_url}}"],
-							"path": ["api", "emi-contracts", "{{contract_id}}", "agreement", ""],
-							"query": [
-								{
-									"key": "download",
-									"value": "pdf"
-								}
-							]
-						},
-						"description": "Downloads the compiled 1-page A4 PDF binary using the ?download=pdf query parameter on the base agreement URL."
-					},
-					"response": []
-				},
-				{
-					"name": "2.4 Get Agreement Raw JSON Data (?format=json)",
-					"request": {
-						"auth": {
-							"type": "bearer",
-							"bearer": [
-								{
-									"key": "token",
-									"value": "{{access_token}}",
-									"type": "string"
-								}
-							]
-						},
-						"method": "GET",
-						"header": [
-							{
-								"key": "Accept",
-								"value": "application/json"
-							}
-						],
-						"url": {
-							"raw": "{{base_url}}/api/emi-contracts/{{contract_id}}/agreement/?format=json",
-							"host": ["{{base_url}}"],
-							"path": ["api", "emi-contracts", "{{contract_id}}", "agreement", ""],
-							"query": [
-								{
-									"key": "format",
-									"value": "json"
-								}
-							]
-						},
-						"description": "Returns structured JSON data payload of the agreement: agreement_number, status, retailer, customer (including signature_url), financed_product, collateral_device, and financial_terms."
-					},
-					"response": []
-				},
-				{
-					"name": "2.5 List EMI Contracts (Includes agreement_url)",
-					"request": {
-						"auth": {
-							"type": "bearer",
-							"bearer": [
-								{
-									"key": "token",
-									"value": "{{access_token}}",
-									"type": "string"
-								}
-							]
-						},
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{base_url}}/api/emi-contracts/",
-							"host": ["{{base_url}}"],
-							"path": ["api", "emi-contracts", ""]
-						},
-						"description": "Lists all EMI contracts accessible to the logged in user. Each record exposes agreement_url in addition to mandate_auth_url."
-					},
-					"response": []
-				},
-				{
-					"name": "2.6 Get EMI Contract Details",
-					"request": {
-						"auth": {
-							"type": "bearer",
-							"bearer": [
-								{
-									"key": "token",
-									"value": "{{access_token}}",
-									"type": "string"
-								}
-							]
-						},
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{base_url}}/api/emi-contracts/{{contract_id}}/",
-							"host": ["{{base_url}}"],
-							"path": ["api", "emi-contracts", "{{contract_id}}", ""]
-						},
-						"description": "Retrieves contract record by ID, showing customer details, installments breakdown, mandate status, and agreement_url."
-					},
-					"response": []
-				}
-			]
-		},
-		{
-			"name": "3. Device Locking & Payment Operations",
-			"item": [
-				{
-					"name": "3.1 Manual Device Lock",
-					"request": {
-						"auth": {
-							"type": "bearer",
-							"bearer": [
-								{
-									"key": "token",
-									"value": "{{access_token}}",
-									"type": "string"
-								}
-							]
-						},
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"reason\": \"Manual lock due to overdue payment\"\n}"
-						},
-						"url": {
-							"raw": "{{base_url}}/api/emi-contracts/{{contract_id}}/lock/",
-							"host": ["{{base_url}}"],
-							"path": ["api", "emi-contracts", "{{contract_id}}", "lock", ""]
-						},
-						"description": "Manually triggers a device lock command on the contract's collateral handset (accessible by Retailer / Staff / Admin)."
-					},
-					"response": []
-				},
-				{
-					"name": "3.2 Manual Device Unlock",
-					"request": {
-						"auth": {
-							"type": "bearer",
-							"bearer": [
-								{
-									"key": "token",
-									"value": "{{access_token}}",
-									"type": "string"
-								}
-							]
-						},
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"reason\": \"Payment received in store cash\"\n}"
-						},
-						"url": {
-							"raw": "{{base_url}}/api/emi-contracts/{{contract_id}}/unlock/",
-							"host": ["{{base_url}}"],
-							"path": ["api", "emi-contracts", "{{contract_id}}", "unlock", ""]
-						},
-						"description": "Manually triggers a device unlock command and restores active status."
-					},
-					"response": []
-				},
-				{
-					"name": "3.3 Record Installment Payment (Cash / UPI)",
-					"request": {
-						"auth": {
-							"type": "bearer",
-							"bearer": [
-								{
-									"key": "token",
-									"value": "{{access_token}}",
-									"type": "string"
-								}
-							]
-						},
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"amount_paid\": \"1500.00\",\n    \"payment_mode\": \"CASH\",\n    \"transaction_reference\": \"TXN_CASH_1001\",\n    \"notes\": \"Payment recorded at retail counter\"\n}"
-						},
-						"url": {
-							"raw": "{{base_url}}/api/emi-installments/{{installment_id}}/record-payment/",
-							"host": ["{{base_url}}"],
-							"path": ["api", "emi-installments", "{{installment_id}}", "record-payment", ""]
-						},
-						"description": "Records an installment payment, updates status to PAID, and automatically unlocks the device if overdue."
-					},
-					"response": []
-				}
-			]
-		}
-	]
+  "info": {
+    "_postman_id": "7b8e5192-341a-4c91-9e20-8e5033c4f7a1",
+    "name": "Prime Locker - Agreement & DLT SMS API",
+    "description": "Postman collection for testing Prime Locker Pro DLT SMS dispatch, auto-generated single-page EMI collateral agreements (HTML, PDF, JSON), and contract lifecycle operations.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://127.0.0.1:8000",
+      "type": "string"
+    },
+    {
+      "key": "access_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "contract_id",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "installment_id",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "mobile_number",
+      "value": "8867538192",
+      "type": "string"
+    },
+    {
+      "key": "otp_code",
+      "value": "112233",
+      "type": "string"
+    },
+    {
+      "key": "customer_id",
+      "value": "1",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Authentication & Live DLT SMS",
+      "item": [
+        {
+          "name": "1.1 Login (Obtain JWT Token)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "if (jsonData.access) {",
+                  "    pm.collectionVariables.set('access_token', jsonData.access);",
+                  "    console.log('Access token set successfully');",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"username\": \"superadmin\",\n    \"password\": \"Admin@123\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/auth/login/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login",
+                ""
+              ]
+            },
+            "description": "Authenticates user and auto-saves the JWT access token in the collection variable {{access_token}}."
+          },
+          "response": []
+        },
+        {
+          "name": "1.2 Request MPIN Reset OTP (Live Jio DLT SMS)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"mobile_number\": \"{{mobile_number}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/auth/mpin/request-otp/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "mpin",
+                "request-otp",
+                ""
+              ]
+            },
+            "description": "Dispatches live DLT OTP SMS via APITxT using Header PRLOCK, Template ID 1277179438043729654, Entity ID 1201179275669531017, and Telemarketer ID 1202162934973074727."
+          },
+          "response": []
+        },
+        {
+          "name": "1.3 Verify MPIN Reset OTP & Set New MPIN",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"mobile_number\": \"{{mobile_number}}\",\n    \"otp\": \"{{otp_code}}\",\n    \"new_mpin\": \"123456\",\n    \"confirm_mpin\": \"123456\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/auth/mpin/verify-otp/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "mpin",
+                "verify-otp",
+                ""
+              ]
+            },
+            "description": "Verifies the 6-digit OTP received on mobile and updates user MPIN."
+          },
+          "response": []
+        },
+        {
+          "name": "1.4 Request Password Reset OTP (Live Jio DLT SMS)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"identifier\": \"{{mobile_number}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/auth/password-reset/request-otp/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "password-reset",
+                "request-otp",
+                ""
+              ]
+            },
+            "description": "Sends live password reset OTP SMS via Jio DLT PRLOCK route."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "2. EMI Loan Agreement (New Features)",
+      "item": [
+        {
+          "name": "2.1 View Agreement HTML (Webview / Print Preview)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "text/html"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/emi-contracts/{{contract_id}}/agreement/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "emi-contracts",
+                "{{contract_id}}",
+                "agreement",
+                ""
+              ]
+            },
+            "description": "Returns responsive, table-free, 1-page A4 legal agreement HTML view. Features contracting parties, collateral IMEI, repayment terms, covenants, and sole borrower digital signature. Includes print button (window.print()) and PDF download link."
+          },
+          "response": []
+        },
+        {
+          "name": "2.2 Download Agreement PDF (Action Endpoint)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/emi-contracts/{{contract_id}}/agreement-pdf/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "emi-contracts",
+                "{{contract_id}}",
+                "agreement-pdf",
+                ""
+              ]
+            },
+            "description": "Directly streams and downloads a 1-page A4 legal agreement PDF binary generated via ReportLab (Content-Type: application/pdf)."
+          },
+          "response": []
+        },
+        {
+          "name": "2.3 Download Agreement PDF (Query Param ?download=pdf)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/emi-contracts/{{contract_id}}/agreement/?download=pdf",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "emi-contracts",
+                "{{contract_id}}",
+                "agreement",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "download",
+                  "value": "pdf"
+                }
+              ]
+            },
+            "description": "Downloads the compiled 1-page A4 PDF binary using the ?download=pdf query parameter on the base agreement URL."
+          },
+          "response": []
+        },
+        {
+          "name": "2.4 Get Agreement Raw JSON Data (?format=json)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/emi-contracts/{{contract_id}}/agreement/?format=json",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "emi-contracts",
+                "{{contract_id}}",
+                "agreement",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "format",
+                  "value": "json"
+                }
+              ]
+            },
+            "description": "Returns structured JSON data payload of the agreement: agreement_number, status, retailer, customer (including signature_url), financed_product, collateral_device, and financial_terms."
+          },
+          "response": []
+        },
+        {
+          "name": "2.5 List EMI Contracts (Includes agreement_url)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/emi-contracts/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "emi-contracts",
+                ""
+              ]
+            },
+            "description": "Lists all EMI contracts accessible to the logged in user. Each record exposes agreement_url in addition to mandate_auth_url."
+          },
+          "response": []
+        },
+        {
+          "name": "2.6 Get EMI Contract Details",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/emi-contracts/{{contract_id}}/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "emi-contracts",
+                "{{contract_id}}",
+                ""
+              ]
+            },
+            "description": "Retrieves contract record by ID, showing customer details, installments breakdown, mandate status, and agreement_url."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "3. Device Locking & Payment Operations",
+      "item": [
+        {
+          "name": "3.1 Manual Device Lock",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"reason\": \"Manual lock due to overdue payment\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/emi-contracts/{{contract_id}}/lock/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "emi-contracts",
+                "{{contract_id}}",
+                "lock",
+                ""
+              ]
+            },
+            "description": "Manually triggers a device lock command on the contract's collateral handset (accessible by Retailer / Staff / Admin)."
+          },
+          "response": []
+        },
+        {
+          "name": "3.2 Manual Device Unlock",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"reason\": \"Payment received in store cash\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/emi-contracts/{{contract_id}}/unlock/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "emi-contracts",
+                "{{contract_id}}",
+                "unlock",
+                ""
+              ]
+            },
+            "description": "Manually triggers a device unlock command and restores active status."
+          },
+          "response": []
+        },
+        {
+          "name": "3.3 Record Installment Payment (Cash / UPI)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"amount_paid\": \"1500.00\",\n    \"payment_mode\": \"CASH\",\n    \"transaction_reference\": \"TXN_CASH_1001\",\n    \"notes\": \"Payment recorded at retail counter\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/emi-installments/{{installment_id}}/record-payment/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "emi-installments",
+                "{{installment_id}}",
+                "record-payment",
+                ""
+              ]
+            },
+            "description": "Records an installment payment, updates status to PAID, and automatically unlocks the device if overdue."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "4. Customer Documents & Photo Edit (Admin)",
+      "item": [
+        {
+          "name": "4.1 Edit Customer Photo (Multipart File Upload)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "customer_photo",
+                  "type": "file",
+                  "description": "Select new customer selfie/photo file (JPG, PNG, WEBP)"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/customers/{{customer_id}}/edit-photo/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "customers",
+                "{{customer_id}}",
+                "edit-photo",
+                ""
+              ]
+            },
+            "description": "Super Admin or authorized manager uploads or replaces customer KYC photo. Permitted at any time, even after device activation."
+          }
+        },
+        {
+          "name": "4.2 Edit Customer Photo (Base64 JSON)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_photo\": \"data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD...\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/customers/{{customer_id}}/edit-photo/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "customers",
+                "{{customer_id}}",
+                "edit-photo",
+                ""
+              ]
+            },
+            "description": "Alternative photo upload endpoint accepting base64 encoded image string directly from mobile apps."
+          }
+        },
+        {
+          "name": "4.3 Delete Customer Photo (Clear KYC Photo)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/customers/{{customer_id}}/edit-photo/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "customers",
+                "{{customer_id}}",
+                "edit-photo",
+                ""
+              ]
+            },
+            "description": "Removes customer photo file from storage and sets customer_photo to null."
+          }
+        },
+        {
+          "name": "4.4 View Customer Profile & Documents Trio (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/customers/{{customer_id}}/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "customers",
+                "{{customer_id}}",
+                ""
+              ]
+            },
+            "description": "Fetches customer details including the documents block with direct links to photo, digital signature, and auto-generated EMI agreement."
+          }
+        }
+      ]
+    }
+  ]
 }

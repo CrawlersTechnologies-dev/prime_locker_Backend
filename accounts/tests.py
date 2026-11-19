@@ -1324,3 +1324,166 @@ class BannerTests(TestCase):
         self.assertEqual(patch_resp.status_code, status.HTTP_403_FORBIDDEN)
 
 
+class CustomerPhotoEditTests(TestCase):
+    def setUp(self):
+        from accounts.models import User, AuditLog
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        self.super_admin = User.objects.create_user(
+            username='admin_photo_test',
+            email='admin_photo@primelocker.pro',
+            password='AdminPassword@123',
+            role='SUPER_ADMIN',
+            mobile_number='+919811111111'
+        )
+        self.retailer = User.objects.create_user(
+            username='retailer_photo_test',
+            email='retailer_photo@primelocker.pro',
+            password='RetailerPassword@123',
+            role='RETAILER',
+            mobile_number='+919822222222'
+        )
+        self.other_customer = User.objects.create_user(
+            username='other_cust',
+            email='other_cust@primelocker.pro',
+            password='CustPassword@123',
+            role='CUSTOMER',
+            mobile_number='+919833333333'
+        )
+        self.customer = User.objects.create_user(
+            username='cust_target',
+            email='cust_target@primelocker.pro',
+            password='TargetPassword@123',
+            role='CUSTOMER',
+            parent=self.retailer,
+            first_name='Ramesh',
+            last_name='Kumar',
+            mobile_number='+919844444444'
+        )
+
+    def _client_for(self, user):
+        from rest_framework.test import APIClient
+        client = APIClient()
+        client.force_authenticate(user=user)
+        return client
+
+    def test_admin_can_edit_customer_photo_via_edit_photo_action(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from accounts.models import AuditLog
+        admin_client = self._client_for(self.super_admin)
+        new_img = SimpleUploadedFile('new_face.jpg', b'\xff\xd8\xff\xe0test_jpeg_data', content_type='image/jpeg')
+
+        resp = admin_client.post(
+            f'/api/customers/{self.customer.id}/edit-photo/',
+            {'customer_photo': new_img},
+            format='multipart'
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertTrue(resp.data['success'])
+        self.assertIn('customer_photo', resp.data)
+        self.assertIn('new_face', resp.data['customer_photo'])
+        self.assertIn('documents', resp.data)
+
+        self.customer.refresh_from_db()
+        self.assertTrue(bool(self.customer.customer_photo))
+
+        # Check AuditLog
+        log = AuditLog.objects.filter(user=self.super_admin, action='CUSTOMER_PHOTO_UPDATED').first()
+        self.assertIsNotNone(log)
+        self.assertEqual(log.details['customer_id'], self.customer.id)
+
+    def test_admin_can_update_photo_via_base64_string(self):
+        import base64
+        admin_client = self._client_for(self.super_admin)
+        raw_bytes = b'fake_png_binary_image_data'
+        b64_str = f"data:image/png;base64,{base64.b64encode(raw_bytes).decode('ascii')}"
+
+        resp = admin_client.post(
+            f'/api/customers/{self.customer.id}/edit-photo/',
+            {'customer_photo': b64_str},
+            format='json'
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertTrue(resp.data['success'])
+        self.customer.refresh_from_db()
+        self.assertTrue(bool(self.customer.customer_photo))
+
+    def test_admin_can_delete_customer_photo(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from accounts.models import AuditLog
+        self.customer.customer_photo = SimpleUploadedFile('to_del.jpg', b'data', content_type='image/jpeg')
+        self.customer.save()
+
+        admin_client = self._client_for(self.super_admin)
+        resp = admin_client.delete(f'/api/customers/{self.customer.id}/edit-photo/')
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertTrue(resp.data['success'])
+
+        self.customer.refresh_from_db()
+        self.assertFalse(bool(self.customer.customer_photo))
+
+        log = AuditLog.objects.filter(user=self.super_admin, action='CUSTOMER_PHOTO_REMOVED').first()
+        self.assertIsNotNone(log)
+
+    def test_customer_detail_and_patch_returns_documents_block(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        self.customer.customer_photo = SimpleUploadedFile('cust.jpg', b'img_bytes', content_type='image/jpeg')
+        self.customer.customer_signature = SimpleUploadedFile('sig.png', b'sig_bytes', content_type='image/png')
+        self.customer.save()
+
+        admin_client = self._client_for(self.super_admin)
+        resp = admin_client.get(f'/api/customers/{self.customer.id}/')
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertIn('documents', resp.data)
+        docs = resp.data['documents']
+        self.assertIn('customer_photos', docs['customer_photo'])
+        self.assertIn('customer_signatures', docs['customer_signature'])
+
+    def test_retailer_blocked_from_editing_photo_after_activation_but_admin_allowed(self):
+        from devices.models import Device, DeviceCategory, OSType, DeviceLockStatus
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        device = Device.objects.create(
+            customer=self.customer,
+            retailer=self.retailer,
+            device_category=DeviceCategory.MOBILE,
+            os_type=OSType.ANDROID,
+            imei='867530900000001',
+            status=DeviceLockStatus.ACTIVE,
+            is_activated=True
+        )
+
+        ret_client = self._client_for(self.retailer)
+        img1 = SimpleUploadedFile('ret_try.jpg', b'ret_bytes', content_type='image/jpeg')
+        resp_ret = ret_client.post(
+            f'/api/customers/{self.customer.id}/edit-photo/',
+            {'customer_photo': img1},
+            format='multipart'
+        )
+        self.assertEqual(resp_ret.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('cannot be modified once the device is activated', resp_ret.data['detail'])
+
+        # Admin CAN edit even when device is activated
+        admin_client = self._client_for(self.super_admin)
+        img2 = SimpleUploadedFile('admin_override.jpg', b'admin_bytes', content_type='image/jpeg')
+        resp_admin = admin_client.post(
+            f'/api/customers/{self.customer.id}/edit-photo/',
+            {'customer_photo': img2},
+            format='multipart'
+        )
+        self.assertEqual(resp_admin.status_code, status.HTTP_200_OK)
+        self.customer.refresh_from_db()
+        self.assertIn('admin_override', self.customer.customer_photo.name)
+
+    def test_unauthorized_customer_cannot_edit_other_customer_photo(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        other_client = self._client_for(self.other_customer)
+        img = SimpleUploadedFile('hack.jpg', b'data', content_type='image/jpeg')
+        resp = other_client.post(
+            f'/api/customers/{self.customer.id}/edit-photo/',
+            {'customer_photo': img},
+            format='multipart'
+        )
+        self.assertIn(resp.status_code, [status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND])
+
+
+

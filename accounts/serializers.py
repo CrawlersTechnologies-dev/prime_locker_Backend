@@ -388,9 +388,10 @@ class CustomerSerializer(serializers.ModelSerializer):
     last_name = serializers.CharField(required=False, allow_blank=True)
     name = serializers.SerializerMethodField(read_only=True)
     masked_id_number = serializers.SerializerMethodField(read_only=True)
-    password = serializers.CharField(write_only=True, required=True, style={'input_type': 'password'})
+    password = serializers.CharField(write_only=True, required=False, allow_blank=True, style={'input_type': 'password'})
     device_summary = serializers.SerializerMethodField(read_only=True)
     contract_summary = serializers.SerializerMethodField(read_only=True)
+    documents = serializers.SerializerMethodField(read_only=True)
     emi_status = serializers.SerializerMethodField(read_only=True)
     status = serializers.SerializerMethodField(read_only=True)
     customer_status = serializers.SerializerMethodField(read_only=True)
@@ -406,12 +407,12 @@ class CustomerSerializer(serializers.ModelSerializer):
             'id_type', 'id_number', 'masked_id_number', 'id_front_image', 'id_back_image',
             'signed_emi_agreement_flag', 'draft_status',
             'password', 'parent', 'role', 'is_active', 'date_joined',
-            'device_summary', 'contract_summary', 'emi_status',
+            'device_summary', 'contract_summary', 'documents', 'emi_status',
             'status', 'customer_status', 'can_edit', 'is_device_activated'
         ]
         read_only_fields = [
             'id', 'customer_code', 'date_joined', 'role', 'parent', 'is_active', 'masked_id_number',
-            'device_summary', 'contract_summary', 'emi_status',
+            'device_summary', 'contract_summary', 'documents', 'emi_status',
             'status', 'customer_status', 'can_edit', 'is_device_activated'
         ]
 
@@ -502,6 +503,18 @@ class CustomerSerializer(serializers.ModelSerializer):
         next_inst = contract.installments.filter(
             status__in=[InstallmentStatus.UPCOMING, InstallmentStatus.DUE]
         ).order_by('due_date').first()
+        
+        request = self.context.get('request')
+        from django.urls import reverse
+        try:
+            agr_path = reverse('customeremicontract-agreement', kwargs={'pk': contract.pk})
+            agr_pdf_path = reverse('customeremicontract-agreement-pdf', kwargs={'pk': contract.pk})
+            agr_url = request.build_absolute_uri(agr_path) if request else agr_path
+            agr_pdf_url = request.build_absolute_uri(agr_pdf_path) if request else agr_pdf_path
+        except Exception:
+            agr_url = f"/api/emi/contracts/{contract.pk}/agreement/"
+            agr_pdf_url = f"/api/emi/contracts/{contract.pk}/agreement-pdf/"
+
         return {
             "id": contract.id,
             "status": contract.status,
@@ -509,7 +522,35 @@ class CustomerSerializer(serializers.ModelSerializer):
             "paid_amount": str(contract.total_paid),
             "remaining_amount": str(contract.total_remaining),
             "overdue_count": overdue_count,
-            "next_due_date": next_inst.due_date if next_inst else None
+            "next_due_date": next_inst.due_date if next_inst else None,
+            "agreement_url": agr_url,
+            "agreement_pdf_url": agr_pdf_url
+        }
+
+    def get_documents(self, obj):
+        request = self.context.get('request')
+        photo_url = request.build_absolute_uri(obj.customer_photo.url) if obj.customer_photo and request else (obj.customer_photo.url if obj.customer_photo else None)
+        sig_url = request.build_absolute_uri(obj.customer_signature.url) if obj.customer_signature and request else (obj.customer_signature.url if obj.customer_signature else None)
+        
+        contract = getattr(obj, 'emi_contracts', None) and obj.emi_contracts.first()
+        agr_url = None
+        agr_pdf_url = None
+        if contract:
+            from django.urls import reverse
+            try:
+                agr_path = reverse('customeremicontract-agreement', kwargs={'pk': contract.pk})
+                agr_pdf_path = reverse('customeremicontract-agreement-pdf', kwargs={'pk': contract.pk})
+                agr_url = request.build_absolute_uri(agr_path) if request else agr_path
+                agr_pdf_url = request.build_absolute_uri(agr_pdf_path) if request else agr_pdf_path
+            except Exception:
+                agr_url = f"/api/emi/contracts/{contract.pk}/agreement/"
+                agr_pdf_url = f"/api/emi/contracts/{contract.pk}/agreement-pdf/"
+
+        return {
+            "customer_photo": photo_url,
+            "customer_signature": sig_url,
+            "agreement_url": agr_url,
+            "agreement_pdf_url": agr_pdf_url
         }
 
     def get_emi_status(self, obj):
@@ -561,7 +602,7 @@ class CustomerSerializer(serializers.ModelSerializer):
         return representation
 
     def create(self, validated_data):
-        password = validated_data.pop('password')
+        password = validated_data.pop('password', None)
         full_name = validated_data.pop('full_name', None)
         
         if full_name:
@@ -576,10 +617,25 @@ class CustomerSerializer(serializers.ModelSerializer):
         if 'is_active' not in self.initial_data:
             validated_data['is_active'] = True
 
+        if not password:
+            mob = str(validated_data.get('mobile_number') or '').strip()
+            password = f"PL@{mob[-4:]}" if len(mob) >= 4 else "PL@1234"
+
         user = User(**validated_data)
         user.set_password(password)
         user.save()
         return user
+
+    def update(self, instance, validated_data):
+        password = validated_data.pop('password', None)
+        full_name = validated_data.pop('full_name', None)
+        if full_name:
+            name_parts = full_name.split(' ', 1)
+            instance.first_name = name_parts[0]
+            instance.last_name = name_parts[1] if len(name_parts) > 1 else ''
+        if password:
+            instance.set_password(password)
+        return super().update(instance, validated_data)
 
 def extract_login_identifier(attrs):
     identifier = (attrs.get('mobile_number') or attrs.get('username') or '').strip()
