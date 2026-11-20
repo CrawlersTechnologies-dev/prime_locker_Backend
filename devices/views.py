@@ -211,6 +211,16 @@ class DeviceViewSet(viewsets.ModelViewSet):
         elif device.lock_provider == LockProvider.PARTNER_MDM:
             from .services.partner_mdm_service import PartnerMDMService
             PartnerMDMService.lock_device(device=device, reason=reason or "Remote lock from dashboard", user=request.user)
+        elif device.lock_provider == LockProvider.APPLE_MDM or device.os_type == OSType.IOS:
+            from .services.apple_mdm import AppleMDMService
+            phone = getattr(device.retailer, 'mobile_number', '') if device.retailer else ''
+            AppleMDMService.take_action(
+                device_reg_num=device.provider_device_id or device.serial_number or device.imei,
+                action="LOCK",
+                message=reason or device.lock_message or "Payment overdue. Please contact admin.",
+                phone_number=phone,
+                foot_note="Prime Locker Protection"
+            )
 
         # In-app notifications (M9)
         from accounts.views import send_system_notification
@@ -263,6 +273,12 @@ class DeviceViewSet(viewsets.ModelViewSet):
         elif device.lock_provider == LockProvider.PARTNER_MDM:
             from .services.partner_mdm_service import PartnerMDMService
             PartnerMDMService.unlock_device(device=device, reason=reason or "Remote unlock from dashboard", user=request.user)
+        elif device.lock_provider == LockProvider.APPLE_MDM or device.os_type == OSType.IOS:
+            from .services.apple_mdm import AppleMDMService
+            AppleMDMService.take_action(
+                device_reg_num=device.provider_device_id or device.serial_number or device.imei,
+                action="UNLOCK"
+            )
 
         # In-app notifications (M9)
         from accounts.views import send_system_notification
@@ -384,6 +400,11 @@ class DeviceViewSet(viewsets.ModelViewSet):
         elif device.lock_provider == LockProvider.ROCKETPAY:
             from .services.rocketpay_service import RocketPayService
             RocketPayService.unregister_key(device=device, user=request.user)
+        elif device.lock_provider == LockProvider.APPLE_MDM or device.os_type == OSType.IOS:
+            from .services.apple_mdm import AppleMDMService
+            AppleMDMService.uninstall_device(
+                device_reg_num=device.provider_device_id or device.serial_number or device.imei
+            )
 
         device.status = DeviceLockStatus.UNENROLLED
         device.provider_status = 'UNREGISTERED'
@@ -842,6 +863,11 @@ class DeviceViewSet(viewsets.ModelViewSet):
         elif device.lock_provider == LockProvider.PARTNER_MDM:
             from .services.partner_mdm_service import PartnerMDMService
             PartnerMDMService.refresh_location(device, user=request.user)
+        elif device.lock_provider == LockProvider.APPLE_MDM or device.os_type == OSType.IOS:
+            from .services.apple_mdm import AppleMDMService
+            AppleMDMService.get_location(
+                device_reg_num=device.provider_device_id or device.serial_number or device.imei
+            )
 
         self._create_command(device, CommandType.SYNC_LOCATION)
         return Response({"message": f"Live GPS location refresh command dispatched to device {device.imei}."})
@@ -1387,6 +1413,251 @@ class DeviceViewSet(viewsets.ModelViewSet):
             "provider_error": device.provider_error
         }, status=status.HTTP_400_BAD_REQUEST)
 
+    # =========================================================================
+    # Apple MDM / Supervised DEP Suite (Loksiz v1.4)
+    # =========================================================================
+
+    @action(detail=False, methods=['get'], url_path='apple-mdm/health')
+    def apple_mdm_health(self, request):
+        """GET /api/devices/apple-mdm/health/ - Verify Apple MDM Gateway connectivity."""
+        from .services.apple_mdm import AppleMDMService
+        res = AppleMDMService.health_check()
+        return Response(res, status=status.HTTP_200_OK if res.get('error') == 0 else status.HTTP_502_BAD_GATEWAY)
+
+    @action(detail=False, methods=['post'], url_path='apple-mdm/validate')
+    def validate_apple_device(self, request):
+        """
+        POST /api/devices/apple-mdm/validate/
+        Mandatory pre-check to validate iPhone eligibility with Apple MDM before enrollment.
+        Checks IMEI, Serial Number, and partner IOS key wallet balance.
+        """
+        denied = self._block_customer(request)
+        if denied:
+            return denied
+
+        imei = request.data.get('imei')
+        serial_number = request.data.get('serial_number') or request.data.get('serialNumber')
+        imei2 = request.data.get('imei2')
+
+        if not imei or not serial_number:
+            return Response(
+                {"error": 1, "msg": "Both 'imei' (15 digits) and 'serial_number' are required for Apple MDM validation."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        from .services.apple_mdm import AppleMDMService
+        res = AppleMDMService.validate_device(imei=imei, serial_number=serial_number, imei2=imei2)
+        http_code = status.HTTP_200_OK if res.get('error') == 0 else status.HTTP_400_BAD_REQUEST
+        return Response(res, status=http_code)
+
+    @action(detail=False, methods=['post'], url_path='apple-mdm/enroll')
+    def enroll_apple_device(self, request):
+        """
+        POST /api/devices/apple-mdm/enroll/
+        Enrolls an iPhone into Apple MDM via Loksiz v1.4.
+        Generates deviceRegNum and updates or creates the local Device record.
+        """
+        denied = self._block_customer(request)
+        if denied:
+            return denied
+
+        imei = request.data.get('imei')
+        serial_number = request.data.get('serial_number') or request.data.get('serialNumber')
+        customer_name = request.data.get('customer_name') or request.data.get('customerName', '')
+        customer_mobile = request.data.get('customer_mobile') or request.data.get('customerMobile', '')
+        customer_email = request.data.get('customer_email') or request.data.get('customerEmail', '')
+        imei2 = request.data.get('imei2')
+        device_id = request.data.get('device_id')
+
+        if not imei or not serial_number:
+            return Response(
+                {"error": 1, "msg": "Both 'imei' and 'serial_number' are required to enroll an iPhone."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        from .services.apple_mdm import AppleMDMService
+        res = AppleMDMService.add_device(
+            imei=imei,
+            serial_number=serial_number,
+            customer_name=customer_name,
+            customer_mobile=customer_mobile,
+            customer_email=customer_email,
+            imei2=imei2
+        )
+
+        if res.get('error') != 0:
+            return Response(res, status=status.HTTP_400_BAD_REQUEST)
+
+        device_reg_num = (res.get('data') or {}).get('deviceRegNum') or ''
+
+        # Locate or associate local Device record
+        device = None
+        if device_id:
+            device = Device.objects.filter(id=device_id).first()
+        if not device:
+            device = Device.objects.filter(imei=imei).first()
+
+        if device:
+            device.provider_device_id = device_reg_num or device.provider_device_id
+            device.lock_provider = LockProvider.APPLE_MDM
+            device.os_type = OSType.IOS
+            device.serial_number = serial_number
+            if imei2:
+                device.secondary_imei = imei2
+            device.save(update_fields=['provider_device_id', 'lock_provider', 'os_type', 'serial_number', 'secondary_imei'])
+
+        return Response(res, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['get', 'post'], url_path='apple-mdm/devices')
+    def apple_mdm_devices(self, request):
+        """
+        GET/POST /api/devices/apple-mdm/devices/
+        Fetches all registered Apple MDM devices and dashboard stats directly from Loksiz.
+        """
+        denied = self._block_customer(request)
+        if denied:
+            return denied
+
+        page = request.data.get('page') or request.query_params.get('page', 1)
+        limit = request.data.get('limit') or request.query_params.get('limit', 10)
+        filter_status = request.data.get('filter') or request.query_params.get('filter')
+        search = request.data.get('search') or request.query_params.get('search')
+
+        from .services.apple_mdm import AppleMDMService
+        res = AppleMDMService.get_devices(
+            page=page,
+            limit=limit,
+            filter_status=filter_status,
+            search=search
+        )
+        return Response(res, status=status.HTTP_200_OK if res.get('error') == 0 else status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['post'], url_path='apple-action')
+    def apple_action(self, request, pk=None):
+        """
+        POST /api/devices/{id}/apple-action/
+        Executes custom LOCK or UNLOCK on an Apple MDM device.
+        Parameters: action (LOCK/UNLOCK), message, phone_number, foot_note
+        """
+        denied = self._block_customer(request)
+        if denied:
+            return denied
+
+        device = self.get_object()
+        action_name = request.data.get('action', 'LOCK').upper()
+        message = request.data.get('message')
+        phone_number = request.data.get('phone_number') or request.data.get('phoneNumber') or getattr(device.retailer, 'mobile_number', '')
+        foot_note = request.data.get('foot_note') or request.data.get('footNote') or "Prime Locker MDM Protection"
+
+        device_reg = device.provider_device_id or device.serial_number or device.imei
+
+        from .services.apple_mdm import AppleMDMService
+        res = AppleMDMService.take_action(
+            device_reg_num=device_reg,
+            action=action_name,
+            message=message,
+            phone_number=phone_number,
+            foot_note=foot_note
+        )
+
+        if action_name == 'LOCK':
+            device.status = DeviceLockStatus.LOCKED
+        elif action_name == 'UNLOCK':
+            device.status = DeviceLockStatus.ACTIVE
+        device.save(update_fields=['status'])
+
+        return Response(res, status=status.HTTP_200_OK if res.get('error') == 0 else status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['post'], url_path='apple-app-lock')
+    def apple_app_lock(self, request, pk=None):
+        """POST /api/devices/{id}/apple-app-lock/ - Enforces Single-App / Kiosk Mode."""
+        denied = self._block_customer(request)
+        if denied:
+            return denied
+        device = self.get_object()
+        device_reg = device.provider_device_id or device.serial_number or device.imei
+
+        from .services.apple_mdm import AppleMDMService
+        res = AppleMDMService.application_lock(device_reg_num=device_reg)
+        return Response(res, status=status.HTTP_200_OK if res.get('error') == 0 else status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['post'], url_path='apple-app-unlock')
+    def apple_app_unlock(self, request, pk=None):
+        """POST /api/devices/{id}/apple-app-unlock/ - Removes Single-App / Kiosk Mode restriction."""
+        denied = self._block_customer(request)
+        if denied:
+            return denied
+        device = self.get_object()
+        device_reg = device.provider_device_id or device.serial_number or device.imei
+
+        from .services.apple_mdm import AppleMDMService
+        res = AppleMDMService.application_unlock(device_reg_num=device_reg)
+        return Response(res, status=status.HTTP_200_OK if res.get('error') == 0 else status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['post'], url_path='apple-activation-lock')
+    def apple_activation_lock(self, request, pk=None):
+        """
+        POST /api/devices/{id}/apple-activation-lock/
+        action: 1 = Enable Supervised Activation Lock, 0 = Disable
+        """
+        denied = self._block_customer(request)
+        if denied:
+            return denied
+        device = self.get_object()
+        device_reg = device.provider_device_id or device.serial_number or device.imei
+        act = request.data.get('action', 1)
+
+        from .services.apple_mdm import AppleMDMService
+        res = AppleMDMService.activation_lock(device_reg_num=device_reg, action=act)
+        return Response(res, status=status.HTTP_200_OK if res.get('error') == 0 else status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['get'], url_path='apple-activation-lock-status')
+    def apple_activation_lock_status(self, request, pk=None):
+        """GET /api/devices/{id}/apple-activation-lock-status/ - Queries Supervised Activation Lock status."""
+        denied = self._block_customer(request)
+        if denied:
+            return denied
+        device = self.get_object()
+        device_reg = device.provider_device_id or device.serial_number or device.imei
+
+        from .services.apple_mdm import AppleMDMService
+        res = AppleMDMService.activation_lock_status(device_reg_num=device_reg)
+        return Response(res, status=status.HTTP_200_OK if res.get('error') == 0 else status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['post'], url_path='apple-wallpaper')
+    def apple_wallpaper(self, request, pk=None):
+        """
+        POST /api/devices/{id}/apple-wallpaper/
+        Sets (Base64) or removes wallpaper on Lock Screen and Home Screen.
+        Parameters: 'wallpaper_image' (base64 string) or 'action': 'REMOVE'
+        """
+        denied = self._block_customer(request)
+        if denied:
+            return denied
+        device = self.get_object()
+        device_reg = device.provider_device_id or device.serial_number or device.imei
+        from .services.apple_mdm import AppleMDMService
+
+        action_cmd = request.data.get('action', '').upper()
+        if action_cmd == 'REMOVE':
+            res = AppleMDMService.remove_wallpaper(device_reg_num=device_reg)
+            device.wallpaper_locked = False
+            device.save(update_fields=['wallpaper_locked'])
+            return Response(res, status=status.HTTP_200_OK if res.get('error') == 0 else status.HTTP_400_BAD_REQUEST)
+
+        wallpaper_b64 = request.data.get('wallpaper_image') or request.data.get('wallpaperImage')
+        if not wallpaper_b64:
+            return Response(
+                {"error": 1, "msg": "Either 'wallpaper_image' (base64) or 'action': 'REMOVE' is required."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        res = AppleMDMService.set_wallpaper(device_reg_num=device_reg, wallpaper_image_base64=wallpaper_b64)
+        if res.get('error') == 0:
+            device.wallpaper_locked = True
+            device.save(update_fields=['wallpaper_locked'])
+        return Response(res, status=status.HTTP_200_OK if res.get('error') == 0 else status.HTTP_400_BAD_REQUEST)
+
 
 
 class DeviceHeartbeatView(APIView):
@@ -1636,6 +1907,25 @@ class RocketPayWebhookView(APIView):
             )
 
         result = RocketPayService.process_webhook_payload(request.data)
+        return Response(result, status=status.HTTP_200_OK)
+
+
+class AppleMDMWebhookView(APIView):
+    """
+    Apple MDM (Loksiz v1.4) Real-Time Webhook Callback Handler.
+    Receives 'apple_device_status_update' events for:
+      - activation_status (MDM profile enrollment / uninstallation)
+      - lock_status (Remote lock / unlock)
+      - app_lock_status (Kiosk single-app lock / unlock)
+      - wallpaper_status (Wallpaper applied / removed)
+      - device_location (Live GPS coordinates: lat, long, date)
+    URL: /api/integrations/apple-mdm/webhook/
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        from .services.apple_mdm import AppleMDMService
+        result = AppleMDMService.process_webhook_payload(request.data, headers=request.headers)
         return Response(result, status=status.HTTP_200_OK)
 
 

@@ -7,6 +7,7 @@ from .views import (
     PublicAppDownloadView,
     LockMessageTemplateViewSet,
     RocketPayWebhookView,
+    AppleMDMWebhookView,
     ApprovedDeviceTACViewSet,
     InstallationVideoViewSet
 )
@@ -25,5 +26,7 @@ urlpatterns = [
     path('devices/heartbeat/', DeviceHeartbeatView.as_view(), name='device-heartbeat-alias'),
     path('devices/rocketpay/webhook/', RocketPayWebhookView.as_view(), name='rocketpay-webhook-alias'),
     path('integrations/rocketpay/webhook/', RocketPayWebhookView.as_view(), name='rocketpay-webhook'),
+    path('devices/apple-mdm/webhook/', AppleMDMWebhookView.as_view(), name='apple-mdm-webhook-alias'),
+    path('integrations/apple-mdm/webhook/', AppleMDMWebhookView.as_view(), name='apple-mdm-webhook'),
     path('', include(router.urls)),
 ]

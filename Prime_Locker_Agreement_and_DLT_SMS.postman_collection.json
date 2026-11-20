@@ -945,6 +945,586 @@
           }
         }
       ]
+    },
+    {
+      "name": "8. Apple MDM (iPhone Locker - Loksiz)",
+      "description": "Comprehensive integration with Loksiz Apple MDM v1.4 for iPhone supervised management, eligibility validation, enrollment, remote lock/unlock, kiosk mode, activation lock, wallpaper, GPS tracking, and real-time webhook status callbacks.",
+      "item": [
+        {
+          "name": "8.1 Service Health Check (Apple MDM Gateway)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/devices/apple-mdm/health/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "devices",
+                "apple-mdm",
+                "health",
+                ""
+              ]
+            },
+            "description": "Checks connectivity with Loksiz Apple MDM Gateway (returns 200 OK with health status)."
+          }
+        },
+        {
+          "name": "8.2 Validate iPhone Eligibility (Mandatory Pre-Enrollment Check)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"imei\": \"358247910271332\",\n  \"serial_number\": \"C02XL1234567\",\n  \"imei2\": \"358247919646625\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/devices/apple-mdm/validate/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "devices",
+                "apple-mdm",
+                "validate",
+                ""
+              ]
+            },
+            "description": "Validates iPhone IMEI & Serial Number eligibility and verifies available IOS key balance in the Loksiz partner wallet before registration."
+          }
+        },
+        {
+          "name": "8.3 Enroll iPhone into Apple MDM",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"imei\": \"358247910271332\",\n  \"serial_number\": \"C02XL1234567\",\n  \"customer_name\": \"Aman Sharma\",\n  \"customer_mobile\": \"+919876543210\",\n  \"customer_email\": \"aman.sharma@example.com\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/devices/apple-mdm/enroll/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "devices",
+                "apple-mdm",
+                "enroll",
+                ""
+              ]
+            },
+            "description": "Registers Apple device with Loksiz MDM, generates deviceRegNum, and creates or updates local Device record with APPLE_MDM lock provider."
+          }
+        },
+        {
+          "name": "8.4 List Registered Apple Devices & Dashboard Counters",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/devices/apple-mdm/devices/?page=1&limit=10",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "devices",
+                "apple-mdm",
+                "devices",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "Fetches all enrolled iOS devices and dashboard summary (total, active, pending, inactive) directly from Loksiz."
+          }
+        },
+        {
+          "name": "8.5 Remote Lock iPhone (Lost Mode with Custom Message & Phone)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"LOCK\",\n  \"message\": \"Payment overdue. Please contact Prime Retailer to restore service.\",\n  \"phone_number\": \"+919876543210\",\n  \"foot_note\": \"Prime Locker MDM Protection\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/devices/{{device_id}}/apple-action/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "devices",
+                "{{device_id}}",
+                "apple-action",
+                ""
+              ]
+            },
+            "description": "Executes immediate Lost Mode LOCK on the managed iPhone, displaying custom overdue message, call button phone number, and footnote."
+          }
+        },
+        {
+          "name": "8.6 Remote Unlock iPhone",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"UNLOCK\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/devices/{{device_id}}/apple-action/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "devices",
+                "{{device_id}}",
+                "apple-action",
+                ""
+              ]
+            },
+            "description": "Instantly removes Lost Mode lock from the iPhone, restoring normal customer access."
+          }
+        },
+        {
+          "name": "8.7 Standard Remote Lock (Auto-routes to Apple MDM)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"EMI overdue remote lock\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/devices/{{device_id}}/lock/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "devices",
+                "{{device_id}}",
+                "lock",
+                ""
+              ]
+            },
+            "description": "Standard Prime Locker lock endpoint. Automatically dispatches lock to Loksiz Apple MDM when device is an iPhone / APPLE_MDM."
+          }
+        },
+        {
+          "name": "8.8 Standard Remote Unlock (Auto-routes to Apple MDM)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Payment received\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/devices/{{device_id}}/unlock/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "devices",
+                "{{device_id}}",
+                "unlock",
+                ""
+              ]
+            },
+            "description": "Standard Prime Locker unlock endpoint. Automatically dispatches unlock to Loksiz Apple MDM."
+          }
+        },
+        {
+          "name": "8.9 Enforce Application Kiosk Mode (App Lock)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/devices/{{device_id}}/apple-app-lock/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "devices",
+                "{{device_id}}",
+                "apple-app-lock",
+                ""
+              ]
+            },
+            "description": "Enforces Single App Mode / Kiosk mode on the managed iPhone."
+          }
+        },
+        {
+          "name": "8.10 Remove Application Kiosk Mode (App Unlock)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/devices/{{device_id}}/apple-app-unlock/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "devices",
+                "{{device_id}}",
+                "apple-app-unlock",
+                ""
+              ]
+            },
+            "description": "Removes application lock restriction, returning device to normal multi-app operation."
+          }
+        },
+        {
+          "name": "8.11 Supervised Activation Lock (Enable / Disable)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": 1\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/devices/{{device_id}}/apple-activation-lock/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "devices",
+                "{{device_id}}",
+                "apple-activation-lock",
+                ""
+              ]
+            },
+            "description": "Triggers Apple MDM Activation Lock. Action 1 = Enable, 0 = Disable."
+          }
+        },
+        {
+          "name": "8.12 Query Supervised Activation Lock Status",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/devices/{{device_id}}/apple-activation-lock-status/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "devices",
+                "{{device_id}}",
+                "apple-activation-lock-status",
+                ""
+              ]
+            },
+            "description": "Queries the current Activation Lock status of the iPhone."
+          }
+        },
+        {
+          "name": "8.13 Set Lockscreen Wallpaper (Base64)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"wallpaper_image\": \"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/devices/{{device_id}}/apple-wallpaper/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "devices",
+                "{{device_id}}",
+                "apple-wallpaper",
+                ""
+              ]
+            },
+            "description": "Sets custom branded wallpaper on iPhone Lock Screen and Home Screen."
+          }
+        },
+        {
+          "name": "8.14 Remove Custom Wallpaper (Restore Default)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"REMOVE\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/devices/{{device_id}}/apple-wallpaper/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "devices",
+                "{{device_id}}",
+                "apple-wallpaper",
+                ""
+              ]
+            },
+            "description": "Removes custom wallpaper and restores system default wallpaper on iPhone."
+          }
+        },
+        {
+          "name": "8.15 Live GPS Location Refresh",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/devices/{{device_id}}/refresh-location/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "devices",
+                "{{device_id}}",
+                "refresh-location",
+                ""
+              ]
+            },
+            "description": "Dispatches instant GET_LOCATION command to retrieve current iPhone coordinates."
+          }
+        },
+        {
+          "name": "8.16 Release / Uninstall MDM Profile (Post EMI Settlement)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Customer completed all EMI installments\",\n  \"force\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/devices/{{device_id}}/uninstall/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "devices",
+                "{{device_id}}",
+                "uninstall",
+                ""
+              ]
+            },
+            "description": "Deregisters iPhone from Apple MDM and marks device as UNENROLLED in Prime Locker."
+          }
+        },
+        {
+          "name": "8.17 Webhook Callback (Remote Lock Status Update)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Callback-Id",
+                "value": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event\": \"apple_device_status_update\",\n  \"callback_id\": \"9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d\",\n  \"deviceRegNum\": \"1726567890123\",\n  \"slug\": \"lock_status\",\n  \"status\": 1,\n  \"location\": null,\n  \"message\": \"Device locked successfully\",\n  \"imei\": \"358247910271332\",\n  \"imei2\": \"358247919646625\",\n  \"serialNumber\": \"C02XL1234567\",\n  \"occurred_at\": \"2026-11-20T10:00:00.000Z\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/integrations/apple-mdm/webhook/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "integrations",
+                "apple-mdm",
+                "webhook",
+                ""
+              ]
+            },
+            "description": "Simulates real-time webhook callback dispatched by Loksiz MDM when device is locked/unlocked. Returns HTTP 200 within 10s."
+          }
+        },
+        {
+          "name": "8.18 Webhook Callback (Live GPS Location Update)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Callback-Id",
+                "value": "71a2b3c4-d5e6-7f8a-9b0c-1d2e3f4a5b6c"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event\": \"apple_device_status_update\",\n  \"callback_id\": \"71a2b3c4-d5e6-7f8a-9b0c-1d2e3f4a5b6c\",\n  \"deviceRegNum\": \"1726567890123\",\n  \"slug\": \"device_location\",\n  \"status\": null,\n  \"location\": {\n    \"lat\": \"28.6139\",\n    \"long\": \"77.2090\",\n    \"date\": \"20-11-2026 15:30:00\"\n  },\n  \"message\": null,\n  \"imei\": \"358247910271332\",\n  \"imei2\": \"358247919646625\",\n  \"serialNumber\": \"C02XL1234567\",\n  \"occurred_at\": \"2026-11-20T10:00:00.000Z\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/integrations/apple-mdm/webhook/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "integrations",
+                "apple-mdm",
+                "webhook",
+                ""
+              ]
+            },
+            "description": "Simulates real-time webhook callback dispatched by Loksiz MDM containing device GPS coordinates."
+          }
+        }
+      ]
     }
   ]
 }

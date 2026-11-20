@@ -177,12 +177,12 @@ SIMPLE_JWT = {
 }
 
 # -------------------------------------------------------------
-# Third-Party Device MDM Integration (Apple DEP / Supervised)
+# Third-Party Device MDM Integration (Apple MDM - Loksiz v1.4)
 # -------------------------------------------------------------
 APPLE_MDM_CONFIG = {
-    'BASE_URL': os.getenv('APPLE_MDM_BASE_URL', ''),
-    'API_KEY': os.getenv('APPLE_MDM_API_KEY', ''),
-    'TENANT_ID': os.getenv('APPLE_MDM_TENANT_ID', ''),
+    'BASE_URL': os.getenv('APPLE_MDM_BASE_URL', 'https://prodapi.loksiz.com/loksiz/apple-mdm').rstrip('/'),
+    'TOKEN': os.getenv('APPLE_MDM_TOKEN', ''),
+    'API_KEY': os.getenv('APPLE_MDM_TOKEN', '') or os.getenv('APPLE_MDM_API_KEY', ''),
 }
 
 # -------------------------------------------------------------
@@ -214,3 +214,4 @@ PARTNER_MDM_CONFIG = {
 
 # Firebase Cloud Messaging Service Account Credentials
 FIREBASE_CREDENTIALS = os.getenv('FIREBASE_CREDENTIALS', str(BASE_DIR / 'firebase-service-account.json'))
+FCM_SERVER_KEY = os.getenv('FCM_SERVER_KEY', '')

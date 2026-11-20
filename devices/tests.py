@@ -1,6 +1,7 @@
 import json
 import hmac
 import hashlib
+from unittest.mock import patch
 from datetime import timedelta
 from decimal import Decimal
 from django.test import TestCase, override_settings
@@ -929,3 +930,235 @@ class InstallationVideoEnrollmentOptionsTests(TestCase):
         results = filter_resp.data if isinstance(filter_resp.data, list) else filter_resp.data.get('results', [])
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]['category'], 'WIFI_ACTIVATION')
+
+
+class AppleMDMBackendTests(TestCase):
+    def setUp(self):
+        self.retailer = User.objects.create_user(
+            username='apple_retailer',
+            email='apple_retailer@test.com',
+            password='Password@123',
+            role=Role.RETAILER,
+            mobile_number='+919876543210',
+            business_name='Apple Store Hub'
+        )
+        self.customer = User.objects.create_user(
+            username='apple_customer',
+            email='apple_customer@test.com',
+            password='Password@123',
+            role=Role.CUSTOMER,
+            mobile_number='+919876543211',
+            parent=self.retailer
+        )
+        self.apple_device = Device.objects.create(
+            customer=self.customer,
+            retailer=self.retailer,
+            imei='358247910271332',
+            serial_number='C02XL1234567',
+            brand='Apple',
+            model='iPhone 15 Pro',
+            os_type=OSType.IOS,
+            status=DeviceLockStatus.ACTIVE,
+            lock_provider=LockProvider.APPLE_MDM,
+            provider_device_id='1726567890123'
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.retailer)
+
+    @patch('devices.services.apple_mdm.AppleMDMService.health_check')
+    def test_apple_mdm_health_check(self, mock_health):
+        mock_health.return_value = {"error": 0, "msg": "Apple MDM route is healthy 🚀 TEST"}
+        resp = self.client.get('/api/devices/apple-mdm/health/')
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data['error'], 0)
+
+    @patch('devices.services.apple_mdm.AppleMDMService.validate_device')
+    def test_apple_mdm_validate_device(self, mock_val):
+        mock_val.return_value = {"error": 0, "msg": "iPhone validated successfully", "data": {"status": True}}
+        resp = self.client.post('/api/devices/apple-mdm/validate/', {
+            "imei": "358247910271332",
+            "serial_number": "C02XL1234567"
+        }, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data['data']['status'], True)
+
+    @patch('devices.services.apple_mdm.AppleMDMService.add_device')
+    def test_apple_mdm_enroll_device(self, mock_add):
+        mock_add.return_value = {
+            "error": 0,
+            "msg": "Apple MDM device added successfully",
+            "data": {"deviceRegNum": "1726567890999"}
+        }
+        # Pre-create un-enrolled device
+        un_device = Device.objects.create(
+            customer=self.customer,
+            retailer=self.retailer,
+            imei='359999999999999',
+            brand='Apple',
+            model='iPhone 14'
+        )
+        resp = self.client.post('/api/devices/apple-mdm/enroll/', {
+            "imei": "359999999999999",
+            "serial_number": "F17NEWDEVICE1",
+            "customer_name": "Test Customer",
+            "customer_mobile": "+919876543211",
+            "customer_email": "customer@apple.com"
+        }, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        un_device.refresh_from_db()
+        self.assertEqual(un_device.provider_device_id, '1726567890999')
+        self.assertEqual(un_device.lock_provider, LockProvider.APPLE_MDM)
+        self.assertEqual(un_device.os_type, OSType.IOS)
+
+    @patch('devices.services.apple_mdm.AppleMDMService.get_devices')
+    def test_apple_mdm_devices_list(self, mock_get):
+        mock_get.return_value = {
+            "error": 0,
+            "msg": "Fetched successfully",
+            "data": [{"deviceRegNum": "1726567890123"}],
+            "dashboard": {"total": 1, "active": 1, "pending": 0, "inactive": 0}
+        }
+        resp = self.client.get('/api/devices/apple-mdm/devices/')
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data['dashboard']['total'], 1)
+
+    @patch('devices.services.apple_mdm.AppleMDMService.take_action')
+    def test_apple_action_lock_and_unlock(self, mock_act):
+        mock_act.return_value = {"error": 0, "msg": "Action LOCK performed successfully"}
+        resp = self.client.post(f'/api/devices/{self.apple_device.id}/apple-action/', {
+            "action": "LOCK",
+            "message": "Payment overdue",
+            "phoneNumber": "+919876543210"
+        }, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.apple_device.refresh_from_db()
+        self.assertEqual(self.apple_device.status, DeviceLockStatus.LOCKED)
+
+        mock_act.return_value = {"error": 0, "msg": "Action UNLOCK performed successfully"}
+        resp2 = self.client.post(f'/api/devices/{self.apple_device.id}/apple-action/', {
+            "action": "UNLOCK"
+        }, format='json')
+        self.assertEqual(resp2.status_code, status.HTTP_200_OK)
+        self.apple_device.refresh_from_db()
+        self.assertEqual(self.apple_device.status, DeviceLockStatus.ACTIVE)
+
+    @patch('devices.services.apple_mdm.AppleMDMService.application_lock')
+    @patch('devices.services.apple_mdm.AppleMDMService.application_unlock')
+    def test_apple_app_lock_and_unlock(self, mock_unlock, mock_lock):
+        mock_lock.return_value = {"error": 0, "msg": "App locked successfully"}
+        mock_unlock.return_value = {"error": 0, "msg": "App unlocked successfully"}
+
+        resp1 = self.client.post(f'/api/devices/{self.apple_device.id}/apple-app-lock/')
+        self.assertEqual(resp1.status_code, status.HTTP_200_OK)
+        mock_lock.assert_called_once_with(device_reg_num='1726567890123')
+
+        resp2 = self.client.post(f'/api/devices/{self.apple_device.id}/apple-app-unlock/')
+        self.assertEqual(resp2.status_code, status.HTTP_200_OK)
+        mock_unlock.assert_called_once_with(device_reg_num='1726567890123')
+
+    @patch('devices.services.apple_mdm.AppleMDMService.activation_lock')
+    @patch('devices.services.apple_mdm.AppleMDMService.activation_lock_status')
+    def test_apple_activation_lock_and_status(self, mock_status, mock_act):
+        mock_act.return_value = {"error": 0, "msg": "Activation Lock enabled"}
+        mock_status.return_value = {"error": 0, "data": {"status": True}}
+
+        resp1 = self.client.post(f'/api/devices/{self.apple_device.id}/apple-activation-lock/', {"action": 1})
+        self.assertEqual(resp1.status_code, status.HTTP_200_OK)
+
+        resp2 = self.client.get(f'/api/devices/{self.apple_device.id}/apple-activation-lock-status/')
+        self.assertEqual(resp2.status_code, status.HTTP_200_OK)
+
+    @patch('devices.services.apple_mdm.AppleMDMService.set_wallpaper')
+    @patch('devices.services.apple_mdm.AppleMDMService.remove_wallpaper')
+    def test_apple_wallpaper_set_and_remove(self, mock_remove, mock_set):
+        mock_set.return_value = {"error": 0, "msg": "Wallpaper set successfully"}
+        mock_remove.return_value = {"error": 0, "msg": "Wallpaper removed successfully"}
+
+        resp1 = self.client.post(f'/api/devices/{self.apple_device.id}/apple-wallpaper/', {
+            "wallpaper_image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+        }, format='json')
+        self.assertEqual(resp1.status_code, status.HTTP_200_OK)
+        self.apple_device.refresh_from_db()
+        self.assertTrue(self.apple_device.wallpaper_locked)
+
+        resp2 = self.client.post(f'/api/devices/{self.apple_device.id}/apple-wallpaper/', {
+            "action": "REMOVE"
+        }, format='json')
+        self.assertEqual(resp2.status_code, status.HTTP_200_OK)
+        self.apple_device.refresh_from_db()
+        self.assertFalse(self.apple_device.wallpaper_locked)
+
+    @patch('devices.services.apple_mdm.AppleMDMService.take_action')
+    def test_standard_lock_unlock_delegates_to_apple_mdm(self, mock_action):
+        mock_action.return_value = {"error": 0, "msg": "Success"}
+        lock_resp = self.client.post(f'/api/devices/{self.apple_device.id}/lock/', {"reason": "Overdue"})
+        self.assertEqual(lock_resp.status_code, status.HTTP_200_OK)
+        self.apple_device.refresh_from_db()
+        self.assertEqual(self.apple_device.status, DeviceLockStatus.LOCKED)
+        mock_action.assert_called_with(
+            device_reg_num='1726567890123',
+            action='LOCK',
+            message='Overdue',
+            phone_number='+919876543210',
+            foot_note='Prime Locker Protection'
+        )
+
+        unlock_resp = self.client.post(f'/api/devices/{self.apple_device.id}/unlock/')
+        self.assertEqual(unlock_resp.status_code, status.HTTP_200_OK)
+        self.apple_device.refresh_from_db()
+        self.assertEqual(self.apple_device.status, DeviceLockStatus.ACTIVE)
+        mock_action.assert_called_with(
+            device_reg_num='1726567890123',
+            action='UNLOCK'
+        )
+
+    def test_apple_mdm_webhook_processing(self):
+        # 1. Test lock status callback
+        payload_lock = {
+            "event": "apple_device_status_update",
+            "callback_id": "test-uuid-1",
+            "deviceRegNum": "1726567890123",
+            "slug": "lock_status",
+            "status": 1,
+            "occurred_at": "2026-11-20T10:00:00Z"
+        }
+        anon_client = APIClient()
+        resp1 = anon_client.post('/api/integrations/apple-mdm/webhook/', payload_lock, format='json')
+        self.assertEqual(resp1.status_code, status.HTTP_200_OK)
+        self.apple_device.refresh_from_db()
+        self.assertEqual(self.apple_device.status, DeviceLockStatus.LOCKED)
+
+        # 2. Test unlock status callback
+        payload_unlock = {
+            "event": "apple_device_status_update",
+            "callback_id": "test-uuid-2",
+            "deviceRegNum": "1726567890123",
+            "slug": "lock_status",
+            "status": 0,
+            "occurred_at": "2026-11-20T10:01:00Z"
+        }
+        resp2 = anon_client.post('/api/integrations/apple-mdm/webhook/', payload_unlock, format='json')
+        self.assertEqual(resp2.status_code, status.HTTP_200_OK)
+        self.apple_device.refresh_from_db()
+        self.assertEqual(self.apple_device.status, DeviceLockStatus.ACTIVE)
+
+        # 3. Test location callback
+        payload_loc = {
+            "event": "apple_device_status_update",
+            "callback_id": "test-uuid-3",
+            "deviceRegNum": "1726567890123",
+            "slug": "device_location",
+            "status": None,
+            "location": {
+                "lat": "28.6139000",
+                "long": "77.2090000",
+                "date": "20-11-2026 15:30:00"
+            },
+            "occurred_at": "2026-11-20T10:02:00Z"
+        }
+        resp3 = anon_client.post('/api/integrations/apple-mdm/webhook/', payload_loc, format='json')
+        self.assertEqual(resp3.status_code, status.HTTP_200_OK)
+        self.apple_device.refresh_from_db()
+        self.assertAlmostEqual(float(self.apple_device.current_latitude), 28.6139, places=4)
+        self.assertAlmostEqual(float(self.apple_device.current_longitude), 77.2090, places=4)
+
