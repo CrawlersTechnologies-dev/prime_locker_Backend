@@ -1486,4 +1486,123 @@ class CustomerPhotoEditTests(TestCase):
         self.assertIn(resp.status_code, [status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND])
 
 
+class AdminResetPartnerPasswordTests(TestCase):
+    def setUp(self):
+        self.super_admin = User.objects.create_superuser(
+            username='admin_pwd_mgr',
+            email='admin_mgr@test.com',
+            password='AdminPassword@123',
+            role=Role.SUPER_ADMIN
+        )
+        self.distributor = User.objects.create_user(
+            username='dist_pwd_mgr',
+            email='dist_mgr@test.com',
+            password='DistPassword@123',
+            role=Role.DISTRIBUTOR,
+            parent=self.super_admin
+        )
+        self.retailer = User.objects.create_user(
+            username='ret_pwd_mgr',
+            email='ret_mgr@test.com',
+            password='OldRetailerPass@123',
+            mobile_number='9876543210',
+            role=Role.RETAILER,
+            parent=self.distributor
+        )
+        self.other_distributor = User.objects.create_user(
+            username='other_dist_mgr',
+            email='other_dist@test.com',
+            password='OtherDistPass@123',
+            role=Role.DISTRIBUTOR,
+            parent=self.super_admin
+        )
+        self.customer = User.objects.create_user(
+            username='cust_pwd_mgr',
+            email='cust_mgr@test.com',
+            password='CustomerPass@123',
+            role=Role.CUSTOMER,
+            parent=self.retailer
+        )
+
+    def _client_for(self, user):
+        from rest_framework.test import APIClient
+        client = APIClient()
+        client.force_authenticate(user=user)
+        return client
+
+    def test_admin_resets_retailer_password_with_custom_password(self):
+        admin_client = self._client_for(self.super_admin)
+        resp = admin_client.post(
+            f'/api/retailers/{self.retailer.id}/reset-password/',
+            {'new_password': 'BrandNewPassword@2026'},
+            format='json'
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertTrue(resp.data['success'])
+        self.assertEqual(resp.data['temporary_password'], 'BrandNewPassword@2026')
+
+        # Verify retailer can authenticate with new password
+        self.retailer.refresh_from_db()
+        self.assertTrue(self.retailer.check_password('BrandNewPassword@2026'))
+        self.assertFalse(self.retailer.check_password('OldRetailerPass@123'))
+
+    def test_admin_resets_retailer_password_auto_generated(self):
+        admin_client = self._client_for(self.super_admin)
+        resp = admin_client.post(
+            f'/api/retailers/{self.retailer.id}/reset-password/',
+            {},
+            format='json'
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        temp_pwd = resp.data['temporary_password']
+        self.assertTrue(len(temp_pwd) >= 6)
+
+        # Verify retailer password matches the generated password
+        self.retailer.refresh_from_db()
+        self.assertTrue(self.retailer.check_password(temp_pwd))
+
+    def test_distributor_can_reset_downline_retailer_password(self):
+        dist_client = self._client_for(self.distributor)
+        resp = dist_client.post(
+            f'/api/retailers/{self.retailer.id}/reset-password/',
+            {'new_password': 'DistSetPass@2026'},
+            format='json'
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.retailer.refresh_from_db()
+        self.assertTrue(self.retailer.check_password('DistSetPass@2026'))
+
+    def test_other_distributor_cannot_reset_unrelated_retailer_password(self):
+        other_client = self._client_for(self.other_distributor)
+        resp = other_client.post(
+            f'/api/retailers/{self.retailer.id}/reset-password/',
+            {'new_password': 'HackPassword@123'},
+            format='json'
+        )
+        self.assertIn(resp.status_code, [status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND])
+        self.retailer.refresh_from_db()
+        self.assertTrue(self.retailer.check_password('OldRetailerPass@123'))
+
+    def test_customer_cannot_reset_retailer_password(self):
+        cust_client = self._client_for(self.customer)
+        resp = cust_client.post(
+            f'/api/retailers/{self.retailer.id}/reset-password/',
+            {'new_password': 'CustHackPass@123'},
+            format='json'
+        )
+        self.assertIn(resp.status_code, [status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND])
+
+    def test_reset_partner_password_by_mobile_or_username(self):
+        admin_client = self._client_for(self.super_admin)
+        resp = admin_client.post(
+            '/api/retailers/reset-password/',
+            {'mobile_number': '9876543210', 'new_password': 'MobileReset@123'},
+            format='json'
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.retailer.refresh_from_db()
+        self.assertTrue(self.retailer.check_password('MobileReset@123'))
+
+
+
 

@@ -153,8 +153,12 @@ class SuperDistributorSerializer(serializers.ModelSerializer):
         }
 
     def validate(self, data):
-        if data.get('password') != data.get('confirm_password'):
-            raise serializers.ValidationError({"password": "Passwords must match."})
+        if not self.instance:
+            if data.get('password') != data.get('confirm_password'):
+                raise serializers.ValidationError({"password": "Passwords must match."})
+        else:
+            if 'confirm_password' in data and data.get('password') != data.get('confirm_password'):
+                raise serializers.ValidationError({"password": "Passwords must match."})
         return data
 
     def validate_email(self, value):

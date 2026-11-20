@@ -839,6 +839,112 @@
           }
         }
       ]
+    },
+    {
+      "name": "7. Retailer & Partner Password Reset (Admin Support)",
+      "item": [
+        {
+          "name": "7.1 Admin Reset Retailer Password (Custom Password)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"new_password\": \"NewRetailerPass@2026\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/retailers/{{retailer_id}}/reset-password/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "retailers",
+                "{{retailer_id}}",
+                "reset-password",
+                ""
+              ]
+            },
+            "description": "Super Admin or Upline Distributor resets a Retailer password with an explicit custom password."
+          }
+        },
+        {
+          "name": "7.2 Admin Reset Retailer Password (Auto-Generate Temporary Password)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/retailers/{{retailer_id}}/reset-password/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "retailers",
+                "{{retailer_id}}",
+                "reset-password",
+                ""
+              ]
+            },
+            "description": "Super Admin resets Retailer password with an auto-generated secure temporary PIN (e.g. PL@4829)."
+          }
+        },
+        {
+          "name": "7.3 Reset Retailer Password by Mobile Number / Username",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mobile_number\": \"9876543210\",\n  \"new_password\": \"Retailer@2026\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/retailers/reset-password/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "retailers",
+                "reset-password",
+                ""
+              ]
+            },
+            "description": "Reset a retailer password by providing their registered mobile number or username."
+          }
+        }
+      ]
     }
   ]
 }

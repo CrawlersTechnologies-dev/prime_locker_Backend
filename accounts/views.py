@@ -202,6 +202,148 @@ class BaseRoleViewSet(viewsets.ModelViewSet):
         )
         return response
 
+    @action(detail=True, methods=['post'], url_path='reset-password')
+    def reset_password(self, request, pk=None):
+        """
+        Admin or Upline resets a partner's password (e.g. POST /api/retailers/{id}/reset-password/).
+        """
+        partner = self.get_object()
+        return self._do_partner_password_reset(partner, request)
+
+    @action(detail=False, methods=['post'], url_path='reset-password')
+    def reset_partner_password(self, request):
+        """
+        Admin or Upline resets partner password by user_id, mobile, or username.
+        POST /api/retailers/reset-password/ (body: {"user_id": 12} or {"mobile_number": "..."} or {"username": "..."})
+        """
+        user_id = request.data.get('user_id') or request.data.get('id')
+        mobile = request.data.get('mobile_number') or request.data.get('mobile')
+        username = request.data.get('username')
+
+        qs = User.objects.filter(role=self.target_role)
+        target = None
+        if user_id:
+            target = qs.filter(id=user_id).first()
+        elif mobile:
+            target = qs.filter(mobile_number=str(mobile).strip()).first()
+        elif username:
+            target = qs.filter(username=str(username).strip()).first()
+
+        if not target:
+            return Response(
+                {"detail": f"Target {self.target_role} not found. Please provide a valid 'user_id', 'mobile_number', or 'username'."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        return self._do_partner_password_reset(target, request)
+
+    def _do_partner_password_reset(self, partner, request):
+        user = request.user
+
+        # 1. Permission / Hierarchy check
+        if user.role == 'CUSTOMER':
+            return Response(
+                {"detail": "Customers do not have permission to reset partner passwords."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        if user.role == 'STAFF_VIEWER':
+            return Response(
+                {"detail": "Viewer staff accounts have read-only access."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        from accounts.permissions import is_downstream_user
+        from accounts.models import is_company_user
+        # Non-company users can only reset passwords for their own downstream network
+        if not is_company_user(user):
+            if not (is_downstream_user(user, partner) or partner in user.get_all_subordinates()):
+                return Response(
+                    {"detail": f"You do not have permission to reset the password for this {partner.role}."},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
+        # Cannot reset own password via admin reset (must use /api/auth/change-password/)
+        if user.id == partner.id:
+            return Response(
+                {"detail": "To change your own password, please use the /api/auth/change-password/ endpoint."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 2. Determine new password
+        new_password = request.data.get('new_password', '').strip()
+        if not new_password:
+            mob = str(partner.mobile_number or '').strip()
+            if len(mob) >= 4:
+                new_password = f"PL@{mob[-4:]}"
+            else:
+                import random
+                new_password = f"PL@{random.randint(1000, 9999)}"
+        else:
+            if len(new_password) < 6:
+                return Response(
+                    {"detail": "Password must be at least 6 characters long."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+        partner.set_password(new_password)
+        partner.save(update_fields=['password'])
+
+        AuditLog.objects.create(
+            user=user,
+            action=f"ADMIN_RESET_{partner.role}_PASSWORD",
+            ip_address=get_client_ip(request),
+            details={
+                "target_id": partner.id,
+                "target_username": partner.username,
+                "target_role": partner.role,
+                "target_mobile": partner.mobile_number,
+                "reset_by": user.username,
+                "reset_by_role": user.role
+            }
+        )
+
+        # Send in-app notification to the partner
+        try:
+            from accounts.views import send_system_notification
+            from accounts.models import NotificationType
+            send_system_notification(
+                recipient=partner,
+                title="Password Reset by Admin",
+                message=f"Your password has been reset by {user.username} ({user.get_role_display()}).",
+                notification_type=NotificationType.SYSTEM,
+                reference_id=partner.id,
+                sender=user
+            )
+        except Exception:
+            pass
+
+        # Send WhatsApp / SMS notification if mobile exists
+        try:
+            from accounts.whatsapp import WhatsAppService
+            if partner.mobile_number:
+                WhatsAppService.send_template(
+                    phone_number=partner.mobile_number,
+                    template_name='password_reset_by_store',
+                    parameters={
+                        'customer_name': partner.first_name or partner.username,
+                        'new_password': new_password
+                    },
+                    recipient_name=partner.first_name
+                )
+        except Exception:
+            pass
+
+        return Response({
+            "success": True,
+            "message": f"Password for {partner.get_role_display()} '{partner.first_name or partner.username}' has been successfully reset.",
+            "user_id": partner.id,
+            "username": partner.username,
+            "role": partner.role,
+            "name": f"{partner.first_name} {partner.last_name}".strip() or partner.username,
+            "mobile_number": partner.mobile_number,
+            "temporary_password": new_password
+        }, status=status.HTTP_200_OK)
+
 class SuperDistributorViewSet(BaseRoleViewSet):
     target_role = 'SUPER_DISTRIBUTOR'
     serializer_class = SuperDistributorSerializer
