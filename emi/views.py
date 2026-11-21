@@ -706,6 +706,14 @@ class EMIInstallmentViewSet(viewsets.GenericViewSet):
                 installment.notes = notes
                 installment.save()
 
+                # 98% / 2% Revenue Split (Scenario B: Offline Cash Payment)
+                from .services.wallet_service import WalletService
+                WalletService.process_offline_emi_split(
+                    installment=installment,
+                    gross_amount=amount,
+                    user=request.user
+                )
+
                 from devices.models import Device, DeviceLockStatus, DeviceCommand, CommandType, CommandStatus, LockProvider
                 from devices.services.rocketpay_service import RocketPayService
                 from accounts.views import send_system_notification
@@ -857,7 +865,10 @@ class EMIInstallmentViewSet(viewsets.GenericViewSet):
             return Response({
                 "message": f"Payment of ₹{amount} successfully recorded for Installment #{installment.installment_number}.",
                 "contract_status": contract.status,
-                "installment_status": installment.status
+                "installment_status": installment.status,
+                "gross_amount": float(amount),
+                "admin_fee_2pct": float(installment.admin_commission),
+                "retailer_share_98pct": float(installment.retailer_share)
             })
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -935,7 +946,10 @@ class EMIInstallmentViewSet(viewsets.GenericViewSet):
             "order_id": cf_order_id,
             "payment_id": payment_id,
             "contract_status": contract.status,
-            "installment_status": installment.status
+            "installment_status": installment.status,
+            "gross_amount": float(installment.paid_amount),
+            "admin_fee_2pct": float(installment.admin_commission),
+            "retailer_share_98pct": float(installment.retailer_share)
         }, status=status.HTTP_200_OK)
 
 
@@ -1388,4 +1402,317 @@ class PaymentViewSet(viewsets.ReadOnlyModelViewSet):
             return generate_csv_response("payments_report.csv", headers, rows)
 
         return super().list(request, *args, **kwargs)
+
+
+# -------------------------------------------------------------
+# Retailer Digital Wallet & 98% / 2% Revenue ViewSets
+# -------------------------------------------------------------
+from .models import (
+    RetailerWallet,
+    WalletTransaction,
+    PayoutRequest,
+    PayoutStatus,
+    PayoutMethod
+)
+from .serializers import (
+    RetailerWalletSerializer,
+    WalletTransactionSerializer,
+    WalletWithdrawSerializer,
+    WalletBuyKeysSerializer,
+    PayoutRequestSerializer,
+    PayoutApproveSerializer,
+    PayoutRejectSerializer
+)
+from django.core.exceptions import ValidationError
+
+
+class RetailerWalletViewSet(viewsets.ViewSet):
+    """
+    Retailer Digital Wallet & Ledger Controller (98% / 2% Revenue Model).
+
+    Endpoints:
+      - GET /api/wallet/ : Live wallet summary (balance, collections, withdrawals, bank details, recent transactions)
+      - GET /api/wallet/statement/ : Itemized transaction history ledger with filters and CSV export
+      - POST /api/wallet/withdraw/ : Request funds payout to registered Bank or UPI
+      - POST /api/wallet/buy-keys/ : Buy device license keys directly with wallet balance
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def list(self, request):
+        user = request.user
+        if user.role == 'RETAILER':
+            target_user = user
+        elif is_company_user(user):
+            retailer_id = request.query_params.get('retailer_id')
+            if retailer_id:
+                from accounts.models import User
+                target_user = User.objects.filter(id=retailer_id, role='RETAILER').first()
+                if not target_user:
+                    return Response({"detail": "Retailer not found."}, status=status.HTTP_404_NOT_FOUND)
+            else:
+                target_user = user
+        else:
+            target_user = user
+
+        wallet = RetailerWallet.get_or_create_wallet(target_user)
+        serializer = RetailerWalletSerializer(wallet)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'], url_path='my-wallet')
+    def my_wallet(self, request):
+        wallet = RetailerWallet.get_or_create_wallet(request.user)
+        serializer = RetailerWalletSerializer(wallet)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'], url_path='statement')
+    def statement(self, request):
+        """
+        Itemized Statement / Transaction Ledger (Scenario A & B credits/debits).
+        Supports filters: ?type=... & ?start_date=... & ?end_date=... & ?search=... & ?export=csv
+        """
+        user = request.user
+        if user.role == 'RETAILER':
+            target_user = user
+        elif is_company_user(user):
+            retailer_id = request.query_params.get('retailer_id')
+            if retailer_id:
+                from accounts.models import User
+                target_user = User.objects.filter(id=retailer_id, role='RETAILER').first()
+                if not target_user:
+                    return Response({"detail": "Retailer not found."}, status=status.HTTP_404_NOT_FOUND)
+            else:
+                target_user = user
+        else:
+            target_user = user
+
+        wallet = RetailerWallet.get_or_create_wallet(target_user)
+        qs = wallet.transactions.all()
+
+        tx_type = request.query_params.get('type')
+        if tx_type:
+            qs = qs.filter(transaction_type=tx_type.upper())
+
+        start_date = request.query_params.get('start_date')
+        if start_date:
+            qs = qs.filter(created_at__date__gte=start_date)
+
+        end_date = request.query_params.get('end_date')
+        if end_date:
+            qs = qs.filter(created_at__date__lte=end_date)
+
+        search = request.query_params.get('search')
+        if search:
+            qs = qs.filter(
+                models.Q(description__icontains=search) |
+                models.Q(reference_id__icontains=search)
+            )
+
+        if request.query_params.get('export') == 'csv':
+            from reports.utils import generate_csv_response
+            headers = [
+                "Transaction ID", "Date", "Type", "Gross Amount", "Admin Fee (2%)",
+                "Net Amount", "Balance After", "Reference ID", "Description"
+            ]
+            rows = []
+            for tx in qs[:5000]:
+                rows.append([
+                    f"TXN-{tx.id:06d}",
+                    tx.created_at.strftime('%Y-%m-%d %H:%M'),
+                    tx.get_transaction_type_display(),
+                    str(tx.gross_amount),
+                    str(tx.admin_fee),
+                    str(tx.amount),
+                    str(tx.balance_after),
+                    tx.reference_id or "N/A",
+                    tx.description
+                ])
+            return generate_csv_response("wallet_statement.csv", headers, rows)
+
+        from rest_framework.pagination import PageNumberPagination
+        paginator = PageNumberPagination()
+        paginator.page_size = 20
+        page = paginator.paginate_queryset(qs, request)
+        serializer = WalletTransactionSerializer(page, many=True)
+        return paginator.get_paginated_response(serializer.data)
+
+    @action(detail=False, methods=['post'], url_path='withdraw')
+    def withdraw(self, request):
+        """
+        Retailer submits a payout withdrawal request to transfer wallet funds to Bank or UPI.
+        """
+        if request.user.role not in ['RETAILER', 'SUPER_ADMIN']:
+            return Response({"detail": "Only retailers can request wallet withdrawals."}, status=status.HTTP_403_FORBIDDEN)
+
+        serializer = WalletWithdrawSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        amount = serializer.validated_data['amount']
+        payout_method = serializer.validated_data['payout_method']
+        bank_data = {
+            'bank_name': serializer.validated_data.get('bank_name'),
+            'account_number': serializer.validated_data.get('account_number'),
+            'ifsc_code': serializer.validated_data.get('ifsc_code'),
+            'upi_id': serializer.validated_data.get('upi_id'),
+        }
+
+        try:
+            from .services.wallet_service import WalletService
+            payout = WalletService.request_payout(
+                retailer=request.user,
+                amount=amount,
+                payout_method=payout_method,
+                bank_data=bank_data
+            )
+            return Response({
+                "message": f"Withdrawal request for ₹{amount:,.2f} submitted successfully. Funds will be transferred once approved by Admin.",
+                "payout": PayoutRequestSerializer(payout).data,
+                "remaining_wallet_balance": float(request.user.wallet.balance)
+            }, status=status.HTTP_201_CREATED)
+        except ValidationError as e:
+            msg = e.messages[0] if hasattr(e, 'messages') else str(e)
+            return Response({"detail": msg}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=False, methods=['post'], url_path='buy-keys')
+    def buy_keys(self, request):
+        """
+        Retailer buys device license keys directly with their in-app wallet balance without spending cash.
+        """
+        if request.user.role not in ['RETAILER', 'SUPER_ADMIN']:
+            return Response({"detail": "Only retailers can purchase keys with wallet balance."}, status=status.HTTP_403_FORBIDDEN)
+
+        serializer = WalletBuyKeysSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        device_type = serializer.validated_data['device_type']
+        quantity = serializer.validated_data['quantity']
+        os_type = serializer.validated_data.get('os_type', 'ANDROID')
+
+        try:
+            from .services.wallet_service import WalletService
+            keys, total_cost, new_balance = WalletService.buy_keys_with_wallet(
+                retailer=request.user,
+                device_type=device_type,
+                quantity=quantity,
+                os_type=os_type
+            )
+            key_codes = [k.key_string for k in keys]
+            return Response({
+                "message": f"Successfully purchased {quantity} {device_type} key(s) using wallet balance.",
+                "total_deducted": float(total_cost),
+                "remaining_wallet_balance": float(new_balance),
+                "keys_count": len(key_codes),
+                "keys": key_codes
+            }, status=status.HTTP_201_CREATED)
+        except ValidationError as e:
+            msg = e.messages[0] if hasattr(e, 'messages') else str(e)
+            return Response({"detail": msg}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class PayoutRequestViewSet(viewsets.ModelViewSet):
+    """
+    Payout Management for Admin & Retailer (Screen: Payout Requests).
+    Retailers view their own payout history.
+    Admins can view, approve (with UTR), or reject (with refund) requests.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = PayoutRequestSerializer
+
+    def get_queryset(self):
+        user = self.request.user
+        qs = PayoutRequest.objects.all().select_related('retailer', 'processed_by')
+
+        if user.role == 'RETAILER':
+            qs = qs.filter(retailer=user)
+        elif not is_company_user(user):
+            retailer_ids = [u.id for u in user.get_all_subordinates() if u.role == 'RETAILER']
+            qs = qs.filter(retailer_id__in=retailer_ids)
+
+        # Filters
+        status_param = self.request.query_params.get('status')
+        if status_param:
+            qs = qs.filter(status=status_param.upper())
+
+        method_param = self.request.query_params.get('method')
+        if method_param:
+            qs = qs.filter(payout_method=method_param.upper())
+
+        retailer_id = self.request.query_params.get('retailer_id')
+        if retailer_id and is_company_user(user):
+            qs = qs.filter(retailer_id=retailer_id)
+
+        start_date = self.request.query_params.get('start_date')
+        if start_date:
+            qs = qs.filter(created_at__date__gte=start_date)
+
+        end_date = self.request.query_params.get('end_date')
+        if end_date:
+            qs = qs.filter(created_at__date__lte=end_date)
+
+        return qs
+
+    @action(detail=True, methods=['post'], url_path='approve')
+    def approve(self, request, pk=None):
+        if not is_company_user(request.user):
+            return Response({"detail": "Only Super Admin or Operations Staff can approve payouts."}, status=status.HTTP_403_FORBIDDEN)
+
+        payout = self.get_object()
+        serializer = PayoutApproveSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        utr = serializer.validated_data.get('utr_number')
+        notes = serializer.validated_data.get('admin_notes', '')
+
+        try:
+            from .services.wallet_service import WalletService
+            payout = WalletService.approve_payout(payout, admin_user=request.user, utr_number=utr, notes=notes)
+            return Response({
+                "message": f"Payout #{payout.id} approved and marked PROCESSED.",
+                "payout": PayoutRequestSerializer(payout).data
+            }, status=status.HTTP_200_OK)
+        except ValidationError as e:
+            msg = e.messages[0] if hasattr(e, 'messages') else str(e)
+            return Response({"detail": msg}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['post'], url_path='reject')
+    def reject(self, request, pk=None):
+        if not is_company_user(request.user):
+            return Response({"detail": "Only Super Admin or Operations Staff can reject payouts."}, status=status.HTTP_403_FORBIDDEN)
+
+        payout = self.get_object()
+        serializer = PayoutRejectSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        reason = serializer.validated_data['reason']
+
+        try:
+            from .services.wallet_service import WalletService
+            payout = WalletService.reject_payout(payout, admin_user=request.user, reason=reason)
+            return Response({
+                "message": f"Payout #{payout.id} rejected. ₹{payout.amount:,.2f} has been refunded to retailer's wallet.",
+                "payout": PayoutRequestSerializer(payout).data
+            }, status=status.HTTP_200_OK)
+        except ValidationError as e:
+            msg = e.messages[0] if hasattr(e, 'messages') else str(e)
+            return Response({"detail": msg}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class RevenueDashboardViewSet(viewsets.ViewSet):
+    """
+    Admin Revenue & 98%/2% Commission Analytics Dashboard.
+    GET /api/revenue/ : Summary of all-time, daily, monthly 2% platform revenue & splits.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def list(self, request):
+        if not is_company_user(request.user):
+            return Response({"detail": "Only Super Admin or Company Staff can view the revenue dashboard."}, status=status.HTTP_403_FORBIDDEN)
+
+        from .services.wallet_service import WalletService
+        data = WalletService.get_revenue_dashboard_stats()
+        return Response(data, status=status.HTTP_200_OK)
+
 

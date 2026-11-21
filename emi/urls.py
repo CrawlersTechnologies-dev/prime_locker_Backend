@@ -7,7 +7,10 @@ from .views import (
     OverdueEMIsViewSet,
     CashfreeWebhookView,
     CashfreeMandateCheckoutView,
-    PaymentViewSet
+    PaymentViewSet,
+    RetailerWalletViewSet,
+    PayoutRequestViewSet,
+    RevenueDashboardViewSet
 )
 
 router = DefaultRouter()
@@ -16,6 +19,9 @@ router.register(r'emi-contracts', CustomerEMIContractViewSet, basename='emi-cont
 router.register(r'emi-installments', EMIInstallmentViewSet, basename='emi-installments')
 router.register(r'emi-overdue', OverdueEMIsViewSet, basename='emi-overdue')
 router.register(r'payments', PaymentViewSet, basename='payments')
+router.register(r'wallet', RetailerWalletViewSet, basename='wallet')
+router.register(r'payouts', PayoutRequestViewSet, basename='payouts')
+router.register(r'revenue', RevenueDashboardViewSet, basename='revenue')
 
 urlpatterns = [
     path('', include(router.urls)),

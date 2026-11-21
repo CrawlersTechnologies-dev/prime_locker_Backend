@@ -81,6 +81,8 @@ class EMIInstallmentSerializer(serializers.ModelSerializer):
             'collection_date',
             'transaction_ref',
             'notes',
+            'admin_commission',
+            'retailer_share',
             'days_overdue',
             'late_fee',
             'total_due'
@@ -88,6 +90,7 @@ class EMIInstallmentSerializer(serializers.ModelSerializer):
         read_only_fields = [
             'id', 'contract', 'installment_number', 'due_date', 'amount',
             'paid_amount', 'status', 'collected_by', 'collection_date',
+            'admin_commission', 'retailer_share',
             'days_overdue', 'late_fee', 'total_due'
         ]
 
@@ -362,6 +365,8 @@ class PaymentItemSerializer(serializers.ModelSerializer):
             'collection_date',
             'transaction_ref',
             'notes',
+            'admin_commission',
+            'retailer_share',
             'collected_by',
             'collected_by_name',
             'customer',
@@ -459,4 +464,175 @@ class PaymentReceiptSerializer(PaymentItemSerializer):
             "state": r.state or "",
             "pincode": r.pincode or ""
         }
+
+
+# -------------------------------------------------------------
+# Retailer Digital Wallet & Payout Serializers (98% / 2% Model)
+# -------------------------------------------------------------
+from .models import (
+    RetailerWallet,
+    WalletTransaction,
+    PayoutRequest,
+    PayoutStatus,
+    PayoutMethod
+)
+
+
+class WalletTransactionSerializer(serializers.ModelSerializer):
+    """
+    Itemized Ledger Receipt for Wallet Transactions.
+    """
+    transaction_type_display = serializers.CharField(source='get_transaction_type_display', read_only=True)
+
+    class Meta:
+        model = WalletTransaction
+        fields = [
+            'id',
+            'transaction_type',
+            'transaction_type_display',
+            'amount',
+            'gross_amount',
+            'admin_fee',
+            'balance_after',
+            'installment',
+            'reference_id',
+            'description',
+            'created_at'
+        ]
+        read_only_fields = fields
+
+
+class RetailerWalletSerializer(serializers.ModelSerializer):
+    """
+    Retailer Wallet Summary Dashboard Serializer.
+    """
+    retailer_name = serializers.SerializerMethodField()
+    retailer_business_name = serializers.CharField(source='retailer.business_name', read_only=True)
+    bank_account = serializers.SerializerMethodField()
+    recent_transactions = serializers.SerializerMethodField()
+
+    class Meta:
+        model = RetailerWallet
+        fields = [
+            'id',
+            'retailer',
+            'retailer_name',
+            'retailer_business_name',
+            'balance',
+            'total_collected',
+            'total_withdrawn',
+            'total_admin_fee_paid',
+            'bank_account',
+            'recent_transactions',
+            'created_at',
+            'updated_at'
+        ]
+        read_only_fields = fields
+
+    def get_retailer_name(self, obj):
+        return obj.retailer.get_full_name() or obj.retailer.username
+
+    def get_bank_account(self, obj):
+        acc = getattr(obj.retailer, 'bank_account', None)
+        if not acc:
+            return None
+        return {
+            "bank_name": acc.bank_name,
+            "account_holder_name": acc.account_holder_name,
+            "masked_account_number": acc.masked_account_number,
+            "ifsc_code": acc.ifsc_code,
+            "upi_id": acc.upi_id,
+            "verification_status": acc.verification_status
+        }
+
+    def get_recent_transactions(self, obj):
+        txs = obj.transactions.all()[:10]
+        return WalletTransactionSerializer(txs, many=True).data
+
+
+class WalletWithdrawSerializer(serializers.Serializer):
+    """
+    Payload for Retailer Withdrawal Request.
+    """
+    amount = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal('1.00'))
+    payout_method = serializers.ChoiceField(choices=['BANK_TRANSFER', 'UPI'], default='BANK_TRANSFER')
+    bank_name = serializers.CharField(required=False, allow_blank=True)
+    account_number = serializers.CharField(required=False, allow_blank=True)
+    ifsc_code = serializers.CharField(required=False, allow_blank=True)
+    upi_id = serializers.CharField(required=False, allow_blank=True)
+
+
+class WalletBuyKeysSerializer(serializers.Serializer):
+    """
+    Payload for Purchasing Keys with In-App Wallet Balance.
+    """
+    device_type = serializers.ChoiceField(
+        choices=['MOBILE', 'TV', 'ANDROID', 'IOS', 'DLC'], default='MOBILE'
+    )
+    os_type = serializers.ChoiceField(
+        choices=['ANDROID', 'IOS'], default='ANDROID', required=False
+    )
+    quantity = serializers.IntegerField(min_value=1, default=1)
+
+
+class PayoutRequestSerializer(serializers.ModelSerializer):
+    """
+    Payout Request ModelSerializer for Retailer & Admin Views.
+    """
+    retailer_name = serializers.SerializerMethodField()
+    retailer_business_name = serializers.CharField(source='retailer.business_name', read_only=True)
+    processed_by_name = serializers.SerializerMethodField()
+    payout_method_display = serializers.CharField(source='get_payout_method_display', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+
+    class Meta:
+        model = PayoutRequest
+        fields = [
+            'id',
+            'retailer',
+            'retailer_name',
+            'retailer_business_name',
+            'amount',
+            'payout_method',
+            'payout_method_display',
+            'account_holder_name',
+            'bank_name',
+            'account_number',
+            'ifsc_code',
+            'upi_id',
+            'status',
+            'status_display',
+            'utr_number',
+            'admin_notes',
+            'rejection_reason',
+            'processed_by',
+            'processed_by_name',
+            'processed_at',
+            'created_at',
+            'updated_at'
+        ]
+        read_only_fields = [
+            'id', 'retailer', 'retailer_name', 'retailer_business_name',
+            'status', 'status_display', 'payout_method_display', 'utr_number',
+            'rejection_reason', 'processed_by', 'processed_by_name',
+            'processed_at', 'created_at', 'updated_at'
+        ]
+
+    def get_retailer_name(self, obj):
+        return obj.retailer.get_full_name() or obj.retailer.username
+
+    def get_processed_by_name(self, obj):
+        if not obj.processed_by:
+            return None
+        return obj.processed_by.get_full_name() or obj.processed_by.username
+
+
+class PayoutApproveSerializer(serializers.Serializer):
+    utr_number = serializers.CharField(required=False, allow_blank=True)
+    admin_notes = serializers.CharField(required=False, allow_blank=True)
+
+
+class PayoutRejectSerializer(serializers.Serializer):
+    reason = serializers.CharField(required=True)
+
 

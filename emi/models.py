@@ -1,3 +1,4 @@
+from decimal import Decimal
 from django.db import models
 from django.contrib.auth import get_user_model
 from django.utils import timezone
@@ -218,6 +219,16 @@ class EMIInstallment(models.Model):
     transaction_ref = models.CharField(max_length=100, blank=True, null=True)
     notes = models.TextField(blank=True, null=True)
 
+    # 98% / 2% Revenue & Commission Split (Screen A-23 & Wallet Ledger)
+    admin_commission = models.DecimalField(
+        max_digits=10, decimal_places=2, default=0.00,
+        help_text="2% Platform fee retained by Prime-Locker Admin"
+    )
+    retailer_share = models.DecimalField(
+        max_digits=10, decimal_places=2, default=0.00,
+        help_text="98% Net share for the Retailer"
+    )
+
     class Meta:
         ordering = ['contract', 'installment_number']
         unique_together = ('contract', 'installment_number')
@@ -253,3 +264,125 @@ class EMIInstallment(models.Model):
     def total_due(self):
         from decimal import Decimal
         return (Decimal(str(self.amount)) + self.late_fee).quantize(Decimal('0.01'))
+
+
+# -------------------------------------------------------------
+# Retailer Digital Wallet & 98% / 2% Revenue Ledger Models
+# -------------------------------------------------------------
+
+class WalletTransactionType(models.TextChoices):
+    EMI_ONLINE_CREDIT = 'EMI_ONLINE_CREDIT', 'Online EMI Payment (98% Net Credit)'
+    EMI_OFFLINE_FEE_DEBIT = 'EMI_OFFLINE_FEE_DEBIT', 'Cash EMI Fee (2% Admin Platform Fee)'
+    PAYOUT_WITHDRAWAL = 'PAYOUT_WITHDRAWAL', 'Withdrawal to Bank Account'
+    PAYOUT_REVERSAL = 'PAYOUT_REVERSAL', 'Payout Reversal / Refund'
+    KEY_PURCHASE = 'KEY_PURCHASE', 'Device Key Purchase via Wallet'
+    ADMIN_ADJUSTMENT = 'ADMIN_ADJUSTMENT', 'Admin Wallet Adjustment'
+
+
+class PayoutStatus(models.TextChoices):
+    PENDING = 'PENDING', 'Pending Admin Approval'
+    APPROVED = 'APPROVED', 'Approved (Processing)'
+    PROCESSED = 'PROCESSED', 'Processed (Transferred)'
+    REJECTED = 'REJECTED', 'Rejected'
+
+
+class PayoutMethod(models.TextChoices):
+    BANK_TRANSFER = 'BANK_TRANSFER', 'Bank Transfer (IMPS/NEFT)'
+    UPI = 'UPI', 'UPI Transfer'
+
+
+class RetailerWallet(models.Model):
+    """
+    Retailer In-App Digital Wallet for EMI Collections & Payouts.
+    Under the 98% / 2% Revenue Model:
+      - Online EMI payments: +98% net amount credited automatically to this wallet.
+      - Offline cash EMI payments: -2% admin platform fee deducted from this wallet.
+    Retailers can withdraw funds to their registered bank account or buy keys directly.
+    """
+    retailer = models.OneToOneField(User, on_delete=models.CASCADE, related_name='wallet')
+    balance = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0.00'))
+    total_collected = models.DecimalField(
+        max_digits=14, decimal_places=2, default=Decimal('0.00'),
+        help_text="Lifetime gross EMI payments processed"
+    )
+    total_withdrawn = models.DecimalField(
+        max_digits=14, decimal_places=2, default=Decimal('0.00'),
+        help_text="Lifetime funds transferred to bank"
+    )
+    total_admin_fee_paid = models.DecimalField(
+        max_digits=14, decimal_places=2, default=Decimal('0.00'),
+        help_text="Lifetime 2% admin platform fees deducted/paid"
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-updated_at']
+
+    def __str__(self):
+        return f"Wallet ({self.retailer.username}) - Balance: ₹{self.balance}"
+
+    @classmethod
+    def get_or_create_wallet(cls, retailer):
+        wallet, _ = cls.objects.get_or_create(retailer=retailer)
+        return wallet
+
+
+class WalletTransaction(models.Model):
+    """
+    Itemized Ledger of all credits, debits, withdrawals, and key purchases for Retailer Wallet.
+    """
+    wallet = models.ForeignKey(RetailerWallet, on_delete=models.CASCADE, related_name='transactions')
+    transaction_type = models.CharField(max_length=40, choices=WalletTransactionType.choices)
+    amount = models.DecimalField(max_digits=14, decimal_places=2, help_text="Net signed change (+ for credit, - for debit)")
+    gross_amount = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0.00'), help_text="Original transaction/EMI amount")
+    admin_fee = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0.00'), help_text="2% Admin fee component")
+    balance_after = models.DecimalField(max_digits=14, decimal_places=2)
+    installment = models.ForeignKey(
+        EMIInstallment, on_delete=models.SET_NULL, null=True, blank=True, related_name='wallet_transactions'
+    )
+    reference_id = models.CharField(max_length=150, null=True, blank=True)
+    description = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.transaction_type}: {self.amount} (Balance: ₹{self.balance_after})"
+
+
+class PayoutRequest(models.Model):
+    """
+    Retailer Withdrawal / Payout Request to transfer wallet balance to Bank or UPI.
+    """
+    retailer = models.ForeignKey(User, on_delete=models.CASCADE, related_name='payout_requests')
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    payout_method = models.CharField(max_length=30, choices=PayoutMethod.choices, default=PayoutMethod.BANK_TRANSFER)
+
+    # Destination bank / UPI snapshot at time of request
+    account_holder_name = models.CharField(max_length=150, blank=True, null=True)
+    bank_name = models.CharField(max_length=150, blank=True, null=True)
+    account_number = models.CharField(max_length=50, blank=True, null=True)
+    ifsc_code = models.CharField(max_length=20, blank=True, null=True)
+    upi_id = models.CharField(max_length=100, blank=True, null=True)
+
+    status = models.CharField(max_length=20, choices=PayoutStatus.choices, default=PayoutStatus.PENDING)
+    utr_number = models.CharField(max_length=100, null=True, blank=True, help_text="Bank UTR / Transaction Reference ID")
+    admin_notes = models.TextField(null=True, blank=True)
+    rejection_reason = models.TextField(null=True, blank=True)
+
+    processed_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name='processed_payouts'
+    )
+    processed_at = models.DateTimeField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Payout #{self.id} - {self.retailer.username}: ₹{self.amount} ({self.status})"

@@ -271,6 +271,14 @@ class CashfreeService:
                 installment.collected_by = user
             installment.save()
 
+            # 98% / 2% Revenue Split (Scenario A: Online Payment)
+            from emi.services.wallet_service import WalletService
+            WalletService.process_online_emi_split(
+                installment=installment,
+                gross_amount=installment.paid_amount,
+                payment_id=payment_id
+            )
+
             # Check if all contract installments are paid
             unpaid_count = contract.installments.exclude(status=InstallmentStatus.PAID).count()
             overdue_count = contract.installments.filter(status=InstallmentStatus.OVERDUE).count()

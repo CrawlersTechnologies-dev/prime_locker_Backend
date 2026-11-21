@@ -45,6 +45,11 @@
       "key": "device_id",
       "value": "1",
       "type": "string"
+    },
+    {
+      "key": "payout_id",
+      "value": "1",
+      "type": "string"
     }
   ],
   "item": [
@@ -1522,6 +1527,286 @@
               ]
             },
             "description": "Simulates real-time webhook callback dispatched by Loksiz MDM containing device GPS coordinates."
+          }
+        }
+      ]
+    },
+    {
+      "name": "9. EMI Commission & Digital Wallet (98% - 2% Model)",
+      "item": [
+        {
+          "name": "9.1 Retailer My Wallet Summary",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/wallet/my-wallet/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "wallet",
+                "my-wallet",
+                ""
+              ]
+            },
+            "description": "Returns retailer's live digital wallet balance, total collected gross, total withdrawn, 2% platform fee paid, registered bank details, and recent ledger entries."
+          }
+        },
+        {
+          "name": "9.2 Retailer Wallet Statement & Ledger",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/wallet/statement/?page=1",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "wallet",
+                "statement",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                }
+              ]
+            },
+            "description": "Itemized transaction statement and ledger showing every gross collection, 2% admin fee deduction, net credit, balance after, and customer reference."
+          }
+        },
+        {
+          "name": "9.3 Export Wallet Statement to CSV",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/wallet/statement/?export=csv",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "wallet",
+                "statement",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "export",
+                  "value": "csv"
+                }
+              ]
+            },
+            "description": "Exports retailer's itemized transaction ledger into a downloadable CSV spreadsheet report."
+          }
+        },
+        {
+          "name": "9.4 Retailer Withdraw to Bank Request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": \"1000.00\",\n  \"payout_method\": \"BANK_TRANSFER\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/wallet/withdraw/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "wallet",
+                "withdraw",
+                ""
+              ]
+            },
+            "description": "Retailer requests payout of accumulated wallet balance to their registered Bank Account or UPI. Balance is deducted immediately to prevent double spending."
+          }
+        },
+        {
+          "name": "9.5 Buy License Keys with Wallet Balance",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"device_type\": \"MOBILE\",\n  \"quantity\": 2,\n  \"os_type\": \"ANDROID\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/wallet/buy-keys/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "wallet",
+                "buy-keys",
+                ""
+              ]
+            },
+            "description": "Retailer buys new device license keys directly using wallet earnings without spending cash. Keys are generated and assigned immediately."
+          }
+        },
+        {
+          "name": "9.6 Admin View All Payout Requests",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/payouts/?status=PENDING",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "payouts",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "PENDING"
+                }
+              ]
+            },
+            "description": "Admin dashboard to view and filter all retailer withdrawal requests across PENDING, PROCESSED, and REJECTED states."
+          }
+        },
+        {
+          "name": "9.7 Admin Approve Payout (Disburse Funds)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"utr_number\": \"UTR998877665544\",\n  \"admin_notes\": \"Disbursed via NEFT to retailer bank account\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/payouts/{{payout_id}}/approve/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "payouts",
+                "{{payout_id}}",
+                "approve",
+                ""
+              ]
+            },
+            "description": "Admin marks payout as PROCESSED, records the bank UTR number, and updates retailer total_withdrawn balance."
+          }
+        },
+        {
+          "name": "9.8 Admin Reject Payout (Refund to Wallet)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Bank account number mismatch or IFSC inactive. Please re-verify.\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/payouts/{{payout_id}}/reject/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "payouts",
+                "{{payout_id}}",
+                "reject",
+                ""
+              ]
+            },
+            "description": "Admin rejects payout request. Deducted funds are immediately refunded back to the retailer's digital wallet."
+          }
+        },
+        {
+          "name": "9.9 Admin Revenue Dashboard (Live 2% Analytics)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/revenue/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "revenue",
+                ""
+              ]
+            },
+            "description": "Real-time analytics dashboard reporting total 2% platform revenue (today, this month, this year, all-time), gross EMI volumes, online vs offline split, and wallet liability balances."
           }
         }
       ]

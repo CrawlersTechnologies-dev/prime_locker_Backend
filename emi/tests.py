@@ -18,11 +18,14 @@ from devices.models import (
     OSType
 )
 from emi.models import (
+    EMIPlanTemplate,
     CustomerEMIContract,
     EMIInstallment,
     InstallmentStatus,
     EMIContractStatus,
-    PaymentMode
+    PaymentMode,
+    DeviceType,
+    DeviceState
 )
 
 User = get_user_model()
@@ -600,3 +603,293 @@ class EMIBackendTests(TestCase):
         url = f'/api/emi-contracts/{self.contract.id}/agreement/'
         resp = self.client.get(url)
         self.assertIn(resp.status_code, [status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND])
+
+
+@override_settings(
+    ROCKETPAY_SIMULATION=True,
+    CASHFREE_SIMULATION=True,
+    CASHFREE_CONFIG={'APP_ID': '', 'SECRET_KEY': '', 'ENV': 'TEST'}
+)
+class WalletAndRevenueCommissionTests(TestCase):
+    def setUp(self):
+        self.admin = User.objects.create_user(
+            username='wallet_admin',
+            email='admin@wallet.com',
+            password='Password123!',
+            role='SUPER_ADMIN'
+        )
+        self.retailer = User.objects.create_user(
+            username='wallet_retailer',
+            email='retailer@wallet.com',
+            password='Password123!',
+            role='RETAILER',
+            mobile_number='+919888811111',
+            business_name='Prime Electronics'
+        )
+        self.customer = User.objects.create_user(
+            username='wallet_customer',
+            email='customer@wallet.com',
+            password='Password123!',
+            role='CUSTOMER',
+            mobile_number='+919888822222',
+            parent=self.retailer
+        )
+
+        from accounts.models import RetailerBankAccount, BankVerificationStatus
+        self.bank_account = RetailerBankAccount.objects.create(
+            retailer=self.retailer,
+            account_holder_name='Prime Electronics Hub',
+            bank_name='HDFC Bank',
+            account_number='50100234567890',
+            ifsc_code='HDFC0001234',
+            upi_id='prime@hdfcbank',
+            mobile_number='+919888811111',
+            verification_status=BankVerificationStatus.VERIFIED
+        )
+
+        self.plan = EMIPlanTemplate.objects.create(
+            name='Wallet Standard 6M',
+            tenure_months=6,
+            min_down_payment_percentage=Decimal('0.00'),
+            processing_fee=Decimal('0.00'),
+            interest_rate_percentage=Decimal('0.00'),
+            grace_period_days=3,
+            is_active=True
+        )
+
+        self.contract = CustomerEMIContract.objects.create(
+            customer=self.customer,
+            retailer=self.retailer,
+            plan_template=self.plan,
+            device_imei='358899001122334',
+            device_name='OnePlus 12',
+            device_type=DeviceType.MOBILE,
+            device_state=DeviceState.NEW,
+            total_amount=Decimal('12000.00'),
+            down_payment=Decimal('0.00'),
+            financed_amount=Decimal('12000.00'),
+            tenure_months=6,
+            monthly_emi_amount=Decimal('2000.00'),
+            first_emi_date=timezone.localdate(),
+            status=EMIContractStatus.ACTIVE
+        )
+
+        self.inst1 = EMIInstallment.objects.create(
+            contract=self.contract,
+            installment_number=1,
+            due_date=timezone.localdate(),
+            amount=Decimal('2000.00'),
+            status=InstallmentStatus.DUE
+        )
+        self.inst2 = EMIInstallment.objects.create(
+            contract=self.contract,
+            installment_number=2,
+            due_date=timezone.localdate() + timedelta(days=30),
+            amount=Decimal('1000.00'),
+            status=InstallmentStatus.UPCOMING
+        )
+
+        self.client = APIClient()
+
+    def test_online_payment_98_2_split(self):
+        """
+        Scenario A: Customer pays online via Cashfree / UPI.
+        - ₹2,000 paid online.
+        - Admin gets 2% = ₹40.00.
+        - Retailer wallet gets 98% = ₹1,960.00.
+        """
+        self.client.force_authenticate(user=self.customer)
+        verify_url = f'/api/emi-installments/{self.inst1.id}/verify-online-payment/'
+
+        resp = self.client.post(verify_url, {'order_id': f'cf_sim_{self.inst1.id}'}, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+        self.inst1.refresh_from_db()
+        self.assertEqual(self.inst1.status, InstallmentStatus.PAID)
+        self.assertEqual(self.inst1.admin_commission, Decimal('40.00'))
+        self.assertEqual(self.inst1.retailer_share, Decimal('1960.00'))
+
+        from emi.models import RetailerWallet, WalletTransaction, WalletTransactionType
+        wallet = RetailerWallet.objects.get(retailer=self.retailer)
+        self.assertEqual(wallet.balance, Decimal('1960.00'))
+        self.assertEqual(wallet.total_collected, Decimal('2000.00'))
+        self.assertEqual(wallet.total_admin_fee_paid, Decimal('40.00'))
+
+        tx = WalletTransaction.objects.filter(wallet=wallet, installment=self.inst1).first()
+        self.assertIsNotNone(tx)
+        self.assertEqual(tx.transaction_type, WalletTransactionType.EMI_ONLINE_CREDIT)
+        self.assertEqual(tx.amount, Decimal('1960.00'))
+        self.assertEqual(tx.admin_fee, Decimal('40.00'))
+        self.assertEqual(tx.balance_after, Decimal('1960.00'))
+
+    def test_offline_cash_payment_deducts_2_percent(self):
+        """
+        Scenario B: Customer pays cash at shop.
+        - Retailer holds 100% cash in hand (₹1,000).
+        - 2% Admin fee (₹20) is deducted from Retailer in-app wallet.
+        """
+        from emi.models import RetailerWallet
+        wallet = RetailerWallet.get_or_create_wallet(self.retailer)
+        wallet.balance = Decimal('1960.00')
+        wallet.save()
+
+        self.client.force_authenticate(user=self.retailer)
+        record_url = f'/api/emi-installments/{self.inst2.id}/record-payment/'
+        resp = self.client.post(record_url, {
+            'amount': 1000.00,
+            'payment_mode': 'CASH',
+            'notes': 'Paid in cash at store'
+        }, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+        self.inst2.refresh_from_db()
+        self.assertEqual(self.inst2.status, InstallmentStatus.PAID)
+        self.assertEqual(self.inst2.admin_commission, Decimal('20.00'))
+        self.assertEqual(self.inst2.retailer_share, Decimal('980.00'))
+
+        wallet.refresh_from_db()
+        # Initial 1960.00 - 20.00 = 1940.00
+        self.assertEqual(wallet.balance, Decimal('1940.00'))
+
+        from emi.models import WalletTransaction, WalletTransactionType
+        tx = WalletTransaction.objects.filter(wallet=wallet, installment=self.inst2).first()
+        self.assertIsNotNone(tx)
+        self.assertEqual(tx.transaction_type, WalletTransactionType.EMI_OFFLINE_FEE_DEBIT)
+        self.assertEqual(tx.amount, Decimal('-20.00'))
+        self.assertEqual(tx.balance_after, Decimal('1940.00'))
+
+    def test_wallet_summary_and_statement(self):
+        from emi.models import RetailerWallet
+        wallet = RetailerWallet.get_or_create_wallet(self.retailer)
+        wallet.balance = Decimal('5000.00')
+        wallet.save()
+
+        self.client.force_authenticate(user=self.retailer)
+        resp = self.client.get('/api/wallet/')
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data['balance'], '5000.00')
+        self.assertIn('bank_account', resp.data)
+        self.assertEqual(resp.data['bank_account']['bank_name'], 'HDFC Bank')
+
+        # Statement
+        stmt_resp = self.client.get('/api/wallet/statement/')
+        self.assertEqual(stmt_resp.status_code, status.HTTP_200_OK)
+
+        # CSV Export
+        csv_resp = self.client.get('/api/wallet/statement/?export=csv')
+        self.assertEqual(csv_resp.status_code, status.HTTP_200_OK)
+        self.assertTrue(csv_resp['Content-Type'].startswith('text/csv'))
+
+    def test_wallet_payout_withdrawal_and_approval_flow(self):
+        from emi.models import RetailerWallet, PayoutRequest, PayoutStatus
+        wallet = RetailerWallet.get_or_create_wallet(self.retailer)
+        wallet.balance = Decimal('3000.00')
+        wallet.save()
+
+        # Retailer requests withdrawal of ₹1,000
+        self.client.force_authenticate(user=self.retailer)
+        withdraw_resp = self.client.post('/api/wallet/withdraw/', {
+            'amount': 1000.00,
+            'payout_method': 'BANK_TRANSFER'
+        }, format='json')
+        self.assertEqual(withdraw_resp.status_code, status.HTTP_201_CREATED)
+
+        wallet.refresh_from_db()
+        self.assertEqual(wallet.balance, Decimal('2000.00'))
+
+        payout = PayoutRequest.objects.filter(retailer=self.retailer).first()
+        self.assertIsNotNone(payout)
+        self.assertEqual(payout.amount, Decimal('1000.00'))
+        self.assertEqual(payout.status, PayoutStatus.PENDING)
+
+        # Admin approves payout
+        self.client.force_authenticate(user=self.admin)
+        approve_resp = self.client.post(f'/api/payouts/{payout.id}/approve/', {
+            'utr_number': 'UTR9988776655',
+            'admin_notes': 'Bank transfer completed'
+        }, format='json')
+        self.assertEqual(approve_resp.status_code, status.HTTP_200_OK)
+
+        payout.refresh_from_db()
+        self.assertEqual(payout.status, PayoutStatus.PROCESSED)
+        self.assertEqual(payout.utr_number, 'UTR9988776655')
+
+        wallet.refresh_from_db()
+        self.assertEqual(wallet.total_withdrawn, Decimal('1000.00'))
+
+    def test_wallet_payout_rejection_and_refund(self):
+        from emi.models import RetailerWallet, PayoutRequest, PayoutStatus, WalletTransaction, WalletTransactionType
+        wallet = RetailerWallet.get_or_create_wallet(self.retailer)
+        wallet.balance = Decimal('1500.00')
+        wallet.save()
+
+        # Retailer requests withdrawal of ₹500
+        self.client.force_authenticate(user=self.retailer)
+        self.client.post('/api/wallet/withdraw/', {'amount': 500.00, 'payout_method': 'UPI'}, format='json')
+
+        wallet.refresh_from_db()
+        self.assertEqual(wallet.balance, Decimal('1000.00'))
+
+        payout = PayoutRequest.objects.filter(retailer=self.retailer).first()
+
+        # Admin rejects payout
+        self.client.force_authenticate(user=self.admin)
+        reject_resp = self.client.post(f'/api/payouts/{payout.id}/reject/', {
+            'reason': 'UPI ID inactive'
+        }, format='json')
+        self.assertEqual(reject_resp.status_code, status.HTTP_200_OK)
+
+        payout.refresh_from_db()
+        self.assertEqual(payout.status, PayoutStatus.REJECTED)
+
+        wallet.refresh_from_db()
+        # Refunded: 1000 + 500 = 1500
+        self.assertEqual(wallet.balance, Decimal('1500.00'))
+
+        tx = WalletTransaction.objects.filter(wallet=wallet, transaction_type=WalletTransactionType.PAYOUT_REVERSAL).first()
+        self.assertIsNotNone(tx)
+        self.assertEqual(tx.amount, Decimal('500.00'))
+
+    def test_buy_keys_with_wallet_balance(self):
+        from emi.models import RetailerWallet, WalletTransaction, WalletTransactionType
+        from keys.models import DeviceKey
+        wallet = RetailerWallet.get_or_create_wallet(self.retailer)
+        wallet.balance = Decimal('2000.00')
+        wallet.save()
+
+        # Buy 2 mobile keys (₹500 each = ₹1,000)
+        self.client.force_authenticate(user=self.retailer)
+        buy_resp = self.client.post('/api/wallet/buy-keys/', {
+            'device_type': 'MOBILE',
+            'quantity': 2,
+            'os_type': 'ANDROID'
+        }, format='json')
+        self.assertEqual(buy_resp.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(buy_resp.data['keys_count'], 2)
+
+        wallet.refresh_from_db()
+        # 2000 - 1000 = 1000
+        self.assertEqual(wallet.balance, Decimal('1000.00'))
+
+        keys = DeviceKey.objects.filter(current_owner=self.retailer)
+        self.assertEqual(keys.count(), 2)
+        for k in keys:
+            self.assertTrue(k.key_string.startswith('AND-'))
+
+        tx = WalletTransaction.objects.filter(wallet=wallet, transaction_type=WalletTransactionType.KEY_PURCHASE).first()
+        self.assertIsNotNone(tx)
+        self.assertEqual(tx.amount, Decimal('-1000.00'))
+
+    def test_revenue_dashboard_stats(self):
+        # Mark an installment paid with split via CashfreeService
+        from emi.services.cashfree_service import CashfreeService
+        CashfreeService.mark_installment_paid(self.inst1, Decimal('2000.00'), 'cf_test_rev')
+
+        self.client.force_authenticate(user=self.admin)
+        resp = self.client.get('/api/revenue/')
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data['platform_commission_percentage'], 2.0)
+        self.assertEqual(resp.data['retailer_share_percentage'], 98.0)
+        self.assertGreaterEqual(resp.data['revenue']['all_time_admin_revenue'], 40.0)
+        self.assertGreaterEqual(resp.data['volume']['all_time_gross_emi_volume'], 2000.0)
+

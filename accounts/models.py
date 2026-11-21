@@ -218,6 +218,20 @@ class PlatformSettings(models.Model):
     rocketpay_webhook_secret = models.TextField(null=True, blank=True)
     rocketpay_enabled = models.BooleanField(default=True)
     
+    # EMI Commission & Revenue Settings (98% / 2% Model)
+    emi_admin_fee_percentage = models.DecimalField(
+        max_digits=5, decimal_places=2, default=2.00,
+        help_text="Platform commission fee percentage on EMI payments (default 2.00%)"
+    )
+    key_price_mobile = models.DecimalField(
+        max_digits=10, decimal_places=2, default=500.00,
+        help_text="Default purchase price per mobile license key when bought via wallet"
+    )
+    key_price_tv = models.DecimalField(
+        max_digits=10, decimal_places=2, default=700.00,
+        help_text="Default purchase price per TV license key when bought via wallet"
+    )
+
     # Retailer Agreement & Terms and Conditions
     retailer_terms_and_conditions = models.TextField(
         null=True,
