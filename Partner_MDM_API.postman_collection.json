@@ -1210,6 +1210,31 @@
               "body": "{\n  \"success\": true,\n  \"request_id\": \"4b588adeaf5ff94aa160d95e4480ded3\",\n  \"data\": {\n    \"device\": {\n      \"id\": 3501,\n      \"customer_id\": 1201,\n      \"customer_name\": \"Ramesh K. Patel\",\n      \"phone_number\": \"9876543210\",\n      \"brand\": \"Samsung\",\n      \"model\": \"Galaxy A15 5G\",\n      \"manufacturer\": null,\n      \"imei1\": \"356938035643809\",\n      \"imei2\": \"356938035643817\",\n      \"sim1\": null,\n      \"sim2\": null,\n      \"device_type\": \"new\",\n      \"finance\": \"In-house\",\n      \"status\": {\n        \"is_enrolled\": false,\n        \"enrolled_at\": null,\n        \"is_online\": false,\n        \"is_locked\": false,\n        \"is_removed\": false\n      },\n      \"loan\": {\n        \"device_price\": 15999,\n        \"processing_fee\": 499,\n        \"down_payment\": 3999,\n        \"number_of_emi\": 6,\n        \"interest_rate\": 0,\n        \"monthly_emi\": 2100,\n        \"first_emi_date\": \"2026-12-05\",\n        \"payment_type\": \"manual\",\n        \"pending_emis\": 6,\n        \"is_loan_active\": true\n      },\n      \"policy\": {\n        \"lock_device\": false,\n        \"camera_enabled\": false,\n        \"calls_enabled\": false,\n        \"social_apps_enabled\": false,\n        \"wifi_enabled\": false,\n        \"mobile_data_enabled\": false,\n        \"usb_debugging_enabled\": false,\n        \"offline_lock\": false,\n        \"factory_reset_enabled\": true,\n        \"get_sim_info\": false,\n        \"get_location\": false,\n        \"set_wallpaper\": false,\n        \"hide_application\": false,\n        \"screen_lock_enabled\": false\n      },\n      \"location\": null,\n      \"created_at\": \"2026-11-02T15:44:07+05:30\",\n      \"updated_at\": \"2026-11-02T15:44:07+05:30\"\n    },\n    \"updated_fields\": [\n      \"model\",\n      \"monthly_emi\"\n    ],\n    \"emi_schedule_regenerated\": true\n  }\n}"
             }
           ]
+        },
+        {
+          "name": "6.7 Generic Retailer Enrollment QRs (New Device, Running Device, Wireless)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/mdm/enrollment-qrs/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "mdm",
+                "enrollment-qrs",
+                ""
+              ]
+            },
+            "description": "Returns generic MDM enrollment QR codes for retailer app Customer QR tab: qr_service_app (New Device / 7-tap), qr_running_device (Running Device normal), and qr_wireless (null if unsupported)."
+          }
         }
       ]
     },

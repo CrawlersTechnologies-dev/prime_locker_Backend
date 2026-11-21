@@ -845,33 +845,71 @@ class CustomerViewSet(BaseRoleViewSet):
         password = data.get('password') or f"PL@{mobile_number[-4:]}"
 
         # 2. Device & Loan Details
+        from devices.models import Device, DeviceCategory, OSType, DeviceScannerState, DeviceLockStatus, LockProvider
+        from devices.imei_lookup import lookup_imei
+        from keys.models import DeviceKey, KeyStatus, KeyAction, KeyTransaction
+
+        os_type_input = str(data.get('os_type') or '').upper()
+        device_type_input = str(data.get('device_type') or '').upper()
+        brand_input = str(data.get('brand') or '').upper()
+        serial_number = (data.get('serial_number') or data.get('serialNumber') or '').strip()
         imei = data.get('imei', '').strip()
-        if not imei:
-            return Response(
-                {"detail": "Field 'imei' is required for device enrollment."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+
+        is_ios = (os_type_input == 'IOS') or (device_type_input == 'IOS') or (brand_input == 'APPLE')
+
+        if is_ios:
+            if not serial_number and not imei:
+                return Response(
+                    {"detail": "Field 'serial_number' is required for iOS device enrollment."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            if not imei:
+                imei = serial_number
+            os_type = OSType.IOS
+            brand = data.get('brand') or 'Apple'
+            model = data.get('model') or 'iPhone'
+            device_category = DeviceCategory.MOBILE
+            device_state = data.get('device_state', DeviceScannerState.NEW)
+            device_name = data.get('device_name') or f"{brand} {model}".strip()
+            lock_provider = LockProvider.APPLE_MDM
+        else:
+            if not imei:
+                return Response(
+                    {"detail": "Field 'imei' is required for device enrollment."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            detected = lookup_imei(imei)
+            brand = data.get('brand') or detected.get('brand', 'Android Device')
+            model = data.get('model') or detected.get('model', f"Model {imei[:8]}")
+            device_category = data.get('device_category') or detected.get('device_category', DeviceCategory.MOBILE)
+            os_type = data.get('os_type') or detected.get('os_type', OSType.ANDROID)
+            device_state = data.get('device_state', DeviceScannerState.NEW)
+            device_name = data.get('device_name') or f"{brand} {model}".strip()
+            lock_provider = data.get('lock_provider')
+            if not lock_provider:
+                mdm_type = (data.get('mdm_type') or '').upper()
+                if mdm_type == 'DLC':
+                    lock_provider = LockProvider.ROCKETPAY
+                elif mdm_type == 'DPC':
+                    lock_provider = LockProvider.PARTNER_MDM
+                elif os_type == OSType.IOS:
+                    lock_provider = LockProvider.APPLE_MDM
+                else:
+                    lock_provider = LockProvider.ROCKETPAY if os_type == OSType.ANDROID else LockProvider.OWN_AGENT
 
         loan_provider = data.get('loan_provider', 'NO_LOAN_CASH')
         loan_provider_other = data.get('loan_provider_other', '')
         loan_account_number = data.get('loan_account_number', '')
 
-        from devices.models import Device, DeviceCategory, OSType, DeviceScannerState, DeviceLockStatus, LockProvider
-        from devices.imei_lookup import lookup_imei
-        from keys.models import DeviceKey, KeyStatus, KeyAction, KeyTransaction
-
-        detected = lookup_imei(imei)
-        brand = data.get('brand') or detected.get('brand', 'Android Device')
-        model = data.get('model') or detected.get('model', f"Model {imei[:8]}")
-        device_category = data.get('device_category') or detected.get('device_category', DeviceCategory.MOBILE)
-        os_type = data.get('os_type') or detected.get('os_type', OSType.ANDROID)
-        device_state = data.get('device_state', DeviceScannerState.NEW)
-        device_name = data.get('device_name') or f"{brand} {model}".strip()
-
-        # Check existing IMEI
+        # Check existing IMEI or Serial Number
         if Device.objects.filter(imei=imei).exists():
             return Response(
-                {"detail": f"A device with IMEI {imei} is already registered in the system."},
+                {"detail": f"A device with IMEI/ID {imei} is already registered in the system."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        if serial_number and Device.objects.filter(serial_number=serial_number).exists():
+            return Response(
+                {"detail": f"A device with Serial Number {serial_number} is already registered in the system."},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
@@ -895,9 +933,9 @@ class CustomerViewSet(BaseRoleViewSet):
             service_code = resolve_service_code(
                 service=data.get('service') or data.get('service_code'),
                 mdm_type=data.get('mdm_type'),
-                lock_provider=data.get('lock_provider'),
-                os_type=data.get('os_type'),
-                device_category=data.get('device_category'),
+                lock_provider=lock_provider,
+                os_type=os_type,
+                device_category=device_category,
             )
             if user.role != 'SUPER_ADMIN':
                 balance_info = get_service_balance_info(user, service_code)
@@ -912,39 +950,27 @@ class CustomerViewSet(BaseRoleViewSet):
                     )
                 key_obj = get_service_key_queryset(user, service_code).order_by('id').first()
 
-        # Item 12: Check Approved Phone Models (TAC list)
-        tac = imei[:8]
-        from devices.models import ApprovedDeviceTAC
-        from accounts.models import PlatformSettings
-        ps = PlatformSettings.get_settings()
-        current_env = 'STAGING' if ('staging' in (ps.rocketpay_base_url or '').lower()) else 'PRODUCTION'
-        
-        if ApprovedDeviceTAC.objects.filter(environment__in=[current_env, 'ALL'], active=True).exists():
-            is_approved = ApprovedDeviceTAC.objects.filter(
-                tac=tac,
-                environment__in=[current_env, 'ALL'],
-                active=True
-            ).exists()
-            if not is_approved:
-                return Response(
-                    {"detail": f"Device model with TAC '{tac}' is not in the approved list for {current_env}. Enrolment rejected."},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
+        # Item 12: Check Approved Phone Models (TAC list for Android)
+        if not is_ios:
+            tac = imei[:8]
+            from devices.models import ApprovedDeviceTAC
+            from accounts.models import PlatformSettings
+            ps = PlatformSettings.get_settings()
+            current_env = 'STAGING' if ('staging' in (ps.rocketpay_base_url or '').lower()) else 'PRODUCTION'
+            
+            if ApprovedDeviceTAC.objects.filter(environment__in=[current_env, 'ALL'], active=True).exists():
+                is_approved = ApprovedDeviceTAC.objects.filter(
+                    tac=tac,
+                    environment__in=[current_env, 'ALL'],
+                    active=True
+                ).exists()
+                if not is_approved:
+                    return Response(
+                        {"detail": f"Device model with TAC '{tac}' is not in the approved list for {current_env}. Enrolment rejected."},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
 
-        # Determine Lock Provider
-        lock_provider = data.get('lock_provider')
-        if not lock_provider:
-            mdm_type = (data.get('mdm_type') or '').upper()
-            if mdm_type == 'DLC':
-                lock_provider = LockProvider.ROCKETPAY
-            elif mdm_type == 'DPC':
-                lock_provider = LockProvider.PARTNER_MDM
-            elif os_type == OSType.IOS:
-                lock_provider = LockProvider.APPLE_MDM
-            else:
-                lock_provider = LockProvider.ROCKETPAY if os_type == OSType.ANDROID else LockProvider.OWN_AGENT
-
-        # Item 9: Enrolment Order - save device first in atomic transaction, then enrol with RocketPay, roll back if fails
+        # Item 9: Enrolment Order - save device first in atomic transaction, then enrol with MDM, roll back if fails
         with transaction.atomic():
             # Check/Create Customer
             customer = User.objects.filter(mobile_number=mobile_number).first()
@@ -983,7 +1009,8 @@ class CustomerViewSet(BaseRoleViewSet):
                 os_type=os_type,
                 device_state=device_state,
                 imei=imei,
-                secondary_imei=data.get('secondary_imei', ''),
+                secondary_imei=data.get('secondary_imei', '') or data.get('imei2', ''),
+                serial_number=serial_number,
                 brand=brand,
                 model=model,
                 device_name=device_name,
@@ -1064,6 +1091,31 @@ class CustomerViewSet(BaseRoleViewSet):
                 device.qr_code_url = qr_code_data
                 device.qr_codes = qr_codes_data
                 device.save(update_fields=['provider_device_id', 'provider_status', 'qr_code_url', 'qr_codes'])
+            elif lock_provider == LockProvider.APPLE_MDM:
+                from devices.services.apple_mdm import AppleMDMService
+                
+                # Enroll iPhone into Apple MDM via Loksiz v1.4
+                apple_res = AppleMDMService.add_device(
+                    imei=imei,
+                    serial_number=serial_number or imei,
+                    customer_name=full_name,
+                    customer_mobile=mobile_number,
+                    customer_email=email,
+                    imei2=data.get('secondary_imei') or data.get('imei2')
+                )
+                if apple_res.get('error') != 0:
+                    transaction.set_rollback(True)
+                    err_msg = apple_res.get('msg') or apple_res.get('message') or "Apple MDM enrollment failed."
+                    return Response(
+                        {"detail": f"Apple MDM enrollment failed: {err_msg}", "details": apple_res},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+
+                device_reg_num = (apple_res.get('data') or {}).get('deviceRegNum') or ''
+                rp_device_id = device_reg_num
+                device.provider_device_id = str(device_reg_num) if device_reg_num else device.provider_device_id
+                device.provider_status = 'PENDING'
+                device.save(update_fields=['provider_device_id', 'provider_status'])
 
             # Activate Key if present
             if key_obj:
@@ -1117,6 +1169,7 @@ class CustomerViewSet(BaseRoleViewSet):
             "device": {
                 "id": device.id,
                 "imei": device.imei,
+                "serial_number": device.serial_number,
                 "brand": device.brand,
                 "model": device.model,
                 "device_category": device.device_category,
@@ -2752,6 +2805,7 @@ class DeviceActivateAuthView(APIView):
             "device": {
                 "id": device.id,
                 "imei": device.imei,
+                "serial_number": device.serial_number,
                 "brand": device.brand,
                 "model": device.model,
                 "status": device.status,

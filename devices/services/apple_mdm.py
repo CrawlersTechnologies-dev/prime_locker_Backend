@@ -15,6 +15,7 @@ Handles iPhone lifecycle management:
   - EMI Financing & Repayment Schedules
   - Real-time Webhook Receiver (apple_device_status_update)
 """
+import uuid
 import logging
 import requests
 from django.conf import settings
@@ -49,13 +50,16 @@ class AppleMDMService:
         token = config.get('TOKEN')
         url = f"{base_url}/{endpoint.lstrip('/')}"
 
-        # If no token configured, operate gracefully in simulation mode
-        if not token:
+        # If no token configured or simulation explicitly enabled, operate gracefully in simulation mode
+        if not token or getattr(settings, 'APPLE_MDM_SIMULATION', False):
             logger.info(f"[SIMULATION] Apple MDM {method} {url} with payload {payload}")
+            sim_data = {"status": True, "simulated": True}
+            if 'add-device' in endpoint:
+                sim_data["deviceRegNum"] = f"1726567{uuid.uuid4().hex[:6]}"
             return {
                 "error": 0,
                 "msg": f"[SIMULATION] Apple MDM {endpoint} simulated successfully.",
-                "data": {"status": True, "simulated": True}
+                "data": sim_data
             }
 
         headers = cls._get_headers()
@@ -124,9 +128,11 @@ class AppleMDMService:
         POST /validate-device
         Checks iPhone eligibility, ensures no duplicates, and verifies wallet key balance.
         """
+        clean_imei = str(imei or serial_number or '').strip()
+        clean_sn = str(serial_number or imei or '').strip()
         body = {
-            "imei": str(imei).strip(),
-            "serialNumber": str(serial_number).strip()
+            "imei": clean_imei,
+            "serialNumber": clean_sn
         }
         if imei2:
             body["imei2"] = str(imei2).strip()
@@ -142,9 +148,11 @@ class AppleMDMService:
         POST /add-device
         Registers new Apple device into MDM platform and returns deviceRegNum.
         """
+        clean_imei = str(imei or serial_number or '').strip()
+        clean_sn = str(serial_number or imei or '').strip()
         body = {
-            "imei": str(imei).strip(),
-            "serialNumber": str(serial_number).strip(),
+            "imei": clean_imei,
+            "serialNumber": clean_sn,
             "customerName": customer_name or "",
             "customerMobile": customer_mobile or "",
             "customerEmail": customer_email or ""

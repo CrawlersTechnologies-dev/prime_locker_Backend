@@ -9,7 +9,8 @@ from .views import (
     RocketPayWebhookView,
     AppleMDMWebhookView,
     ApprovedDeviceTACViewSet,
-    InstallationVideoViewSet
+    InstallationVideoViewSet,
+    RetailerEnrollmentQRsView
 )
 
 router = DefaultRouter()
@@ -20,6 +21,7 @@ router.register(r'tac-list', ApprovedDeviceTACViewSet, basename='tac-list')
 router.register(r'installation-videos', InstallationVideoViewSet, basename='installation-videos')
 
 urlpatterns = [
+    path('mdm/enrollment-qrs/', RetailerEnrollmentQRsView.as_view(), name='retailer-mdm-enrollment-qrs'),
     path('app-versions/download/<str:slug>/', PublicAppDownloadView.as_view(), name='public_app_download'),
     path('devices/ping/', DeviceHeartbeatView.as_view(), name='device-heartbeat'),
     path('devices/check-in/', DeviceHeartbeatView.as_view(), name='device-checkin-alias'),

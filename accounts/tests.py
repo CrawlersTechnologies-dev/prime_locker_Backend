@@ -10,7 +10,7 @@ from keys.models import DeviceKey, KeyStatus
 User = get_user_model()
 
 
-@override_settings(ROCKETPAY_SIMULATION=True)
+@override_settings(ROCKETPAY_SIMULATION=True, PARTNER_MDM_SIMULATION=True, APPLE_MDM_SIMULATION=True)
 class AccountsBackendTests(TestCase):
     def setUp(self):
         self.retailer = User.objects.create_user(
@@ -528,6 +528,77 @@ class AccountsBackendTests(TestCase):
         device.refresh_from_db()
         self.assertTrue(device.is_activated)
         self.assertEqual(device.fcm_token, 'fcm_running_token_123')
+
+    def test_retailer_generic_mdm_enrollment_qrs_endpoint(self):
+        """Verify GET /mdm/enrollment-qrs/ returns generic QRs (qr_service_app, qr_running_device, qr_wireless)"""
+        for url in ['/api/mdm/enrollment-qrs/', '/mdm/enrollment-qrs/']:
+            resp = self.client.get(url)
+            self.assertEqual(resp.status_code, status.HTTP_200_OK)
+            self.assertIn('qr_service_app', resp.data)
+            self.assertIn('qr_running_device', resp.data)
+            self.assertIn('qr_wireless', resp.data)
+            self.assertTrue(resp.data['qr_service_app'])
+            self.assertTrue(resp.data['qr_running_device'])
+            self.assertIsNone(resp.data['qr_wireless'])
+
+    def test_customer_enroll_ios_with_serial_number_and_no_imei(self):
+        """Verify iOS customer enrollment accepts serial_number without requiring IMEI"""
+        from devices.models import Device, OSType, LockProvider
+        # Allocate an iOS key to retailer
+        ios_key = DeviceKey.objects.create(
+            key_string='IOS-TEST-KEY-001',
+            device_type='IOS',
+            status=KeyStatus.AVAILABLE,
+            current_owner=self.retailer
+        )
+
+        payload = {
+            'full_name': 'Rohit Sharma',
+            'mobile_number': '+919877777777',
+            'os_type': 'IOS',
+            'serial_number': 'C02TESTIPHONE15',
+            'brand': 'Apple',
+            'model': 'iPhone 15 Pro',
+            'loan_provider': 'NO_LOAN_CASH'
+        }
+
+        resp = self.client.post('/api/customers/enroll/', payload, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        self.assertIn('device', resp.data)
+        dev_data = resp.data['device']
+        self.assertEqual(dev_data['os_type'], 'IOS')
+        self.assertEqual(dev_data['lock_provider'], 'APPLE_MDM')
+        self.assertEqual(dev_data['serial_number'], 'C02TESTIPHONE15')
+        self.assertTrue(dev_data['provider_device_id'])
+
+        # Verify device in DB
+        created_dev = Device.objects.get(id=dev_data['id'])
+        self.assertEqual(created_dev.os_type, OSType.IOS)
+        self.assertEqual(created_dev.lock_provider, LockProvider.APPLE_MDM)
+        self.assertEqual(created_dev.serial_number, 'C02TESTIPHONE15')
+        self.assertTrue(created_dev.provider_device_id)
+
+        # Verify key was consumed
+        ios_key.refresh_from_db()
+        self.assertEqual(ios_key.status, KeyStatus.ACTIVATED)
+
+    def test_customer_enroll_ios_zero_balance_blocked(self):
+        """Verify iOS enrollment is blocked with ZERO_KEY_BALANCE when retailer has 0 iOS keys"""
+        # Ensure 0 available iOS keys
+        DeviceKey.objects.filter(current_owner=self.retailer, device_type='IOS').delete()
+
+        payload = {
+            'full_name': 'Virat Kohli',
+            'mobile_number': '+919866666667',
+            'os_type': 'IOS',
+            'serial_number': 'C02NOBALIPHONE',
+            'brand': 'Apple',
+            'model': 'iPhone 14'
+        }
+
+        resp = self.client.post('/api/customers/enroll/', payload, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(resp.data.get('error_code'), 'ZERO_KEY_BALANCE')
 
 
 @override_settings(ROCKETPAY_SIMULATION=True, PARTNER_MDM_SIMULATION=True)

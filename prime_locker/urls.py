@@ -17,10 +17,11 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path, include
 from accounts.views import ProtectedMediaView, DeviceActivateAuthView
-from devices.views import PublicAppDownloadView
+from devices.views import PublicAppDownloadView, RetailerEnrollmentQRsView
 from emi.views import CashfreeMandateCheckoutView
 
 urlpatterns = [
+    path('mdm/enrollment-qrs/', RetailerEnrollmentQRsView.as_view(), name='root_retailer_mdm_enrollment_qrs'),
     path('app-versions/download/<str:slug>/', PublicAppDownloadView.as_view(), name='root_public_app_download'),
     path('auth/device-activate/', DeviceActivateAuthView.as_view(), name='root_device_activate_auth'),
     path('admin/', admin.site.urls),

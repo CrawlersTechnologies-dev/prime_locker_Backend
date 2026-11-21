@@ -205,6 +205,41 @@ class PartnerMDMService:
         return result
 
     @classmethod
+    def get_generic_enrollment_qrs(cls, user=None):
+        """
+        Returns generic / retailer-level MDM enrollment QRs:
+          - qr_service_app: Service App self-enrollment / 7-tap setup for new phones
+          - qr_running_device: Provisioning for already-running customer devices (normal)
+          - qr_wireless: Wireless / Wi-Fi provisioning (null if unsupported by provider)
+          - qr_test_dpc: 6-tap factory-reset DPC setup
+        """
+        cfg_qrs = getattr(settings, 'PARTNER_MDM_GENERIC_QRS', {})
+        live_service_app = cfg_qrs.get('qr_service_app') or "https://apirenewjss.com/api2/QR/new/QR-2.png"
+        live_running_device = cfg_qrs.get('qr_running_device') or "https://apirenewjss.com/api2/QR/new/QR-3.png"
+        live_test_dpc = cfg_qrs.get('qr_test_dpc') or "https://apirenewjss.com/api2/QR/new/QR-1.png"
+        live_wireless = cfg_qrs.get('qr_wireless') or None
+
+        if cls._is_sim_mode():
+            sim_base = "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=https://partner-mdm.net/provision/retailer_generic"
+            return {
+                "qr_service_app": f"{sim_base}&type=service_app",
+                "qr_running_device": f"{sim_base}&type=running",
+                "qr_wireless": None,
+                "qr_test_dpc": f"{sim_base}&type=dpc",
+                "provider": "PARTNER_MDM",
+                "simulation": True
+            }
+
+        return {
+            "qr_service_app": live_service_app,
+            "qr_running_device": live_running_device,
+            "qr_wireless": live_wireless,
+            "qr_test_dpc": live_test_dpc,
+            "provider": "PARTNER_MDM",
+            "simulation": False
+        }
+
+    @classmethod
     def enroll_device(cls, device, customer_name="", customer_mobile="", customer_address="", loan_data=None, user=None):
         """
         Registers a customer & phone with Partner MDM (Android Enterprise).

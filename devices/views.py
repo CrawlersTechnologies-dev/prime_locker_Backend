@@ -2214,3 +2214,30 @@ class PublicAppDownloadView(APIView):
             filename=filename
         )
         return response
+
+
+class RetailerEnrollmentQRsView(APIView):
+    """
+    GET /mdm/enrollment-qrs/ (or /api/mdm/enrollment-qrs/)
+    Returns generic, retailer-level MDM provisioning QRs for setting up phones:
+      - qr_service_app (New device / 7-tap)
+      - qr_running_device (Running device - normal)
+      - qr_wireless (Running device - wireless, null if unsupported)
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        from .services.partner_mdm_service import PartnerMDMService
+        qr_data = PartnerMDMService.get_generic_enrollment_qrs(user=request.user)
+        return Response({
+            "status": "success",
+            "retailer": getattr(request.user, 'business_name', '') or request.user.username,
+            "retailer_id": request.user.id,
+            "qr_service_app": qr_data.get("qr_service_app"),
+            "qr_running_device": qr_data.get("qr_running_device"),
+            "qr_wireless": qr_data.get("qr_wireless"),
+            "qr_test_dpc": qr_data.get("qr_test_dpc"),
+            "provider": qr_data.get("provider", "PARTNER_MDM"),
+            "simulation": qr_data.get("simulation", False),
+            "data": qr_data
+        }, status=status.HTTP_200_OK)

@@ -1528,6 +1528,64 @@
             },
             "description": "Simulates real-time webhook callback dispatched by Loksiz MDM containing device GPS coordinates."
           }
+        },
+        {
+          "name": "8.19 Retailer Generic MDM Enrollment QRs (New Device, Running Device, Wireless)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/mdm/enrollment-qrs/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "mdm",
+                "enrollment-qrs",
+                ""
+              ]
+            },
+            "description": "Returns generic MDM enrollment QR codes for retailer app Customer QR tab: qr_service_app (New Device / 7-tap), qr_running_device (Running Device normal), and qr_wireless (null if unsupported)."
+          }
+        },
+        {
+          "name": "8.20 Enroll iPhone via Standard Customer Enroll API (/customers/enroll/)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"full_name\": \"Aarav Mehta\",\n  \"mobile_number\": \"9812345670\",\n  \"email\": \"aarav.mehta@example.com\",\n  \"os_type\": \"IOS\",\n  \"device_type\": \"IOS\",\n  \"brand\": \"Apple\",\n  \"model\": \"iPhone 15 Pro\",\n  \"serial_number\": \"F2LW98APTEST\",\n  \"total_amount\": 120000,\n  \"down_payment\": 30000,\n  \"loan_amount\": 90000,\n  \"emi_amount\": 15000,\n  \"total_emis\": 6,\n  \"emi_frequency\": \"MONTHLY\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/customers/enroll/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "customers",
+                "enroll",
+                ""
+              ]
+            },
+            "description": "Enrolls an Apple iPhone via the primary /customers/enroll/ endpoint. Accepts serial_number (does NOT require IMEI), sets os_type to IOS and lock_provider to APPLE_MDM, consumes an iOS key from retailer balance, and registers the device with Loksiz MDM."
+          }
         }
       ]
     },
@@ -1807,6 +1865,69 @@
               ]
             },
             "description": "Real-time analytics dashboard reporting total 2% platform revenue (today, this month, this year, all-time), gross EMI volumes, online vs offline split, and wallet liability balances."
+          }
+        }
+      ]
+    },
+    {
+      "name": "10. Retailer Generic MDM QRs & Multi-OS Customer Enroll",
+      "item": [
+        {
+          "name": "10.1 Generic Retailer Enrollment QRs (New Device, Running Device, Wireless)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/mdm/enrollment-qrs/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "mdm",
+                "enrollment-qrs",
+                ""
+              ]
+            },
+            "description": "Returns generic MDM enrollment QR codes for retailer app Customer QR tab: qr_service_app (New Device / 7-tap), qr_running_device (Running Device normal), and qr_wireless (null if unsupported)."
+          }
+        },
+        {
+          "name": "10.2 Enroll iPhone Customer via /customers/enroll/ (Serial Number, No IMEI)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"full_name\": \"Aarav Mehta\",\n  \"mobile_number\": \"9812345670\",\n  \"email\": \"aarav.mehta@example.com\",\n  \"os_type\": \"IOS\",\n  \"device_type\": \"IOS\",\n  \"brand\": \"Apple\",\n  \"model\": \"iPhone 15 Pro\",\n  \"serial_number\": \"F2LW98APTEST\",\n  \"total_amount\": 120000,\n  \"down_payment\": 30000,\n  \"loan_amount\": 90000,\n  \"emi_amount\": 15000,\n  \"total_emis\": 6,\n  \"emi_frequency\": \"MONTHLY\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/customers/enroll/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "customers",
+                "enroll",
+                ""
+              ]
+            },
+            "description": "Enrolls an Apple iPhone via the primary /customers/enroll/ endpoint. Accepts serial_number (does NOT require IMEI), sets os_type to IOS and lock_provider to APPLE_MDM, consumes an iOS key from retailer balance, and registers the device with Loksiz MDM."
           }
         }
       ]
