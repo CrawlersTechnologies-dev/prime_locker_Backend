@@ -1027,6 +1027,7 @@ class CustomerViewSet(BaseRoleViewSet):
             # Enrol with RocketPay if lock_provider is ROCKETPAY
             rp_device_id = None
             qr_code_data = None
+            qr_codes_data = {}
             if lock_provider == LockProvider.ROCKETPAY:
                 from devices.services.rocketpay_service import RocketPayService
                 mdm_type = data.get('mdm_type', 'DLC').upper()
@@ -1183,6 +1184,9 @@ class CustomerViewSet(BaseRoleViewSet):
                 "provider_device_id": device.provider_device_id,
                 "provider_status": device.provider_status,
                 "qr_code_data": qr_code_data,
+                "qr_codes": qr_codes_data,
+                "qr_service_app": (qr_codes_data.get('qr_service_app') if isinstance(qr_codes_data, dict) else None) or qr_code_data,
+                "qr_running_device": qr_codes_data.get('qr_running_device') if isinstance(qr_codes_data, dict) else None,
                 "offline_unlock_code": device.offline_unlock_code,
                 "activation_key": key_obj.key_string if key_obj else None
             },
