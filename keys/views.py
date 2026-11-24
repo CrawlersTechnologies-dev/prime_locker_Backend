@@ -194,23 +194,28 @@ class KeyViewSet(viewsets.GenericViewSet, viewsets.mixins.ListModelMixin, viewse
             for item in inventory_annotated
         ]
 
-        from .services import get_service_key_queryset
-        dlc_keys_left = get_service_key_queryset(request.user, 'ANDROID_DLC').count()
-        android_keys_left = get_service_key_queryset(request.user, 'ANDROID_MDM').count()
-        ios_keys_left = get_service_key_queryset(request.user, 'IOS_LOCKER').count()
-        tv_keys_left = get_service_key_queryset(request.user, 'SMART_TV').count()
-        total_keys_left = dlc_keys_left + android_keys_left + ios_keys_left + tv_keys_left
+        from .services import get_user_available_keys_breakdown
+        breakdown = get_user_available_keys_breakdown(request.user) or {}
+        dlc_keys_left = breakdown.get('dlc_keys', 0)
+        android_keys_left = breakdown.get('mdm_keys', 0)
+        mdm_keys_left = breakdown.get('mdm_keys', 0)
+        ios_keys_left = breakdown.get('ios_keys', 0)
+        tv_keys_left = breakdown.get('tv_keys', 0)
+        total_keys_left = breakdown.get('total', 0)
 
         return Response({
             "inventory": summary,
             "dlc_keys_left": dlc_keys_left,
             "android_keys_left": android_keys_left,
+            "mdm_keys_left": mdm_keys_left,
             "ios_keys_left": ios_keys_left,
             "tv_keys_left": tv_keys_left,
             "total_keys_left": total_keys_left,
+            "available_keys": breakdown,
             "keys_left": {
                 "dlc_keys_left": dlc_keys_left,
                 "android_keys_left": android_keys_left,
+                "mdm_keys_left": mdm_keys_left,
                 "ios_keys_left": ios_keys_left,
                 "tv_keys_left": tv_keys_left,
                 "total_keys_left": total_keys_left
@@ -221,9 +226,9 @@ class KeyViewSet(viewsets.GenericViewSet, viewsets.mixins.ListModelMixin, viewse
     def check_balance(self, request):
         """
         Checks retailer's available key balance for a specific service
-        (ANDROID_MDM, ANDROID_DLC, IOS_LOCKER) or returns all services.
+        (ANDROID_MDM, ANDROID_DLC, IOS_LOCKER, SMART_TV) or returns all services.
         """
-        from .services import resolve_service_code, get_service_balance_info
+        from .services import resolve_service_code, get_service_balance_info, get_user_available_keys_breakdown
         service_param = (
             request.query_params.get('service')
             or request.query_params.get('lock_provider')
@@ -236,12 +241,18 @@ class KeyViewSet(viewsets.GenericViewSet, viewsets.mixins.ListModelMixin, viewse
 
         services = [
             get_service_balance_info(request.user, code)
-            for code in ('ANDROID_MDM', 'ANDROID_DLC', 'IOS_LOCKER')
+            for code in ('ANDROID_MDM', 'ANDROID_DLC', 'IOS_LOCKER', 'SMART_TV')
         ]
-        total_available = sum(item['available_balance'] for item in services)
+        breakdown = get_user_available_keys_breakdown(request.user) or {}
+        total_available = breakdown.get('total', sum(item['available_balance'] for item in services))
         return Response({
             'services': services,
             'total_available': total_available,
+            'available_keys': breakdown,
+            'mdm_keys': breakdown.get('mdm_keys', 0),
+            'ios_keys': breakdown.get('ios_keys', 0),
+            'dlc_keys': breakdown.get('dlc_keys', 0),
+            'tv_keys': breakdown.get('tv_keys', 0),
         })
 
     @action(detail=False, methods=['get'])
@@ -288,13 +299,12 @@ class KeyViewSet(viewsets.GenericViewSet, viewsets.mixins.ListModelMixin, viewse
         device_type = request.query_params.get('device_type')
         from django.db.models import Q
 
-        my_avail = DeviceKey.objects.filter(current_owner=user, status=KeyStatus.AVAILABLE)
-        my_dlc = my_avail.filter(Q(key_string__istartswith='DLC-') | Q(device_type__iexact='DLC')).count()
-        my_and = my_avail.filter(
-            (Q(key_string__istartswith='AND-') | Q(device_type__iexact='ANDROID')) &
-            ~Q(key_string__istartswith='DLC-') & ~Q(key_string__istartswith='IOS-') & ~Q(key_string__istartswith='TV-')
-        ).count()
-        my_ios = my_avail.filter(Q(key_string__istartswith='IOS-') | Q(device_type__iexact='IOS')).count()
+        from .services import get_user_available_keys_breakdown
+        my_breakdown = get_user_available_keys_breakdown(user) or {}
+        my_dlc = my_breakdown.get('dlc_keys', 0)
+        my_and = my_breakdown.get('mdm_keys', 0)
+        my_ios = my_breakdown.get('ios_keys', 0)
+        my_tv = my_breakdown.get('tv_keys', 0)
 
         data = []
         for u in users_qs:
@@ -303,13 +313,11 @@ class KeyViewSet(viewsets.GenericViewSet, viewsets.mixins.ListModelMixin, viewse
                 keys_qs = keys_qs.filter(_get_device_type_q_filter(device_type))
             keys_count = keys_qs.count()
 
-            u_avail = DeviceKey.objects.filter(current_owner=u, status=KeyStatus.AVAILABLE)
-            u_dlc = u_avail.filter(Q(key_string__istartswith='DLC-') | Q(device_type__iexact='DLC')).count()
-            u_and = u_avail.filter(
-                (Q(key_string__istartswith='AND-') | Q(device_type__iexact='ANDROID')) &
-                ~Q(key_string__istartswith='DLC-') & ~Q(key_string__istartswith='IOS-') & ~Q(key_string__istartswith='TV-')
-            ).count()
-            u_ios = u_avail.filter(Q(key_string__istartswith='IOS-') | Q(device_type__iexact='IOS')).count()
+            u_breakdown = get_user_available_keys_breakdown(u) or {}
+            u_dlc = u_breakdown.get('dlc_keys', 0)
+            u_and = u_breakdown.get('mdm_keys', 0)
+            u_ios = u_breakdown.get('ios_keys', 0)
+            u_tv = u_breakdown.get('tv_keys', 0)
 
             name = f"{u.first_name} {u.last_name}".strip() or u.username
             data.append({
@@ -321,10 +329,13 @@ class KeyViewSet(viewsets.GenericViewSet, viewsets.mixins.ListModelMixin, viewse
                 "mobile_number": u.mobile_number,
                 "city": u.city,
                 "state": u.state,
-                "current_available_keys": keys_count,
+                "current_available_keys": u_breakdown.get('total', keys_count),
                 "dlc_keys": u_dlc,
                 "android_keys": u_and,
-                "ios_keys": u_ios
+                "mdm_keys": u_and,
+                "ios_keys": u_ios,
+                "tv_keys": u_tv,
+                "available_keys": u_breakdown,
             })
 
         return Response({
@@ -333,8 +344,11 @@ class KeyViewSet(viewsets.GenericViewSet, viewsets.mixins.ListModelMixin, viewse
             "my_keys_available": {
                 "dlc_keys_left": my_dlc,
                 "android_keys_left": my_and,
+                "mdm_keys_left": my_and,
                 "ios_keys_left": my_ios,
-                "total_keys_left": my_dlc + my_and + my_ios
+                "tv_keys_left": my_tv,
+                "total_keys_left": my_breakdown.get('total', my_dlc + my_and + my_ios + my_tv),
+                "available_keys": my_breakdown,
             },
             "users": data
         })

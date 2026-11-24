@@ -2566,6 +2566,8 @@ class RetailerEnrollmentQRsView(APIView):
         qr_data = PartnerMDMService.get_generic_enrollment_qrs(user=request.user)
         retailer_name = getattr(request.user, 'business_name', '') or getattr(request.user, 'username', '') if getattr(request.user, 'is_authenticated', False) else "Prime Retailer"
         retailer_id = request.user.id if getattr(request.user, 'is_authenticated', False) else None
+        apk_download_url = "https://apirenewjss.com/apk/primelocker.apk"
+        camera_download_qr = f"https://api.qrserver.com/v1/create-qr-code/?size=400x400&data={apk_download_url}"
         service_app_qr = qr_data.get("qr_service_app")
         running_device_qr = qr_data.get("qr_running_device")
         test_dpc_qr = qr_data.get("qr_test_dpc")
@@ -2574,13 +2576,14 @@ class RetailerEnrollmentQRsView(APIView):
             "status": "success",
             "retailer": retailer_name,
             "retailer_id": retailer_id,
-            "step1_connect_app": service_app_qr,
+            "step1_connect_app": camera_download_qr,
             "step2_install_app": running_device_qr,
+            "camera_download_qr": camera_download_qr,
             "qr_service_app": service_app_qr,
             "qr_running_device": running_device_qr,
             "qr_wireless": wireless_qr,
             "qr_test_dpc": test_dpc_qr,
-            "app_download_url": "https://apirenewjss.com/apk/primelocker.apk",
+            "app_download_url": apk_download_url,
             "provider": qr_data.get("provider", "PARTNER_MDM"),
             "simulation": qr_data.get("simulation", False),
             "instructions": {

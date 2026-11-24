@@ -1,2268 +1,2295 @@
 {
-  "info": {
-    "_postman_id": "7b8e5192-341a-4c91-9e20-8e5033c4f7a1",
-    "name": "Prime Locker - Agreement & DLT SMS API",
-    "description": "Postman collection for testing Prime Locker Pro DLT SMS dispatch, auto-generated single-page EMI collateral agreements (HTML, PDF, JSON), and contract lifecycle operations.",
-    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
-  },
-  "variable": [
-    {
-      "key": "base_url",
-      "value": "http://127.0.0.1:8000",
-      "type": "string"
+    "info": {
+        "_postman_id": "7b8e5192-341a-4c91-9e20-8e5033c4f7a1",
+        "name": "Prime Locker - Agreement & DLT SMS API",
+        "description": "Postman collection for testing Prime Locker Pro DLT SMS dispatch, auto-generated single-page EMI collateral agreements (HTML, PDF, JSON), and contract lifecycle operations.",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
     },
-    {
-      "key": "access_token",
-      "value": "",
-      "type": "string"
-    },
-    {
-      "key": "contract_id",
-      "value": "1",
-      "type": "string"
-    },
-    {
-      "key": "installment_id",
-      "value": "1",
-      "type": "string"
-    },
-    {
-      "key": "mobile_number",
-      "value": "8867538192",
-      "type": "string"
-    },
-    {
-      "key": "otp_code",
-      "value": "112233",
-      "type": "string"
-    },
-    {
-      "key": "customer_id",
-      "value": "1",
-      "type": "string"
-    },
-    {
-      "key": "device_id",
-      "value": "1",
-      "type": "string"
-    },
-    {
-      "key": "payout_id",
-      "value": "1",
-      "type": "string"
-    }
-  ],
-  "item": [
-    {
-      "name": "1. Authentication & Live DLT SMS",
-      "item": [
+    "variable": [
         {
-          "name": "1.1 Login (Obtain JWT Token)",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "exec": [
-                  "var jsonData = pm.response.json();",
-                  "if (jsonData.access) {",
-                  "    pm.collectionVariables.set('access_token', jsonData.access);",
-                  "    console.log('Access token set successfully');",
-                  "}"
-                ],
-                "type": "text/javascript"
-              }
-            }
-          ],
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n    \"username\": \"superadmin\",\n    \"password\": \"Admin@123\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/api/auth/login/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "auth",
-                "login",
-                ""
-              ]
-            },
-            "description": "Authenticates user and auto-saves the JWT access token in the collection variable {{access_token}}."
-          },
-          "response": []
+            "key": "base_url",
+            "value": "http://127.0.0.1:8000",
+            "type": "string"
         },
         {
-          "name": "1.2 Request MPIN Reset OTP (Live Jio DLT SMS)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n    \"mobile_number\": \"{{mobile_number}}\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/api/auth/mpin/request-otp/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "auth",
-                "mpin",
-                "request-otp",
-                ""
-              ]
-            },
-            "description": "Dispatches live DLT OTP SMS via APITxT using Header PRLOCK, Template ID 1277179438043729654, Entity ID 1201179275669531017, and Telemarketer ID 1202162934973074727."
-          },
-          "response": []
+            "key": "access_token",
+            "value": "",
+            "type": "string"
         },
         {
-          "name": "1.3 Verify MPIN Reset OTP & Set New MPIN",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n    \"mobile_number\": \"{{mobile_number}}\",\n    \"otp\": \"{{otp_code}}\",\n    \"new_mpin\": \"123456\",\n    \"confirm_mpin\": \"123456\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/api/auth/mpin/verify-otp/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "auth",
-                "mpin",
-                "verify-otp",
-                ""
-              ]
-            },
-            "description": "Verifies the 6-digit OTP received on mobile and updates user MPIN."
-          },
-          "response": []
+            "key": "contract_id",
+            "value": "1",
+            "type": "string"
         },
         {
-          "name": "1.4 Request Password Reset OTP (Live Jio DLT SMS)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n    \"identifier\": \"{{mobile_number}}\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/api/auth/password-reset/request-otp/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "auth",
-                "password-reset",
-                "request-otp",
-                ""
-              ]
-            },
-            "description": "Sends live password reset OTP SMS via Jio DLT PRLOCK route."
-          },
-          "response": []
+            "key": "installment_id",
+            "value": "1",
+            "type": "string"
+        },
+        {
+            "key": "mobile_number",
+            "value": "8867538192",
+            "type": "string"
+        },
+        {
+            "key": "otp_code",
+            "value": "112233",
+            "type": "string"
+        },
+        {
+            "key": "customer_id",
+            "value": "1",
+            "type": "string"
+        },
+        {
+            "key": "device_id",
+            "value": "1",
+            "type": "string"
+        },
+        {
+            "key": "payout_id",
+            "value": "1",
+            "type": "string"
         }
-      ]
-    },
-    {
-      "name": "2. EMI Loan Agreement (New Features)",
-      "item": [
+    ],
+    "item": [
         {
-          "name": "2.1 View Agreement HTML (Webview / Print Preview)",
-          "request": {
-            "auth": {
-              "type": "bearer",
-              "bearer": [
+            "name": "1. Authentication & Live DLT SMS",
+            "item": [
                 {
-                  "key": "token",
-                  "value": "{{access_token}}",
-                  "type": "string"
-                }
-              ]
-            },
-            "method": "GET",
-            "header": [
-              {
-                "key": "Accept",
-                "value": "text/html"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/api/emi-contracts/{{contract_id}}/agreement/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "emi-contracts",
-                "{{contract_id}}",
-                "agreement",
-                ""
-              ]
-            },
-            "description": "Returns responsive, table-free, 1-page A4 legal agreement HTML view. Features contracting parties, collateral IMEI, repayment terms, covenants, and sole borrower digital signature. Includes print button (window.print()) and PDF download link."
-          },
-          "response": []
-        },
-        {
-          "name": "2.2 Download Agreement PDF (Action Endpoint)",
-          "request": {
-            "auth": {
-              "type": "bearer",
-              "bearer": [
-                {
-                  "key": "token",
-                  "value": "{{access_token}}",
-                  "type": "string"
-                }
-              ]
-            },
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/emi-contracts/{{contract_id}}/agreement-pdf/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "emi-contracts",
-                "{{contract_id}}",
-                "agreement-pdf",
-                ""
-              ]
-            },
-            "description": "Directly streams and downloads a 1-page A4 legal agreement PDF binary generated via ReportLab (Content-Type: application/pdf)."
-          },
-          "response": []
-        },
-        {
-          "name": "2.3 Download Agreement PDF (Query Param ?download=pdf)",
-          "request": {
-            "auth": {
-              "type": "bearer",
-              "bearer": [
-                {
-                  "key": "token",
-                  "value": "{{access_token}}",
-                  "type": "string"
-                }
-              ]
-            },
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/emi-contracts/{{contract_id}}/agreement/?download=pdf",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "emi-contracts",
-                "{{contract_id}}",
-                "agreement",
-                ""
-              ],
-              "query": [
-                {
-                  "key": "download",
-                  "value": "pdf"
-                }
-              ]
-            },
-            "description": "Downloads the compiled 1-page A4 PDF binary using the ?download=pdf query parameter on the base agreement URL."
-          },
-          "response": []
-        },
-        {
-          "name": "2.4 Get Agreement Raw JSON Data (?format=json)",
-          "request": {
-            "auth": {
-              "type": "bearer",
-              "bearer": [
-                {
-                  "key": "token",
-                  "value": "{{access_token}}",
-                  "type": "string"
-                }
-              ]
-            },
-            "method": "GET",
-            "header": [
-              {
-                "key": "Accept",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/api/emi-contracts/{{contract_id}}/agreement/?format=json",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "emi-contracts",
-                "{{contract_id}}",
-                "agreement",
-                ""
-              ],
-              "query": [
-                {
-                  "key": "format",
-                  "value": "json"
-                }
-              ]
-            },
-            "description": "Returns structured JSON data payload of the agreement: agreement_number, status, retailer, customer (including signature_url), financed_product, collateral_device, and financial_terms."
-          },
-          "response": []
-        },
-        {
-          "name": "2.5 List EMI Contracts (Includes agreement_url)",
-          "request": {
-            "auth": {
-              "type": "bearer",
-              "bearer": [
-                {
-                  "key": "token",
-                  "value": "{{access_token}}",
-                  "type": "string"
-                }
-              ]
-            },
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/emi-contracts/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "emi-contracts",
-                ""
-              ]
-            },
-            "description": "Lists all EMI contracts accessible to the logged in user. Each record exposes agreement_url in addition to mandate_auth_url."
-          },
-          "response": []
-        },
-        {
-          "name": "2.6 Get EMI Contract Details",
-          "request": {
-            "auth": {
-              "type": "bearer",
-              "bearer": [
-                {
-                  "key": "token",
-                  "value": "{{access_token}}",
-                  "type": "string"
-                }
-              ]
-            },
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/emi-contracts/{{contract_id}}/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "emi-contracts",
-                "{{contract_id}}",
-                ""
-              ]
-            },
-            "description": "Retrieves contract record by ID, showing customer details, installments breakdown, mandate status, and agreement_url."
-          },
-          "response": []
-        }
-      ]
-    },
-    {
-      "name": "3. Device Locking & Payment Operations",
-      "item": [
-        {
-          "name": "3.1 Manual Device Lock",
-          "request": {
-            "auth": {
-              "type": "bearer",
-              "bearer": [
-                {
-                  "key": "token",
-                  "value": "{{access_token}}",
-                  "type": "string"
-                }
-              ]
-            },
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n    \"reason\": \"Manual lock due to overdue payment\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/api/emi-contracts/{{contract_id}}/lock/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "emi-contracts",
-                "{{contract_id}}",
-                "lock",
-                ""
-              ]
-            },
-            "description": "Manually triggers a device lock command on the contract's collateral handset (accessible by Retailer / Staff / Admin)."
-          },
-          "response": []
-        },
-        {
-          "name": "3.2 Manual Device Unlock",
-          "request": {
-            "auth": {
-              "type": "bearer",
-              "bearer": [
-                {
-                  "key": "token",
-                  "value": "{{access_token}}",
-                  "type": "string"
-                }
-              ]
-            },
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n    \"reason\": \"Payment received in store cash\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/api/emi-contracts/{{contract_id}}/unlock/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "emi-contracts",
-                "{{contract_id}}",
-                "unlock",
-                ""
-              ]
-            },
-            "description": "Manually triggers a device unlock command and restores active status."
-          },
-          "response": []
-        },
-        {
-          "name": "3.3 Record Installment Payment (Cash / UPI)",
-          "request": {
-            "auth": {
-              "type": "bearer",
-              "bearer": [
-                {
-                  "key": "token",
-                  "value": "{{access_token}}",
-                  "type": "string"
-                }
-              ]
-            },
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n    \"amount_paid\": \"1500.00\",\n    \"payment_mode\": \"CASH\",\n    \"transaction_reference\": \"TXN_CASH_1001\",\n    \"notes\": \"Payment recorded at retail counter\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/api/emi-installments/{{installment_id}}/record-payment/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "emi-installments",
-                "{{installment_id}}",
-                "record-payment",
-                ""
-              ]
-            },
-            "description": "Records an installment payment, updates status to PAID, and automatically unlocks the device if overdue."
-          },
-          "response": []
-        }
-      ]
-    },
-    {
-      "name": "4. Customer Documents & Photo Edit (Admin)",
-      "item": [
-        {
-          "name": "4.1 Edit Customer Photo (Multipart File Upload)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              }
-            ],
-            "body": {
-              "mode": "formdata",
-              "formdata": [
-                {
-                  "key": "customer_photo",
-                  "type": "file",
-                  "description": "Select new customer selfie/photo file (JPG, PNG, WEBP)"
-                }
-              ]
-            },
-            "url": {
-              "raw": "{{base_url}}/api/customers/{{customer_id}}/edit-photo/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "customers",
-                "{{customer_id}}",
-                "edit-photo",
-                ""
-              ]
-            },
-            "description": "Super Admin or authorized manager uploads or replaces customer KYC photo. Permitted at any time, even after device activation."
-          }
-        },
-        {
-          "name": "4.2 Edit Customer Photo (Base64 JSON)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"customer_photo\": \"data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD...\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/api/customers/{{customer_id}}/edit-photo/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "customers",
-                "{{customer_id}}",
-                "edit-photo",
-                ""
-              ]
-            },
-            "description": "Alternative photo upload endpoint accepting base64 encoded image string directly from mobile apps."
-          }
-        },
-        {
-          "name": "4.3 Delete Customer Photo (Clear KYC Photo)",
-          "request": {
-            "method": "DELETE",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/api/customers/{{customer_id}}/edit-photo/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "customers",
-                "{{customer_id}}",
-                "edit-photo",
-                ""
-              ]
-            },
-            "description": "Removes customer photo file from storage and sets customer_photo to null."
-          }
-        },
-        {
-          "name": "4.4 View Customer Profile & Documents Trio (Admin)",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/api/customers/{{customer_id}}/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "customers",
-                "{{customer_id}}",
-                ""
-              ]
-            },
-            "description": "Fetches customer details including the documents block with direct links to photo, digital signature, and auto-generated EMI agreement."
-          }
-        }
-      ]
-    },
-    {
-      "name": "5. SIM Card Information & Anti-Fraud (Admin & Retailer)",
-      "item": [
-        {
-          "name": "5.1 Get Device Details (Includes Structured sim_details)",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/api/devices/{{device_id}}/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "devices",
-                "{{device_id}}",
-                ""
-              ]
-            },
-            "description": "Returns device details including structured sim_details (slot_1, slot_2, is_dual_sim, sim_changed alert flag, and sim_history timeline)."
-          }
-        },
-        {
-          "name": "5.2 Heartbeat Telemetry Ping (Simulate SIM & Location Report)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"imei\": \"867530900000001\",\n  \"battery_level\": 92,\n  \"sim_operator\": \"Airtel 5G\",\n  \"sim_number\": \"+919876543210\",\n  \"sim_serial\": \"8991000123456789012F\",\n  \"sim_operator_2\": \"Jio True 5G\",\n  \"sim_number_2\": \"+919812345678\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/api/devices/ping/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "devices",
-                "ping",
-                ""
-              ]
-            },
-            "description": "Heartbeat ping API called periodically by the phone app to report SIM info, battery, and location. If SIM ICCID changes, backend automatically flags sim_changed=True and logs to sim_history."
-          }
-        },
-        {
-          "name": "5.3 Acknowledge / Clear SIM Change Alert",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/api/devices/{{device_id}}/acknowledge-sim-change/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "devices",
-                "{{device_id}}",
-                "acknowledge-sim-change",
-                ""
-              ]
-            },
-            "description": "Admin or Retailer clears the red warning badge after verifying an authorized SIM change with the customer."
-          }
-        }
-      ]
-    },
-    {
-      "name": "6. Key Ledger & Whole-Count Transfers (Screen N-07)",
-      "item": [
-        {
-          "name": "6.1 Key Transactions Ledger (Grouped Whole Count - Default)",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/api/keys/transactions/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "keys",
-                "transactions",
-                ""
-              ]
-            },
-            "description": "Screen N-07: Key history ledger grouped by batch. Displays whole count (e.g. quantity: 50, key_string: DLC-1001 (+49 more)) instead of spamming 50 individual +1 rows."
-          }
-        },
-        {
-          "name": "6.2 Key Transactions Ledger (Detailed Raw View)",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/api/keys/transactions/?view=detailed",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "keys",
-                "transactions",
-                ""
-              ],
-              "query": [
-                {
-                  "key": "view",
-                  "value": "detailed",
-                  "description": "Return individual single-key rows"
-                }
-              ]
-            },
-            "description": "Returns individual serial key transaction rows (each with quantity: 1) when individual serial inspection is needed."
-          }
-        },
-        {
-          "name": "6.3 Key Transactions CSV Export",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/api/keys/transactions/?export=csv",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "keys",
-                "transactions",
-                ""
-              ],
-              "query": [
-                {
-                  "key": "export",
-                  "value": "csv",
-                  "description": "Export ledger to CSV with Quantity column"
-                }
-              ]
-            },
-            "description": "Downloads CSV report of key transactions including Quantity and Batch ID columns."
-          }
-        }
-      ]
-    },
-    {
-      "name": "7. Retailer & Partner Password Reset (Admin Support)",
-      "item": [
-        {
-          "name": "7.1 Admin Reset Retailer Password (Custom Password)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"new_password\": \"NewRetailerPass@2026\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/api/retailers/{{retailer_id}}/reset-password/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "retailers",
-                "{{retailer_id}}",
-                "reset-password",
-                ""
-              ]
-            },
-            "description": "Super Admin or Upline Distributor resets a Retailer password with an explicit custom password."
-          }
-        },
-        {
-          "name": "7.2 Admin Reset Retailer Password (Auto-Generate Temporary Password)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{}"
-            },
-            "url": {
-              "raw": "{{base_url}}/api/retailers/{{retailer_id}}/reset-password/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "retailers",
-                "{{retailer_id}}",
-                "reset-password",
-                ""
-              ]
-            },
-            "description": "Super Admin resets Retailer password with an auto-generated secure temporary PIN (e.g. PL@4829)."
-          }
-        },
-        {
-          "name": "7.3 Reset Retailer Password by Mobile Number / Username",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"mobile_number\": \"9876543210\",\n  \"new_password\": \"Retailer@2026\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/api/retailers/reset-password/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "retailers",
-                "reset-password",
-                ""
-              ]
-            },
-            "description": "Reset a retailer password by providing their registered mobile number or username."
-          }
-        }
-      ]
-    },
-    {
-      "name": "8. Apple MDM (iPhone Locker - Loksiz)",
-      "description": "Comprehensive integration with Loksiz Apple MDM v1.4 for iPhone supervised management, eligibility validation, enrollment, remote lock/unlock, kiosk mode, activation lock, wallpaper, GPS tracking, and real-time webhook status callbacks.",
-      "item": [
-        {
-          "name": "8.1 Service Health Check (Apple MDM Gateway)",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/api/devices/apple-mdm/health/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "devices",
-                "apple-mdm",
-                "health",
-                ""
-              ]
-            },
-            "description": "Checks connectivity with Loksiz Apple MDM Gateway (returns 200 OK with health status)."
-          }
-        },
-        {
-          "name": "8.2 Validate iPhone Eligibility (Mandatory Pre-Enrollment Check)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"imei\": \"358247910271332\",\n  \"serial_number\": \"C02XL1234567\",\n  \"imei2\": \"358247919646625\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/api/devices/apple-mdm/validate/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "devices",
-                "apple-mdm",
-                "validate",
-                ""
-              ]
-            },
-            "description": "Validates iPhone IMEI & Serial Number eligibility and verifies available IOS key balance in the Loksiz partner wallet before registration."
-          }
-        },
-        {
-          "name": "8.3 Enroll iPhone into Apple MDM",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"imei\": \"358247910271332\",\n  \"serial_number\": \"C02XL1234567\",\n  \"customer_name\": \"Aman Sharma\",\n  \"customer_mobile\": \"+919876543210\",\n  \"customer_email\": \"aman.sharma@example.com\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/api/devices/apple-mdm/enroll/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "devices",
-                "apple-mdm",
-                "enroll",
-                ""
-              ]
-            },
-            "description": "Registers Apple device with Loksiz MDM, generates deviceRegNum, and creates or updates local Device record with APPLE_MDM lock provider."
-          }
-        },
-        {
-          "name": "8.4 List Registered Apple Devices & Dashboard Counters",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/api/devices/apple-mdm/devices/?page=1&limit=10",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "devices",
-                "apple-mdm",
-                "devices",
-                ""
-              ],
-              "query": [
-                {
-                  "key": "page",
-                  "value": "1"
+                    "name": "1.1 Login (Obtain JWT Token)",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "var jsonData = pm.response.json();",
+                                    "if (jsonData.access) {",
+                                    "    pm.collectionVariables.set('access_token', jsonData.access);",
+                                    "    console.log('Access token set successfully');",
+                                    "}"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"username\": \"superadmin\",\n    \"password\": \"Admin@123\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/auth/login/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "auth",
+                                "login",
+                                ""
+                            ]
+                        },
+                        "description": "Authenticates user and auto-saves the JWT access token in the collection variable {{access_token}}."
+                    },
+                    "response": []
                 },
                 {
-                  "key": "limit",
-                  "value": "10"
-                }
-              ]
-            },
-            "description": "Fetches all enrolled iOS devices and dashboard summary (total, active, pending, inactive) directly from Loksiz."
-          }
-        },
-        {
-          "name": "8.5 Remote Lock iPhone (Lost Mode with Custom Message & Phone)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"action\": \"LOCK\",\n  \"message\": \"Payment overdue. Please contact Prime Retailer to restore service.\",\n  \"phone_number\": \"+919876543210\",\n  \"foot_note\": \"Prime Locker MDM Protection\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/api/devices/{{device_id}}/apple-action/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "devices",
-                "{{device_id}}",
-                "apple-action",
-                ""
-              ]
-            },
-            "description": "Executes immediate Lost Mode LOCK on the managed iPhone, displaying custom overdue message, call button phone number, and footnote."
-          }
-        },
-        {
-          "name": "8.6 Remote Unlock iPhone",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"action\": \"UNLOCK\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/api/devices/{{device_id}}/apple-action/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "devices",
-                "{{device_id}}",
-                "apple-action",
-                ""
-              ]
-            },
-            "description": "Instantly removes Lost Mode lock from the iPhone, restoring normal customer access."
-          }
-        },
-        {
-          "name": "8.7 Standard Remote Lock (Auto-routes to Apple MDM)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"reason\": \"EMI overdue remote lock\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/api/devices/{{device_id}}/lock/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "devices",
-                "{{device_id}}",
-                "lock",
-                ""
-              ]
-            },
-            "description": "Standard Prime Locker lock endpoint. Automatically dispatches lock to Loksiz Apple MDM when device is an iPhone / APPLE_MDM."
-          }
-        },
-        {
-          "name": "8.8 Standard Remote Unlock (Auto-routes to Apple MDM)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"reason\": \"Payment received\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/api/devices/{{device_id}}/unlock/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "devices",
-                "{{device_id}}",
-                "unlock",
-                ""
-              ]
-            },
-            "description": "Standard Prime Locker unlock endpoint. Automatically dispatches unlock to Loksiz Apple MDM."
-          }
-        },
-        {
-          "name": "8.9 Enforce Application Kiosk Mode (App Lock)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/api/devices/{{device_id}}/apple-app-lock/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "devices",
-                "{{device_id}}",
-                "apple-app-lock",
-                ""
-              ]
-            },
-            "description": "Enforces Single App Mode / Kiosk mode on the managed iPhone."
-          }
-        },
-        {
-          "name": "8.10 Remove Application Kiosk Mode (App Unlock)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/api/devices/{{device_id}}/apple-app-unlock/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "devices",
-                "{{device_id}}",
-                "apple-app-unlock",
-                ""
-              ]
-            },
-            "description": "Removes application lock restriction, returning device to normal multi-app operation."
-          }
-        },
-        {
-          "name": "8.11 Supervised Activation Lock (Enable / Disable)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"action\": 1\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/api/devices/{{device_id}}/apple-activation-lock/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "devices",
-                "{{device_id}}",
-                "apple-activation-lock",
-                ""
-              ]
-            },
-            "description": "Triggers Apple MDM Activation Lock. Action 1 = Enable, 0 = Disable."
-          }
-        },
-        {
-          "name": "8.12 Query Supervised Activation Lock Status",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/api/devices/{{device_id}}/apple-activation-lock-status/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "devices",
-                "{{device_id}}",
-                "apple-activation-lock-status",
-                ""
-              ]
-            },
-            "description": "Queries the current Activation Lock status of the iPhone."
-          }
-        },
-        {
-          "name": "8.13 Set Lockscreen Wallpaper (Base64)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"wallpaper_image\": \"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/api/devices/{{device_id}}/apple-wallpaper/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "devices",
-                "{{device_id}}",
-                "apple-wallpaper",
-                ""
-              ]
-            },
-            "description": "Sets custom branded wallpaper on iPhone Lock Screen and Home Screen."
-          }
-        },
-        {
-          "name": "8.14 Remove Custom Wallpaper (Restore Default)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"action\": \"REMOVE\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/api/devices/{{device_id}}/apple-wallpaper/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "devices",
-                "{{device_id}}",
-                "apple-wallpaper",
-                ""
-              ]
-            },
-            "description": "Removes custom wallpaper and restores system default wallpaper on iPhone."
-          }
-        },
-        {
-          "name": "8.15 Live GPS Location Refresh",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/api/devices/{{device_id}}/refresh-location/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "devices",
-                "{{device_id}}",
-                "refresh-location",
-                ""
-              ]
-            },
-            "description": "Dispatches instant GET_LOCATION command to retrieve current iPhone coordinates."
-          }
-        },
-        {
-          "name": "8.16 Release / Uninstall MDM Profile (Post EMI Settlement)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"reason\": \"Customer completed all EMI installments\",\n  \"force\": true\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/api/devices/{{device_id}}/uninstall/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "devices",
-                "{{device_id}}",
-                "uninstall",
-                ""
-              ]
-            },
-            "description": "Deregisters iPhone from Apple MDM and marks device as UNENROLLED in Prime Locker."
-          }
-        },
-        {
-          "name": "8.17 Webhook Callback (Remote Lock Status Update)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "X-Callback-Id",
-                "value": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"event\": \"apple_device_status_update\",\n  \"callback_id\": \"9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d\",\n  \"deviceRegNum\": \"1726567890123\",\n  \"slug\": \"lock_status\",\n  \"status\": 1,\n  \"location\": null,\n  \"message\": \"Device locked successfully\",\n  \"imei\": \"358247910271332\",\n  \"imei2\": \"358247919646625\",\n  \"serialNumber\": \"C02XL1234567\",\n  \"occurred_at\": \"2026-11-20T10:00:00.000Z\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/api/integrations/apple-mdm/webhook/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "integrations",
-                "apple-mdm",
-                "webhook",
-                ""
-              ]
-            },
-            "description": "Simulates real-time webhook callback dispatched by Loksiz MDM when device is locked/unlocked. Returns HTTP 200 within 10s."
-          }
-        },
-        {
-          "name": "8.18 Webhook Callback (Live GPS Location Update)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "X-Callback-Id",
-                "value": "71a2b3c4-d5e6-7f8a-9b0c-1d2e3f4a5b6c"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"event\": \"apple_device_status_update\",\n  \"callback_id\": \"71a2b3c4-d5e6-7f8a-9b0c-1d2e3f4a5b6c\",\n  \"deviceRegNum\": \"1726567890123\",\n  \"slug\": \"device_location\",\n  \"status\": null,\n  \"location\": {\n    \"lat\": \"28.6139\",\n    \"long\": \"77.2090\",\n    \"date\": \"20-11-2026 15:30:00\"\n  },\n  \"message\": null,\n  \"imei\": \"358247910271332\",\n  \"imei2\": \"358247919646625\",\n  \"serialNumber\": \"C02XL1234567\",\n  \"occurred_at\": \"2026-11-20T10:00:00.000Z\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/api/integrations/apple-mdm/webhook/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "integrations",
-                "apple-mdm",
-                "webhook",
-                ""
-              ]
-            },
-            "description": "Simulates real-time webhook callback dispatched by Loksiz MDM containing device GPS coordinates."
-          }
-        },
-        {
-          "name": "8.19 Retailer Generic MDM Enrollment QRs (New Device, Running Device, Wireless)",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/api/mdm/enrollment-qrs/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "mdm",
-                "enrollment-qrs",
-                ""
-              ]
-            },
-            "description": "Returns generic MDM enrollment QR codes for retailer app Customer QR tab: qr_service_app (New Device / 7-tap), qr_running_device (Running Device normal), and qr_wireless (null if unsupported)."
-          }
-        },
-        {
-          "name": "8.20 Enroll iPhone via Standard Customer Enroll API (/customers/enroll/)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"full_name\": \"Aarav Mehta\",\n  \"mobile_number\": \"9812345670\",\n  \"email\": \"aarav.mehta@example.com\",\n  \"os_type\": \"IOS\",\n  \"device_type\": \"IOS\",\n  \"brand\": \"Apple\",\n  \"model\": \"iPhone 15 Pro\",\n  \"serial_number\": \"F2LW98APTEST\",\n  \"total_amount\": 120000,\n  \"down_payment\": 30000,\n  \"loan_amount\": 90000,\n  \"emi_amount\": 15000,\n  \"total_emis\": 6,\n  \"emi_frequency\": \"MONTHLY\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/api/customers/enroll/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "customers",
-                "enroll",
-                ""
-              ]
-            },
-            "description": "Enrolls an Apple iPhone via the primary /customers/enroll/ endpoint. Accepts serial_number (does NOT require IMEI), sets os_type to IOS and lock_provider to APPLE_MDM, consumes an iOS key from retailer balance, and registers the device with Loksiz MDM."
-          }
-        }
-      ]
-    },
-    {
-      "name": "9. EMI Commission & Digital Wallet (98% - 2% Model)",
-      "item": [
-        {
-          "name": "9.1 Retailer My Wallet Summary",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/api/wallet/my-wallet/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "wallet",
-                "my-wallet",
-                ""
-              ]
-            },
-            "description": "Returns retailer's live digital wallet balance, total collected gross, total withdrawn, 2% platform fee paid, registered bank details, and recent ledger entries."
-          }
-        },
-        {
-          "name": "9.2 Retailer Wallet Statement & Ledger",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/api/wallet/statement/?page=1",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "wallet",
-                "statement",
-                ""
-              ],
-              "query": [
+                    "name": "1.2 Request MPIN Reset OTP (Live Jio DLT SMS)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"mobile_number\": \"{{mobile_number}}\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/auth/mpin/request-otp/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "auth",
+                                "mpin",
+                                "request-otp",
+                                ""
+                            ]
+                        },
+                        "description": "Dispatches live DLT OTP SMS via APITxT using Header PRLOCK, Template ID 1277179438043729654, Entity ID 1201179275669531017, and Telemarketer ID 1202162934973074727."
+                    },
+                    "response": []
+                },
                 {
-                  "key": "page",
-                  "value": "1"
-                }
-              ]
-            },
-            "description": "Itemized transaction statement and ledger showing every gross collection, 2% admin fee deduction, net credit, balance after, and customer reference."
-          }
-        },
-        {
-          "name": "9.3 Export Wallet Statement to CSV",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/api/wallet/statement/?export=csv",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "wallet",
-                "statement",
-                ""
-              ],
-              "query": [
+                    "name": "1.3 Verify MPIN Reset OTP & Set New MPIN",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"mobile_number\": \"{{mobile_number}}\",\n    \"otp\": \"{{otp_code}}\",\n    \"new_mpin\": \"123456\",\n    \"confirm_mpin\": \"123456\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/auth/mpin/verify-otp/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "auth",
+                                "mpin",
+                                "verify-otp",
+                                ""
+                            ]
+                        },
+                        "description": "Verifies the 6-digit OTP received on mobile and updates user MPIN."
+                    },
+                    "response": []
+                },
                 {
-                  "key": "export",
-                  "value": "csv"
+                    "name": "1.4 Request Password Reset OTP (Live Jio DLT SMS)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"identifier\": \"{{mobile_number}}\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/auth/password-reset/request-otp/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "auth",
+                                "password-reset",
+                                "request-otp",
+                                ""
+                            ]
+                        },
+                        "description": "Sends live password reset OTP SMS via Jio DLT PRLOCK route."
+                    },
+                    "response": []
                 }
-              ]
-            },
-            "description": "Exports retailer's itemized transaction ledger into a downloadable CSV spreadsheet report."
-          }
+            ]
         },
         {
-          "name": "9.4 Retailer Withdraw to Bank Request",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"amount\": \"1000.00\",\n  \"payout_method\": \"BANK_TRANSFER\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/api/wallet/withdraw/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "wallet",
-                "withdraw",
-                ""
-              ]
-            },
-            "description": "Retailer requests payout of accumulated wallet balance to their registered Bank Account or UPI. Balance is deducted immediately to prevent double spending."
-          }
-        },
-        {
-          "name": "9.5 Buy License Keys with Wallet Balance",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"device_type\": \"MOBILE\",\n  \"quantity\": 2,\n  \"os_type\": \"ANDROID\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/api/wallet/buy-keys/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "wallet",
-                "buy-keys",
-                ""
-              ]
-            },
-            "description": "Retailer buys new device license keys directly using wallet earnings without spending cash. Keys are generated and assigned immediately."
-          }
-        },
-        {
-          "name": "9.6 Admin View All Payout Requests",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/api/payouts/?status=PENDING",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "payouts",
-                ""
-              ],
-              "query": [
+            "name": "2. EMI Loan Agreement (New Features)",
+            "item": [
                 {
-                  "key": "status",
-                  "value": "PENDING"
+                    "name": "2.1 View Agreement HTML (Webview / Print Preview)",
+                    "request": {
+                        "auth": {
+                            "type": "bearer",
+                            "bearer": [
+                                {
+                                    "key": "token",
+                                    "value": "{{access_token}}",
+                                    "type": "string"
+                                }
+                            ]
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Accept",
+                                "value": "text/html"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/emi-contracts/{{contract_id}}/agreement/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "emi-contracts",
+                                "{{contract_id}}",
+                                "agreement",
+                                ""
+                            ]
+                        },
+                        "description": "Returns responsive, table-free, 1-page A4 legal agreement HTML view. Features contracting parties, collateral IMEI, repayment terms, covenants, and sole borrower digital signature. Includes print button (window.print()) and PDF download link."
+                    },
+                    "response": []
+                },
+                {
+                    "name": "2.2 Download Agreement PDF (Action Endpoint)",
+                    "request": {
+                        "auth": {
+                            "type": "bearer",
+                            "bearer": [
+                                {
+                                    "key": "token",
+                                    "value": "{{access_token}}",
+                                    "type": "string"
+                                }
+                            ]
+                        },
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/api/emi-contracts/{{contract_id}}/agreement-pdf/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "emi-contracts",
+                                "{{contract_id}}",
+                                "agreement-pdf",
+                                ""
+                            ]
+                        },
+                        "description": "Directly streams and downloads a 1-page A4 legal agreement PDF binary generated via ReportLab (Content-Type: application/pdf)."
+                    },
+                    "response": []
+                },
+                {
+                    "name": "2.3 Download Agreement PDF (Query Param ?download=pdf)",
+                    "request": {
+                        "auth": {
+                            "type": "bearer",
+                            "bearer": [
+                                {
+                                    "key": "token",
+                                    "value": "{{access_token}}",
+                                    "type": "string"
+                                }
+                            ]
+                        },
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/api/emi-contracts/{{contract_id}}/agreement/?download=pdf",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "emi-contracts",
+                                "{{contract_id}}",
+                                "agreement",
+                                ""
+                            ],
+                            "query": [
+                                {
+                                    "key": "download",
+                                    "value": "pdf"
+                                }
+                            ]
+                        },
+                        "description": "Downloads the compiled 1-page A4 PDF binary using the ?download=pdf query parameter on the base agreement URL."
+                    },
+                    "response": []
+                },
+                {
+                    "name": "2.4 Get Agreement Raw JSON Data (?format=json)",
+                    "request": {
+                        "auth": {
+                            "type": "bearer",
+                            "bearer": [
+                                {
+                                    "key": "token",
+                                    "value": "{{access_token}}",
+                                    "type": "string"
+                                }
+                            ]
+                        },
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/emi-contracts/{{contract_id}}/agreement/?format=json",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "emi-contracts",
+                                "{{contract_id}}",
+                                "agreement",
+                                ""
+                            ],
+                            "query": [
+                                {
+                                    "key": "format",
+                                    "value": "json"
+                                }
+                            ]
+                        },
+                        "description": "Returns structured JSON data payload of the agreement: agreement_number, status, retailer, customer (including signature_url), financed_product, collateral_device, and financial_terms."
+                    },
+                    "response": []
+                },
+                {
+                    "name": "2.5 List EMI Contracts (Includes agreement_url)",
+                    "request": {
+                        "auth": {
+                            "type": "bearer",
+                            "bearer": [
+                                {
+                                    "key": "token",
+                                    "value": "{{access_token}}",
+                                    "type": "string"
+                                }
+                            ]
+                        },
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/api/emi-contracts/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "emi-contracts",
+                                ""
+                            ]
+                        },
+                        "description": "Lists all EMI contracts accessible to the logged in user. Each record exposes agreement_url in addition to mandate_auth_url."
+                    },
+                    "response": []
+                },
+                {
+                    "name": "2.6 Get EMI Contract Details",
+                    "request": {
+                        "auth": {
+                            "type": "bearer",
+                            "bearer": [
+                                {
+                                    "key": "token",
+                                    "value": "{{access_token}}",
+                                    "type": "string"
+                                }
+                            ]
+                        },
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/api/emi-contracts/{{contract_id}}/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "emi-contracts",
+                                "{{contract_id}}",
+                                ""
+                            ]
+                        },
+                        "description": "Retrieves contract record by ID, showing customer details, installments breakdown, mandate status, and agreement_url."
+                    },
+                    "response": []
                 }
-              ]
-            },
-            "description": "Admin dashboard to view and filter all retailer withdrawal requests across PENDING, PROCESSED, and REJECTED states."
-          }
+            ]
         },
         {
-          "name": "9.7 Admin Approve Payout (Disburse Funds)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"utr_number\": \"UTR998877665544\",\n  \"admin_notes\": \"Disbursed via NEFT to retailer bank account\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/api/payouts/{{payout_id}}/approve/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "payouts",
-                "{{payout_id}}",
-                "approve",
-                ""
-              ]
-            },
-            "description": "Admin marks payout as PROCESSED, records the bank UTR number, and updates retailer total_withdrawn balance."
-          }
+            "name": "3. Device Locking & Payment Operations",
+            "item": [
+                {
+                    "name": "3.1 Manual Device Lock",
+                    "request": {
+                        "auth": {
+                            "type": "bearer",
+                            "bearer": [
+                                {
+                                    "key": "token",
+                                    "value": "{{access_token}}",
+                                    "type": "string"
+                                }
+                            ]
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"reason\": \"Manual lock due to overdue payment\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/emi-contracts/{{contract_id}}/lock/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "emi-contracts",
+                                "{{contract_id}}",
+                                "lock",
+                                ""
+                            ]
+                        },
+                        "description": "Manually triggers a device lock command on the contract's collateral handset (accessible by Retailer / Staff / Admin)."
+                    },
+                    "response": []
+                },
+                {
+                    "name": "3.2 Manual Device Unlock",
+                    "request": {
+                        "auth": {
+                            "type": "bearer",
+                            "bearer": [
+                                {
+                                    "key": "token",
+                                    "value": "{{access_token}}",
+                                    "type": "string"
+                                }
+                            ]
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"reason\": \"Payment received in store cash\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/emi-contracts/{{contract_id}}/unlock/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "emi-contracts",
+                                "{{contract_id}}",
+                                "unlock",
+                                ""
+                            ]
+                        },
+                        "description": "Manually triggers a device unlock command and restores active status."
+                    },
+                    "response": []
+                },
+                {
+                    "name": "3.3 Record Installment Payment (Cash / UPI)",
+                    "request": {
+                        "auth": {
+                            "type": "bearer",
+                            "bearer": [
+                                {
+                                    "key": "token",
+                                    "value": "{{access_token}}",
+                                    "type": "string"
+                                }
+                            ]
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"amount_paid\": \"1500.00\",\n    \"payment_mode\": \"CASH\",\n    \"transaction_reference\": \"TXN_CASH_1001\",\n    \"notes\": \"Payment recorded at retail counter\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/emi-installments/{{installment_id}}/record-payment/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "emi-installments",
+                                "{{installment_id}}",
+                                "record-payment",
+                                ""
+                            ]
+                        },
+                        "description": "Records an installment payment, updates status to PAID, and automatically unlocks the device if overdue."
+                    },
+                    "response": []
+                }
+            ]
         },
         {
-          "name": "9.8 Admin Reject Payout (Refund to Wallet)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"reason\": \"Bank account number mismatch or IFSC inactive. Please re-verify.\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/api/payouts/{{payout_id}}/reject/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "payouts",
-                "{{payout_id}}",
-                "reject",
-                ""
-              ]
-            },
-            "description": "Admin rejects payout request. Deducted funds are immediately refunded back to the retailer's digital wallet."
-          }
+            "name": "4. Customer Documents & Photo Edit (Admin)",
+            "item": [
+                {
+                    "name": "4.1 Edit Customer Photo (Multipart File Upload)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "body": {
+                            "mode": "formdata",
+                            "formdata": [
+                                {
+                                    "key": "customer_photo",
+                                    "type": "file",
+                                    "description": "Select new customer selfie/photo file (JPG, PNG, WEBP)"
+                                }
+                            ]
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/customers/{{customer_id}}/edit-photo/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "customers",
+                                "{{customer_id}}",
+                                "edit-photo",
+                                ""
+                            ]
+                        },
+                        "description": "Super Admin or authorized manager uploads or replaces customer KYC photo. Permitted at any time, even after device activation."
+                    }
+                },
+                {
+                    "name": "4.2 Edit Customer Photo (Base64 JSON)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"customer_photo\": \"data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD...\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/customers/{{customer_id}}/edit-photo/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "customers",
+                                "{{customer_id}}",
+                                "edit-photo",
+                                ""
+                            ]
+                        },
+                        "description": "Alternative photo upload endpoint accepting base64 encoded image string directly from mobile apps."
+                    }
+                },
+                {
+                    "name": "4.3 Delete Customer Photo (Clear KYC Photo)",
+                    "request": {
+                        "method": "DELETE",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/customers/{{customer_id}}/edit-photo/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "customers",
+                                "{{customer_id}}",
+                                "edit-photo",
+                                ""
+                            ]
+                        },
+                        "description": "Removes customer photo file from storage and sets customer_photo to null."
+                    }
+                },
+                {
+                    "name": "4.4 View Customer Profile & Documents Trio (Admin)",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/customers/{{customer_id}}/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "customers",
+                                "{{customer_id}}",
+                                ""
+                            ]
+                        },
+                        "description": "Fetches customer details including the documents block with direct links to photo, digital signature, and auto-generated EMI agreement."
+                    }
+                }
+            ]
         },
         {
-          "name": "9.9 Admin Revenue Dashboard (Live 2% Analytics)",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/api/revenue/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "revenue",
-                ""
-              ]
-            },
-            "description": "Real-time analytics dashboard reporting total 2% platform revenue (today, this month, this year, all-time), gross EMI volumes, online vs offline split, and wallet liability balances."
-          }
+            "name": "5. SIM Card Information & Anti-Fraud (Admin & Retailer)",
+            "item": [
+                {
+                    "name": "5.1 Get Device Details (Includes Structured sim_details)",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/devices/{{device_id}}/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "devices",
+                                "{{device_id}}",
+                                ""
+                            ]
+                        },
+                        "description": "Returns device details including structured sim_details (slot_1, slot_2, is_dual_sim, sim_changed alert flag, and sim_history timeline)."
+                    }
+                },
+                {
+                    "name": "5.2 Heartbeat Telemetry Ping (Simulate SIM & Location Report)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"imei\": \"867530900000001\",\n  \"battery_level\": 92,\n  \"sim_operator\": \"Airtel 5G\",\n  \"sim_number\": \"+919876543210\",\n  \"sim_serial\": \"8991000123456789012F\",\n  \"sim_operator_2\": \"Jio True 5G\",\n  \"sim_number_2\": \"+919812345678\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/devices/ping/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "devices",
+                                "ping",
+                                ""
+                            ]
+                        },
+                        "description": "Heartbeat ping API called periodically by the phone app to report SIM info, battery, and location. If SIM ICCID changes, backend automatically flags sim_changed=True and logs to sim_history."
+                    }
+                },
+                {
+                    "name": "5.3 Acknowledge / Clear SIM Change Alert",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/devices/{{device_id}}/acknowledge-sim-change/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "devices",
+                                "{{device_id}}",
+                                "acknowledge-sim-change",
+                                ""
+                            ]
+                        },
+                        "description": "Admin or Retailer clears the red warning badge after verifying an authorized SIM change with the customer."
+                    }
+                }
+            ]
+        },
+        {
+            "name": "6. Key Ledger & Whole-Count Transfers (Screen N-07)",
+            "item": [
+                {
+                    "name": "6.1 Key Transactions Ledger (Grouped Whole Count - Default)",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/keys/transactions/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "keys",
+                                "transactions",
+                                ""
+                            ]
+                        },
+                        "description": "Screen N-07: Key history ledger grouped by batch. Displays whole count (e.g. quantity: 50, key_string: DLC-1001 (+49 more)) instead of spamming 50 individual +1 rows."
+                    }
+                },
+                {
+                    "name": "6.2 Key Transactions Ledger (Detailed Raw View)",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/keys/transactions/?view=detailed",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "keys",
+                                "transactions",
+                                ""
+                            ],
+                            "query": [
+                                {
+                                    "key": "view",
+                                    "value": "detailed",
+                                    "description": "Return individual single-key rows"
+                                }
+                            ]
+                        },
+                        "description": "Returns individual serial key transaction rows (each with quantity: 1) when individual serial inspection is needed."
+                    }
+                },
+                {
+                    "name": "6.3 Key Transactions CSV Export",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/keys/transactions/?export=csv",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "keys",
+                                "transactions",
+                                ""
+                            ],
+                            "query": [
+                                {
+                                    "key": "export",
+                                    "value": "csv",
+                                    "description": "Export ledger to CSV with Quantity column"
+                                }
+                            ]
+                        },
+                        "description": "Downloads CSV report of key transactions including Quantity and Batch ID columns."
+                    }
+                }
+            ]
+        },
+        {
+            "name": "7. Retailer & Partner Password Reset (Admin Support)",
+            "item": [
+                {
+                    "name": "7.1 Admin Reset Retailer Password (Custom Password)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"new_password\": \"NewRetailerPass@2026\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/retailers/{{retailer_id}}/reset-password/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "retailers",
+                                "{{retailer_id}}",
+                                "reset-password",
+                                ""
+                            ]
+                        },
+                        "description": "Super Admin or Upline Distributor resets a Retailer password with an explicit custom password."
+                    }
+                },
+                {
+                    "name": "7.2 Admin Reset Retailer Password (Auto-Generate Temporary Password)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/retailers/{{retailer_id}}/reset-password/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "retailers",
+                                "{{retailer_id}}",
+                                "reset-password",
+                                ""
+                            ]
+                        },
+                        "description": "Super Admin resets Retailer password with an auto-generated secure temporary PIN (e.g. PL@4829)."
+                    }
+                },
+                {
+                    "name": "7.3 Reset Retailer Password by Mobile Number / Username",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"mobile_number\": \"9876543210\",\n  \"new_password\": \"Retailer@2026\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/retailers/reset-password/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "retailers",
+                                "reset-password",
+                                ""
+                            ]
+                        },
+                        "description": "Reset a retailer password by providing their registered mobile number or username."
+                    }
+                }
+            ]
+        },
+        {
+            "name": "8. Apple MDM (iPhone Locker - Loksiz)",
+            "description": "Comprehensive integration with Loksiz Apple MDM v1.4 for iPhone supervised management, eligibility validation, enrollment, remote lock/unlock, kiosk mode, activation lock, wallpaper, GPS tracking, and real-time webhook status callbacks.",
+            "item": [
+                {
+                    "name": "8.1 Service Health Check (Apple MDM Gateway)",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/devices/apple-mdm/health/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "devices",
+                                "apple-mdm",
+                                "health",
+                                ""
+                            ]
+                        },
+                        "description": "Checks connectivity with Loksiz Apple MDM Gateway (returns 200 OK with health status)."
+                    }
+                },
+                {
+                    "name": "8.2 Validate iPhone Eligibility (Mandatory Pre-Enrollment Check)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"imei\": \"358247910271332\",\n  \"serial_number\": \"C02XL1234567\",\n  \"imei2\": \"358247919646625\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/devices/apple-mdm/validate/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "devices",
+                                "apple-mdm",
+                                "validate",
+                                ""
+                            ]
+                        },
+                        "description": "Validates iPhone IMEI & Serial Number eligibility and verifies available IOS key balance in the Loksiz partner wallet before registration."
+                    }
+                },
+                {
+                    "name": "8.3 Enroll iPhone into Apple MDM",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"imei\": \"358247910271332\",\n  \"serial_number\": \"C02XL1234567\",\n  \"customer_name\": \"Aman Sharma\",\n  \"customer_mobile\": \"+919876543210\",\n  \"customer_email\": \"aman.sharma@example.com\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/devices/apple-mdm/enroll/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "devices",
+                                "apple-mdm",
+                                "enroll",
+                                ""
+                            ]
+                        },
+                        "description": "Registers Apple device with Loksiz MDM, generates deviceRegNum, and creates or updates local Device record with APPLE_MDM lock provider."
+                    }
+                },
+                {
+                    "name": "8.4 List Registered Apple Devices & Dashboard Counters",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/devices/apple-mdm/devices/?page=1&limit=10",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "devices",
+                                "apple-mdm",
+                                "devices",
+                                ""
+                            ],
+                            "query": [
+                                {
+                                    "key": "page",
+                                    "value": "1"
+                                },
+                                {
+                                    "key": "limit",
+                                    "value": "10"
+                                }
+                            ]
+                        },
+                        "description": "Fetches all enrolled iOS devices and dashboard summary (total, active, pending, inactive) directly from Loksiz."
+                    }
+                },
+                {
+                    "name": "8.5 Remote Lock iPhone (Lost Mode with Custom Message & Phone)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"action\": \"LOCK\",\n  \"message\": \"Payment overdue. Please contact Prime Retailer to restore service.\",\n  \"phone_number\": \"+919876543210\",\n  \"foot_note\": \"Prime Locker MDM Protection\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/devices/{{device_id}}/apple-action/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "devices",
+                                "{{device_id}}",
+                                "apple-action",
+                                ""
+                            ]
+                        },
+                        "description": "Executes immediate Lost Mode LOCK on the managed iPhone, displaying custom overdue message, call button phone number, and footnote."
+                    }
+                },
+                {
+                    "name": "8.6 Remote Unlock iPhone",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"action\": \"UNLOCK\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/devices/{{device_id}}/apple-action/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "devices",
+                                "{{device_id}}",
+                                "apple-action",
+                                ""
+                            ]
+                        },
+                        "description": "Instantly removes Lost Mode lock from the iPhone, restoring normal customer access."
+                    }
+                },
+                {
+                    "name": "8.7 Standard Remote Lock (Auto-routes to Apple MDM)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"reason\": \"EMI overdue remote lock\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/devices/{{device_id}}/lock/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "devices",
+                                "{{device_id}}",
+                                "lock",
+                                ""
+                            ]
+                        },
+                        "description": "Standard Prime Locker lock endpoint. Automatically dispatches lock to Loksiz Apple MDM when device is an iPhone / APPLE_MDM."
+                    }
+                },
+                {
+                    "name": "8.8 Standard Remote Unlock (Auto-routes to Apple MDM)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"reason\": \"Payment received\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/devices/{{device_id}}/unlock/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "devices",
+                                "{{device_id}}",
+                                "unlock",
+                                ""
+                            ]
+                        },
+                        "description": "Standard Prime Locker unlock endpoint. Automatically dispatches unlock to Loksiz Apple MDM."
+                    }
+                },
+                {
+                    "name": "8.9 Enforce Application Kiosk Mode (App Lock)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/devices/{{device_id}}/apple-app-lock/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "devices",
+                                "{{device_id}}",
+                                "apple-app-lock",
+                                ""
+                            ]
+                        },
+                        "description": "Enforces Single App Mode / Kiosk mode on the managed iPhone."
+                    }
+                },
+                {
+                    "name": "8.10 Remove Application Kiosk Mode (App Unlock)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/devices/{{device_id}}/apple-app-unlock/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "devices",
+                                "{{device_id}}",
+                                "apple-app-unlock",
+                                ""
+                            ]
+                        },
+                        "description": "Removes application lock restriction, returning device to normal multi-app operation."
+                    }
+                },
+                {
+                    "name": "8.11 Supervised Activation Lock (Enable / Disable)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"action\": 1\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/devices/{{device_id}}/apple-activation-lock/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "devices",
+                                "{{device_id}}",
+                                "apple-activation-lock",
+                                ""
+                            ]
+                        },
+                        "description": "Triggers Apple MDM Activation Lock. Action 1 = Enable, 0 = Disable."
+                    }
+                },
+                {
+                    "name": "8.12 Query Supervised Activation Lock Status",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/devices/{{device_id}}/apple-activation-lock-status/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "devices",
+                                "{{device_id}}",
+                                "apple-activation-lock-status",
+                                ""
+                            ]
+                        },
+                        "description": "Queries the current Activation Lock status of the iPhone."
+                    }
+                },
+                {
+                    "name": "8.13 Set Lockscreen Wallpaper (Base64)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"wallpaper_image\": \"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/devices/{{device_id}}/apple-wallpaper/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "devices",
+                                "{{device_id}}",
+                                "apple-wallpaper",
+                                ""
+                            ]
+                        },
+                        "description": "Sets custom branded wallpaper on iPhone Lock Screen and Home Screen."
+                    }
+                },
+                {
+                    "name": "8.14 Remove Custom Wallpaper (Restore Default)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"action\": \"REMOVE\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/devices/{{device_id}}/apple-wallpaper/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "devices",
+                                "{{device_id}}",
+                                "apple-wallpaper",
+                                ""
+                            ]
+                        },
+                        "description": "Removes custom wallpaper and restores system default wallpaper on iPhone."
+                    }
+                },
+                {
+                    "name": "8.15 Live GPS Location Refresh",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/devices/{{device_id}}/refresh-location/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "devices",
+                                "{{device_id}}",
+                                "refresh-location",
+                                ""
+                            ]
+                        },
+                        "description": "Dispatches instant GET_LOCATION command to retrieve current iPhone coordinates."
+                    }
+                },
+                {
+                    "name": "8.16 Release / Uninstall MDM Profile (Post EMI Settlement)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"reason\": \"Customer completed all EMI installments\",\n  \"force\": true\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/devices/{{device_id}}/uninstall/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "devices",
+                                "{{device_id}}",
+                                "uninstall",
+                                ""
+                            ]
+                        },
+                        "description": "Deregisters iPhone from Apple MDM and marks device as UNENROLLED in Prime Locker."
+                    }
+                },
+                {
+                    "name": "8.17 Webhook Callback (Remote Lock Status Update)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "X-Callback-Id",
+                                "value": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"event\": \"apple_device_status_update\",\n  \"callback_id\": \"9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d\",\n  \"deviceRegNum\": \"1726567890123\",\n  \"slug\": \"lock_status\",\n  \"status\": 1,\n  \"location\": null,\n  \"message\": \"Device locked successfully\",\n  \"imei\": \"358247910271332\",\n  \"imei2\": \"358247919646625\",\n  \"serialNumber\": \"C02XL1234567\",\n  \"occurred_at\": \"2026-11-20T10:00:00.000Z\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/integrations/apple-mdm/webhook/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "integrations",
+                                "apple-mdm",
+                                "webhook",
+                                ""
+                            ]
+                        },
+                        "description": "Simulates real-time webhook callback dispatched by Loksiz MDM when device is locked/unlocked. Returns HTTP 200 within 10s."
+                    }
+                },
+                {
+                    "name": "8.18 Webhook Callback (Live GPS Location Update)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "X-Callback-Id",
+                                "value": "71a2b3c4-d5e6-7f8a-9b0c-1d2e3f4a5b6c"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"event\": \"apple_device_status_update\",\n  \"callback_id\": \"71a2b3c4-d5e6-7f8a-9b0c-1d2e3f4a5b6c\",\n  \"deviceRegNum\": \"1726567890123\",\n  \"slug\": \"device_location\",\n  \"status\": null,\n  \"location\": {\n    \"lat\": \"28.6139\",\n    \"long\": \"77.2090\",\n    \"date\": \"20-11-2026 15:30:00\"\n  },\n  \"message\": null,\n  \"imei\": \"358247910271332\",\n  \"imei2\": \"358247919646625\",\n  \"serialNumber\": \"C02XL1234567\",\n  \"occurred_at\": \"2026-11-20T10:00:00.000Z\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/integrations/apple-mdm/webhook/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "integrations",
+                                "apple-mdm",
+                                "webhook",
+                                ""
+                            ]
+                        },
+                        "description": "Simulates real-time webhook callback dispatched by Loksiz MDM containing device GPS coordinates."
+                    }
+                },
+                {
+                    "name": "8.19 Retailer Generic MDM Enrollment QRs (New Device, Running Device, Wireless)",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/mdm/enrollment-qrs/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "mdm",
+                                "enrollment-qrs",
+                                ""
+                            ]
+                        },
+                        "description": "Returns generic MDM enrollment QR codes for retailer app Customer QR tab: qr_service_app (New Device / 7-tap), qr_running_device (Running Device normal), and qr_wireless (null if unsupported)."
+                    }
+                },
+                {
+                    "name": "8.20 Enroll iPhone via Standard Customer Enroll API (/customers/enroll/)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"full_name\": \"Aarav Mehta\",\n  \"mobile_number\": \"9812345670\",\n  \"email\": \"aarav.mehta@example.com\",\n  \"os_type\": \"IOS\",\n  \"device_type\": \"IOS\",\n  \"brand\": \"Apple\",\n  \"model\": \"iPhone 15 Pro\",\n  \"serial_number\": \"F2LW98APTEST\",\n  \"total_amount\": 120000,\n  \"down_payment\": 30000,\n  \"loan_amount\": 90000,\n  \"emi_amount\": 15000,\n  \"total_emis\": 6,\n  \"emi_frequency\": \"MONTHLY\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/customers/enroll/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "customers",
+                                "enroll",
+                                ""
+                            ]
+                        },
+                        "description": "Enrolls an Apple iPhone via the primary /customers/enroll/ endpoint. Accepts serial_number (does NOT require IMEI), sets os_type to IOS and lock_provider to APPLE_MDM, consumes an iOS key from retailer balance, and registers the device with Loksiz MDM."
+                    }
+                }
+            ]
+        },
+        {
+            "name": "9. EMI Commission & Digital Wallet (98% - 2% Model)",
+            "item": [
+                {
+                    "name": "9.1 Retailer My Wallet Summary",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/wallet/my-wallet/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "wallet",
+                                "my-wallet",
+                                ""
+                            ]
+                        },
+                        "description": "Returns retailer's live digital wallet balance, total collected gross, total withdrawn, 2% platform fee paid, registered bank details, and recent ledger entries."
+                    }
+                },
+                {
+                    "name": "9.2 Retailer Wallet Statement & Ledger",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/wallet/statement/?page=1",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "wallet",
+                                "statement",
+                                ""
+                            ],
+                            "query": [
+                                {
+                                    "key": "page",
+                                    "value": "1"
+                                }
+                            ]
+                        },
+                        "description": "Itemized transaction statement and ledger showing every gross collection, 2% admin fee deduction, net credit, balance after, and customer reference."
+                    }
+                },
+                {
+                    "name": "9.3 Export Wallet Statement to CSV",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/wallet/statement/?export=csv",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "wallet",
+                                "statement",
+                                ""
+                            ],
+                            "query": [
+                                {
+                                    "key": "export",
+                                    "value": "csv"
+                                }
+                            ]
+                        },
+                        "description": "Exports retailer's itemized transaction ledger into a downloadable CSV spreadsheet report."
+                    }
+                },
+                {
+                    "name": "9.4 Retailer Withdraw to Bank Request",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"amount\": \"1000.00\",\n  \"payout_method\": \"BANK_TRANSFER\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/wallet/withdraw/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "wallet",
+                                "withdraw",
+                                ""
+                            ]
+                        },
+                        "description": "Retailer requests payout of accumulated wallet balance to their registered Bank Account or UPI. Balance is deducted immediately to prevent double spending."
+                    }
+                },
+                {
+                    "name": "9.5 Buy License Keys with Wallet Balance",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"device_type\": \"MOBILE\",\n  \"quantity\": 2,\n  \"os_type\": \"ANDROID\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/wallet/buy-keys/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "wallet",
+                                "buy-keys",
+                                ""
+                            ]
+                        },
+                        "description": "Retailer buys new device license keys directly using wallet earnings without spending cash. Keys are generated and assigned immediately."
+                    }
+                },
+                {
+                    "name": "9.6 Admin View All Payout Requests",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/payouts/?status=PENDING",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "payouts",
+                                ""
+                            ],
+                            "query": [
+                                {
+                                    "key": "status",
+                                    "value": "PENDING"
+                                }
+                            ]
+                        },
+                        "description": "Admin dashboard to view and filter all retailer withdrawal requests across PENDING, PROCESSED, and REJECTED states."
+                    }
+                },
+                {
+                    "name": "9.7 Admin Approve Payout (Disburse Funds)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"utr_number\": \"UTR998877665544\",\n  \"admin_notes\": \"Disbursed via NEFT to retailer bank account\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/payouts/{{payout_id}}/approve/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "payouts",
+                                "{{payout_id}}",
+                                "approve",
+                                ""
+                            ]
+                        },
+                        "description": "Admin marks payout as PROCESSED, records the bank UTR number, and updates retailer total_withdrawn balance."
+                    }
+                },
+                {
+                    "name": "9.8 Admin Reject Payout (Refund to Wallet)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"reason\": \"Bank account number mismatch or IFSC inactive. Please re-verify.\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/payouts/{{payout_id}}/reject/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "payouts",
+                                "{{payout_id}}",
+                                "reject",
+                                ""
+                            ]
+                        },
+                        "description": "Admin rejects payout request. Deducted funds are immediately refunded back to the retailer's digital wallet."
+                    }
+                },
+                {
+                    "name": "9.9 Admin Revenue Dashboard (Live 2% Analytics)",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/revenue/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "revenue",
+                                ""
+                            ]
+                        },
+                        "description": "Real-time analytics dashboard reporting total 2% platform revenue (today, this month, this year, all-time), gross EMI volumes, online vs offline split, and wallet liability balances."
+                    }
+                }
+            ]
+        },
+        {
+            "name": "10. Retailer Generic MDM QRs & Multi-OS Customer Enroll",
+            "item": [
+                {
+                    "name": "10.1 Generic Retailer Enrollment QRs (New Device, Running Device, Wireless)",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/mdm/enrollment-qrs/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "mdm",
+                                "enrollment-qrs",
+                                ""
+                            ]
+                        },
+                        "description": "Returns generic MDM enrollment QR codes for retailer app Customer QR tab: qr_service_app (New Device / 7-tap), qr_running_device (Running Device normal), and qr_wireless (null if unsupported)."
+                    }
+                },
+                {
+                    "name": "10.2 Enroll iPhone Customer via /customers/enroll/ (Serial Number, No IMEI)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"full_name\": \"Aarav Mehta\",\n  \"mobile_number\": \"9812345670\",\n  \"email\": \"aarav.mehta@example.com\",\n  \"os_type\": \"IOS\",\n  \"device_type\": \"IOS\",\n  \"brand\": \"Apple\",\n  \"model\": \"iPhone 15 Pro\",\n  \"serial_number\": \"F2LW98APTEST\",\n  \"total_amount\": 120000,\n  \"down_payment\": 30000,\n  \"loan_amount\": 90000,\n  \"emi_amount\": 15000,\n  \"total_emis\": 6,\n  \"emi_frequency\": \"MONTHLY\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/customers/enroll/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "customers",
+                                "enroll",
+                                ""
+                            ]
+                        },
+                        "description": "Enrolls an Apple iPhone via the primary /customers/enroll/ endpoint. Accepts serial_number (does NOT require IMEI), sets os_type to IOS and lock_provider to APPLE_MDM, consumes an iOS key from retailer balance, and registers the device with Loksiz MDM."
+                    }
+                },
+                {
+                    "name": "10.3 Inactive Device IMEI & IMEI2 Edit (PATCH /devices/{id}/)",
+                    "request": {
+                        "method": "PATCH",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"imei\": \"352099009999001\",\n  \"imei2\": \"352099009999002\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/devices/{{device_id}}/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "devices",
+                                "{{device_id}}",
+                                ""
+                            ]
+                        },
+                        "description": "Allows updating IMEI and secondary IMEI (imei2) while device is inactive / not activated. Automatically blocked if device is already active."
+                    }
+                },
+                {
+                    "name": "10.4 Live Device Location Coordinates (GET /devices/{id}/location/)",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/devices/{{device_id}}/location/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "devices",
+                                "{{device_id}}",
+                                "location",
+                                ""
+                            ]
+                        },
+                        "description": "Returns live GPS coordinates (latitude, longitude, address, maps_url) of the device."
+                    }
+                },
+                {
+                    "name": "10.5 Device SIM Details & Status (GET /devices/{id}/sim-details/)",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/devices/{{device_id}}/sim-details/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "devices",
+                                "{{device_id}}",
+                                "sim-details",
+                                ""
+                            ]
+                        },
+                        "description": "Returns full dual-SIM details (carrier, phone number, ICCID, slot status, swap history)."
+                    }
+                },
+                {
+                    "name": "10.6 Device Offline Unlock Code (GET /devices/{id}/offline-unlock-code/)",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/devices/{{device_id}}/offline-unlock-code/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "devices",
+                                "{{device_id}}",
+                                "offline-unlock-code",
+                                ""
+                            ]
+                        },
+                        "description": "Returns current active offline unlock code and expiry timestamp for the device."
+                    }
+                },
+                {
+                    "name": "10.7 Get Autopay Mandate Options (UPI & eNACH)",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/emi-contracts/mandate-options/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "emi-contracts",
+                                "mandate-options",
+                                ""
+                            ]
+                        },
+                        "description": "Returns supported recurring Autopay options (UPI AutoPay and eNACH Bank Mandate) with limits, descriptions, and default modes."
+                    }
+                },
+                {
+                    "name": "10.8 Create Autopay Mandate - UPI AutoPay (POST /create-mandate/)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"auth_mode\": \"UPI\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/emi-contracts/{{contract_id}}/create-mandate/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "emi-contracts",
+                                "{{contract_id}}",
+                                "create-mandate",
+                                ""
+                            ]
+                        },
+                        "description": "Creates a Cashfree UPI AutoPay recurring mandate for the customer EMI contract, returning mandate_auth_url for instant UPI PIN authorization."
+                    }
+                },
+                {
+                    "name": "10.9 Create Autopay Mandate - eNACH Bank Mandate (POST /create-mandate/)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"auth_mode\": \"ENACH\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/emi-contracts/{{contract_id}}/create-mandate/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "emi-contracts",
+                                "{{contract_id}}",
+                                "create-mandate",
+                                ""
+                            ]
+                        },
+                        "description": "Creates a Cashfree eNACH recurring bank mandate for the customer EMI contract, returning mandate_auth_url for NetBanking / Debit Card authorization."
+                    }
+                },
+                {
+                    "name": "10.10 Check Mandate Status & UMRN (GET /mandate-status/)",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/emi-contracts/{{contract_id}}/mandate-status/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "emi-contracts",
+                                "{{contract_id}}",
+                                "mandate-status",
+                                ""
+                            ]
+                        },
+                        "description": "Queries live Cashfree mandate status, UMRN, and checkout authorization URL."
+                    }
+                },
+                {
+                    "name": "10.11 Reset Device for Same Customer (POST /api/devices/{id}/reset-enrollment/)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"reason\": \"Phone wiped by customer / re-provisioning\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/devices/{{device_id}}/reset-enrollment/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "devices",
+                                "{{device_id}}",
+                                "reset-enrollment",
+                                ""
+                            ]
+                        },
+                        "description": "Resets device hardware enrollment state (is_activated=false, status=INACTIVE, provider_status=PENDING) keeping existing customer and EMI contract. Generates fresh QR codes for immediate rescanning."
+                    }
+                },
+                {
+                    "name": "10.12 Transfer Retailer Between Roles (POST /api/retailers/{id}/transfer-role/)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"new_role\": \"SUB_DISTRIBUTOR\",\n  \"new_parent_id\": 2,\n  \"remarks\": \"Promoted to Sub Distributor\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/retailers/{{retailer_id}}/transfer-role/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "retailers",
+                                "{{retailer_id}}",
+                                "transfer-role",
+                                ""
+                            ]
+                        },
+                        "description": "Transfers a retailer between hierarchy roles (e.g. RETAILER -> SUB_DISTRIBUTOR -> DISTRIBUTOR) with upline parent reassignment while preserving digital keys, customer records, and ledger balances."
+                    }
+                },
+                {
+                    "name": "10.13 Direct Device Ping & Status Verification (POST /api/devices/{id}/ping/)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"battery_level\": 90,\n  \"latitude\": 19.0760,\n  \"longitude\": 72.8777,\n  \"address\": \"Mumbai, Maharashtra\",\n  \"sim_operator\": \"Jio True 5G\",\n  \"sim_number\": \"+919876543210\",\n  \"sim_serial\": \"8991000123456789012F\",\n  \"model\": \"Galaxy A14 5G\",\n  \"brand\": \"Samsung\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/api/devices/{{device_id}}/ping/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "devices",
+                                "{{device_id}}",
+                                "ping",
+                                ""
+                            ]
+                        },
+                        "description": "Direct simulated or device heartbeat ping. Instantly marks device online (is_online=true), activates device if inactive, and updates battery, coordinates, SIM details, and hardware model."
+                    }
+                },
+                {
+                    "name": "10.14 Get Available Keys Breakdown (MDM, iOS, DLC, TV)",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}",
+                                "type": "text"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/keys/check-balance/",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "keys",
+                                "check-balance",
+                                ""
+                            ]
+                        },
+                        "description": "Returns available digital keys categorized by MDM, iOS, DLC, and Smart TV for any non-customer partner (Retailer, Distributor, Admin). Customer accounts receive null."
+                    },
+                    "response": []
+                }
+            ]
         }
-      ]
-    },
-    {
-      "name": "10. Retailer Generic MDM QRs & Multi-OS Customer Enroll",
-      "item": [
-        {
-          "name": "10.1 Generic Retailer Enrollment QRs (New Device, Running Device, Wireless)",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/api/mdm/enrollment-qrs/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "mdm",
-                "enrollment-qrs",
-                ""
-              ]
-            },
-            "description": "Returns generic MDM enrollment QR codes for retailer app Customer QR tab: qr_service_app (New Device / 7-tap), qr_running_device (Running Device normal), and qr_wireless (null if unsupported)."
-          }
-        },
-        {
-          "name": "10.2 Enroll iPhone Customer via /customers/enroll/ (Serial Number, No IMEI)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"full_name\": \"Aarav Mehta\",\n  \"mobile_number\": \"9812345670\",\n  \"email\": \"aarav.mehta@example.com\",\n  \"os_type\": \"IOS\",\n  \"device_type\": \"IOS\",\n  \"brand\": \"Apple\",\n  \"model\": \"iPhone 15 Pro\",\n  \"serial_number\": \"F2LW98APTEST\",\n  \"total_amount\": 120000,\n  \"down_payment\": 30000,\n  \"loan_amount\": 90000,\n  \"emi_amount\": 15000,\n  \"total_emis\": 6,\n  \"emi_frequency\": \"MONTHLY\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/api/customers/enroll/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "customers",
-                "enroll",
-                ""
-              ]
-            },
-            "description": "Enrolls an Apple iPhone via the primary /customers/enroll/ endpoint. Accepts serial_number (does NOT require IMEI), sets os_type to IOS and lock_provider to APPLE_MDM, consumes an iOS key from retailer balance, and registers the device with Loksiz MDM."
-          }
-        },
-        {
-          "name": "10.3 Inactive Device IMEI & IMEI2 Edit (PATCH /devices/{id}/)",
-          "request": {
-            "method": "PATCH",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"imei\": \"352099009999001\",\n  \"imei2\": \"352099009999002\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/api/devices/{{device_id}}/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "devices",
-                "{{device_id}}",
-                ""
-              ]
-            },
-            "description": "Allows updating IMEI and secondary IMEI (imei2) while device is inactive / not activated. Automatically blocked if device is already active."
-          }
-        },
-        {
-          "name": "10.4 Live Device Location Coordinates (GET /devices/{id}/location/)",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/api/devices/{{device_id}}/location/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "devices",
-                "{{device_id}}",
-                "location",
-                ""
-              ]
-            },
-            "description": "Returns live GPS coordinates (latitude, longitude, address, maps_url) of the device."
-          }
-        },
-        {
-          "name": "10.5 Device SIM Details & Status (GET /devices/{id}/sim-details/)",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/api/devices/{{device_id}}/sim-details/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "devices",
-                "{{device_id}}",
-                "sim-details",
-                ""
-              ]
-            },
-            "description": "Returns full dual-SIM details (carrier, phone number, ICCID, slot status, swap history)."
-          }
-        },
-        {
-          "name": "10.6 Device Offline Unlock Code (GET /devices/{id}/offline-unlock-code/)",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/api/devices/{{device_id}}/offline-unlock-code/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "devices",
-                "{{device_id}}",
-                "offline-unlock-code",
-                ""
-              ]
-            },
-            "description": "Returns current active offline unlock code and expiry timestamp for the device."
-          }
-        },
-        {
-          "name": "10.7 Get Autopay Mandate Options (UPI & eNACH)",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/api/emi-contracts/mandate-options/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "emi-contracts",
-                "mandate-options",
-                ""
-              ]
-            },
-            "description": "Returns supported recurring Autopay options (UPI AutoPay and eNACH Bank Mandate) with limits, descriptions, and default modes."
-          }
-        },
-        {
-          "name": "10.8 Create Autopay Mandate - UPI AutoPay (POST /create-mandate/)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"auth_mode\": \"UPI\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/api/emi-contracts/{{contract_id}}/create-mandate/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "emi-contracts",
-                "{{contract_id}}",
-                "create-mandate",
-                ""
-              ]
-            },
-            "description": "Creates a Cashfree UPI AutoPay recurring mandate for the customer EMI contract, returning mandate_auth_url for instant UPI PIN authorization."
-          }
-        },
-        {
-          "name": "10.9 Create Autopay Mandate - eNACH Bank Mandate (POST /create-mandate/)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"auth_mode\": \"ENACH\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/api/emi-contracts/{{contract_id}}/create-mandate/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "emi-contracts",
-                "{{contract_id}}",
-                "create-mandate",
-                ""
-              ]
-            },
-            "description": "Creates a Cashfree eNACH recurring bank mandate for the customer EMI contract, returning mandate_auth_url for NetBanking / Debit Card authorization."
-          }
-        },
-        {
-          "name": "10.10 Check Mandate Status & UMRN (GET /mandate-status/)",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/api/emi-contracts/{{contract_id}}/mandate-status/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "emi-contracts",
-                "{{contract_id}}",
-                "mandate-status",
-                ""
-              ]
-            },
-            "description": "Queries live Cashfree mandate status, UMRN, and checkout authorization URL."
-          }
-        },
-        {
-          "name": "10.11 Reset Device for Same Customer (POST /api/devices/{id}/reset-enrollment/)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"reason\": \"Phone wiped by customer / re-provisioning\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/api/devices/{{device_id}}/reset-enrollment/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "devices",
-                "{{device_id}}",
-                "reset-enrollment",
-                ""
-              ]
-            },
-            "description": "Resets device hardware enrollment state (is_activated=false, status=INACTIVE, provider_status=PENDING) keeping existing customer and EMI contract. Generates fresh QR codes for immediate rescanning."
-          }
-        },
-        {
-          "name": "10.12 Transfer Retailer Between Roles (POST /api/retailers/{id}/transfer-role/)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"new_role\": \"SUB_DISTRIBUTOR\",\n  \"new_parent_id\": 2,\n  \"remarks\": \"Promoted to Sub Distributor\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/api/retailers/{{retailer_id}}/transfer-role/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "retailers",
-                "{{retailer_id}}",
-                "transfer-role",
-                ""
-              ]
-            },
-            "description": "Transfers a retailer between hierarchy roles (e.g. RETAILER -> SUB_DISTRIBUTOR -> DISTRIBUTOR) with upline parent reassignment while preserving digital keys, customer records, and ledger balances."
-          }
-        },
-        {
-          "name": "10.13 Direct Device Ping & Status Verification (POST /api/devices/{id}/ping/)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"battery_level\": 90,\n  \"latitude\": 19.0760,\n  \"longitude\": 72.8777,\n  \"address\": \"Mumbai, Maharashtra\",\n  \"sim_operator\": \"Jio True 5G\",\n  \"sim_number\": \"+919876543210\",\n  \"sim_serial\": \"8991000123456789012F\",\n  \"model\": \"Galaxy A14 5G\",\n  \"brand\": \"Samsung\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/api/devices/{{device_id}}/ping/",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "devices",
-                "{{device_id}}",
-                "ping",
-                ""
-              ]
-            },
-            "description": "Direct simulated or device heartbeat ping. Instantly marks device online (is_online=true), activates device if inactive, and updates battery, coordinates, SIM details, and hardware model."
-          }
-        }
-      ]
-    }
-  ]
+    ]
 }

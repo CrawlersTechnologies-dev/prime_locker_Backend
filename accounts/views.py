@@ -2329,12 +2329,9 @@ class CurrentUserView(APIView):
                 "business_name": user.parent.business_name
             }
 
-        # Available keys breakdown
-        from keys.models import DeviceKey, KeyStatus
-        from django.db.models import Count
-        owned_keys = DeviceKey.objects.filter(current_owner=user, status=KeyStatus.AVAILABLE)
-        by_type = dict(owned_keys.values('device_type').annotate(c=Count('id')).values_list('device_type', 'c'))
-        by_type['total'] = sum(by_type.values())
+        # Available keys breakdown (all roles except CUSTOMER)
+        from keys.services import get_user_available_keys_breakdown
+        by_type = get_user_available_keys_breakdown(user)
 
         # Children counts
         subordinates = user.get_all_subordinates()

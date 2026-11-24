@@ -12,7 +12,12 @@ SERVICE_META = {
         'code': 'ANDROID_MDM',
         'device_type': 'ANDROID',
         'filter': (
-            (Q(key_string__istartswith='AND-') | Q(device_type__iexact='ANDROID'))
+            (
+                Q(key_string__istartswith='AND-')
+                | Q(key_string__istartswith='MOB-')
+                | Q(device_type__iexact='ANDROID')
+                | Q(device_type__iexact='MOBILE')
+            )
             & ~Q(key_string__istartswith='DLC-')
             & ~Q(key_string__istartswith='IOS-')
             & ~Q(key_string__istartswith='TV-')
@@ -92,3 +97,49 @@ def get_service_balance_info(user, service_code):
         'can_enroll': balance > 0,
         'message': None if balance > 0 else ZERO_KEY_MESSAGE,
     }
+
+
+def get_user_available_keys_breakdown(user):
+    """
+    Returns structured breakdown of available keys for any non-customer user:
+      - total: sum of all available keys
+      - mdm_keys: Android Enterprise MDM / 6-tap / DPC keys
+      - ios_keys: Apple iOS MDM keys
+      - dlc_keys: Android DLC / RocketPay OEM Knox keys
+      - tv_keys: Smart TV keys
+    Returns None for CUSTOMER users.
+    """
+    if not user or getattr(user, 'role', None) == 'CUSTOMER':
+        return None
+
+    from django.db.models import Count, Case, When, IntegerField
+    from .models import DeviceKey, KeyStatus
+
+    avail_qs = DeviceKey.objects.filter(current_owner=user, status=KeyStatus.AVAILABLE)
+
+    aggs = avail_qs.aggregate(
+        mdm=Count(Case(When(SERVICE_META['ANDROID_MDM']['filter'], then=1), output_field=IntegerField())),
+        dlc=Count(Case(When(SERVICE_META['ANDROID_DLC']['filter'], then=1), output_field=IntegerField())),
+        ios=Count(Case(When(SERVICE_META['IOS_LOCKER']['filter'], then=1), output_field=IntegerField())),
+        tv=Count(Case(When(SERVICE_META['SMART_TV']['filter'], then=1), output_field=IntegerField())),
+        total=Count('id'),
+    )
+
+    mdm_count = aggs.get('mdm') or 0
+    dlc_count = aggs.get('dlc') or 0
+    ios_count = aggs.get('ios') or 0
+    tv_count = aggs.get('tv') or 0
+    total_count = aggs.get('total') or 0
+
+    return {
+        'total': total_count,
+        'mdm_keys': mdm_count,
+        'ios_keys': ios_count,
+        'dlc_keys': dlc_count,
+        'tv_keys': tv_count,
+        'ANDROID': mdm_count,
+        'IOS': ios_count,
+        'DLC': dlc_count,
+        'TV': tv_count,
+    }
+

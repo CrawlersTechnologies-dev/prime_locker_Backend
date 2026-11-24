@@ -288,3 +288,125 @@ class KeyTransactionGroupedCountTests(TestCase):
         self.assertEqual(csv_resp.status_code, status.HTTP_200_OK)
         self.assertIn(b'Quantity', csv_resp.content)
 
+
+class KeyBreakdownAndCustomerExclusionTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.super_admin = User.objects.create_superuser(
+            username='admin_bk',
+            email='admin_bk@test.com',
+            password='password123',
+            role='SUPER_ADMIN'
+        )
+        self.distributor = User.objects.create_user(
+            username='dist_bk',
+            email='dist_bk@test.com',
+            password='password123',
+            role='DISTRIBUTOR',
+            parent=self.super_admin
+        )
+        self.retailer = User.objects.create_user(
+            username='ret_bk',
+            email='ret_bk@test.com',
+            password='password123',
+            role='RETAILER',
+            parent=self.distributor
+        )
+        self.customer = User.objects.create_user(
+            username='cust_bk',
+            email='cust_bk@test.com',
+            password='password123',
+            role='CUSTOMER',
+            parent=self.retailer
+        )
+
+        # Create available keys of different types for retailer
+        DeviceKey.objects.create(key_string='AND-11111111', device_type='ANDROID', status=KeyStatus.AVAILABLE, current_owner=self.retailer)
+        DeviceKey.objects.create(key_string='AND-22222222', device_type='ANDROID', status=KeyStatus.AVAILABLE, current_owner=self.retailer)
+        DeviceKey.objects.create(key_string='IOS-33333333', device_type='IOS', status=KeyStatus.AVAILABLE, current_owner=self.retailer)
+        DeviceKey.objects.create(key_string='DLC-44444444', device_type='DLC', status=KeyStatus.AVAILABLE, current_owner=self.retailer)
+        DeviceKey.objects.create(key_string='DLC-55555555', device_type='DLC', status=KeyStatus.AVAILABLE, current_owner=self.retailer)
+        DeviceKey.objects.create(key_string='DLC-66666666', device_type='DLC', status=KeyStatus.AVAILABLE, current_owner=self.retailer)
+        DeviceKey.objects.create(key_string='TV-77777777', device_type='TV', status=KeyStatus.AVAILABLE, current_owner=self.retailer)
+
+        # An activated key that should NOT be in available counts
+        DeviceKey.objects.create(key_string='AND-99999999', device_type='ANDROID', status=KeyStatus.ACTIVATED, current_owner=self.retailer)
+
+    def test_get_user_available_keys_breakdown_function(self):
+        from keys.services import get_user_available_keys_breakdown
+        
+        # Retailer check
+        breakdown = get_user_available_keys_breakdown(self.retailer)
+        self.assertIsNotNone(breakdown)
+        self.assertEqual(breakdown['total'], 7)
+        self.assertEqual(breakdown['mdm_keys'], 2)
+        self.assertEqual(breakdown['ios_keys'], 1)
+        self.assertEqual(breakdown['dlc_keys'], 3)
+        self.assertEqual(breakdown['tv_keys'], 1)
+
+        # Customer check (MUST return None)
+        cust_breakdown = get_user_available_keys_breakdown(self.customer)
+        self.assertIsNone(cust_breakdown)
+
+    def test_auth_me_available_keys_for_retailer_and_customer(self):
+        # 1. Retailer
+        self.client.force_authenticate(user=self.retailer)
+        ret_resp = self.client.get('/api/auth/me/')
+        self.assertEqual(ret_resp.status_code, status.HTTP_200_OK)
+        avail = ret_resp.data.get('available_keys')
+        self.assertIsNotNone(avail)
+        self.assertEqual(avail['total'], 7)
+        self.assertEqual(avail['mdm_keys'], 2)
+        self.assertEqual(avail['ios_keys'], 1)
+        self.assertEqual(avail['dlc_keys'], 3)
+        self.assertEqual(avail['tv_keys'], 1)
+
+        # 2. Customer
+        self.client.force_authenticate(user=self.customer)
+        cust_resp = self.client.get('/api/auth/me/')
+        self.assertEqual(cust_resp.status_code, status.HTTP_200_OK)
+        self.assertIsNone(cust_resp.data.get('available_keys'))
+
+    def test_serializers_available_keys(self):
+        from accounts.serializers import RetailerSerializer, UserSerializer, CustomerSerializer
+
+        # Retailer Serializer
+        ret_data = RetailerSerializer(self.retailer).data
+        self.assertIsNotNone(ret_data.get('available_keys'))
+        self.assertEqual(ret_data['available_keys']['mdm_keys'], 2)
+        self.assertEqual(ret_data['available_keys']['ios_keys'], 1)
+        self.assertEqual(ret_data['available_keys']['dlc_keys'], 3)
+        self.assertEqual(ret_data['available_keys']['tv_keys'], 1)
+        self.assertEqual(ret_data['available_keys']['total'], 7)
+
+        # User Serializer for customer
+        user_cust_data = UserSerializer(self.customer).data
+        self.assertIsNone(user_cust_data.get('available_keys'))
+
+        # Customer Serializer
+        cust_data = CustomerSerializer(self.customer).data
+        self.assertNotIn('available_keys', cust_data)
+
+    def test_keys_check_balance_and_dashboard_endpoints(self):
+        self.client.force_authenticate(user=self.retailer)
+        
+        # Check Balance endpoint
+        bal_resp = self.client.get('/api/keys/check-balance/')
+        self.assertEqual(bal_resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(bal_resp.data['total_available'], 7)
+        self.assertEqual(bal_resp.data['mdm_keys'], 2)
+        self.assertEqual(bal_resp.data['ios_keys'], 1)
+        self.assertEqual(bal_resp.data['dlc_keys'], 3)
+        self.assertEqual(bal_resp.data['tv_keys'], 1)
+        self.assertEqual(bal_resp.data['available_keys']['total'], 7)
+
+        # Dashboard endpoint
+        dash_resp = self.client.get('/api/keys/dashboard/')
+        self.assertEqual(dash_resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(dash_resp.data['total_keys_left'], 7)
+        self.assertEqual(dash_resp.data['mdm_keys_left'], 2)
+        self.assertEqual(dash_resp.data['ios_keys_left'], 1)
+        self.assertEqual(dash_resp.data['dlc_keys_left'], 3)
+        self.assertEqual(dash_resp.data['tv_keys_left'], 1)
+
+

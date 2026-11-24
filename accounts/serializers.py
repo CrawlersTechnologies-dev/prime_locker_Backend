@@ -119,6 +119,11 @@ class UserSerializer(serializers.ModelSerializer):
                 'role': instance.parent.role,
                 'business_name': instance.parent.business_name
             }
+        if instance.role != 'CUSTOMER':
+            from keys.services import get_user_available_keys_breakdown
+            representation['available_keys'] = get_user_available_keys_breakdown(instance)
+        else:
+            representation['available_keys'] = None
         return representation
 
 class SuperDistributorSerializer(serializers.ModelSerializer):
@@ -269,15 +274,14 @@ class SuperDistributorSerializer(serializers.ModelSerializer):
                 'business_name': instance.parent.business_name
             }
 
-        # Available keys per device type & total
+        # Available keys per device type & total (all roles except CUSTOMER)
         from keys.models import DeviceKey, KeyStatus, KeyTransaction, KeyAction
-        from django.db.models import Count
+        from keys.services import get_user_available_keys_breakdown
 
-        owned_keys = DeviceKey.objects.filter(current_owner=instance, status=KeyStatus.AVAILABLE)
-        type_counts = dict(owned_keys.values('device_type').annotate(c=Count('id')).values_list('device_type', 'c'))
-        total_available = sum(type_counts.values())
-        type_counts['total'] = total_available
-        representation['available_keys'] = type_counts
+        if instance.role != 'CUSTOMER':
+            representation['available_keys'] = get_user_available_keys_breakdown(instance)
+        else:
+            representation['available_keys'] = None
 
         # Key transaction totals
         keys_rec = KeyTransaction.objects.filter(to_user=instance).exclude(from_user=instance).count()
