@@ -435,9 +435,21 @@ class CustomerSerializer(serializers.ModelSerializer):
             return raw
         return None
 
+    def _get_device(self, obj):
+        if hasattr(obj, '_prefetched_objects_cache') and 'registered_devices' in obj._prefetched_objects_cache:
+            devs = obj.registered_devices.all()
+            return devs[0] if len(devs) > 0 else None
+        return obj.registered_devices.first()
+
+    def _get_contract(self, obj):
+        if hasattr(obj, '_prefetched_objects_cache') and 'emi_contracts' in obj._prefetched_objects_cache:
+            contracts = obj.emi_contracts.all()
+            return contracts[0] if len(contracts) > 0 else None
+        return getattr(obj, 'emi_contracts', None) and obj.emi_contracts.first()
+
     def get_status(self, obj):
         from devices.models import DeviceLockStatus
-        device = obj.registered_devices.first()
+        device = self._get_device(obj)
         if not device:
             return "INACTIVE"
         if device.status == DeviceLockStatus.UNENROLLED or device.provider_status == 'UNREGISTERED':
@@ -451,7 +463,7 @@ class CustomerSerializer(serializers.ModelSerializer):
 
     def get_is_device_activated(self, obj):
         from devices.models import DeviceLockStatus
-        device = obj.registered_devices.first()
+        device = self._get_device(obj)
         if not device:
             return False
         if device.status == DeviceLockStatus.UNENROLLED or device.provider_status == 'UNREGISTERED':
@@ -469,7 +481,7 @@ class CustomerSerializer(serializers.ModelSerializer):
         return not self.get_is_device_activated(obj)
 
     def get_device_summary(self, obj):
-        device = obj.registered_devices.first()
+        device = self._get_device(obj)
         if not device:
             return None
         return {
@@ -505,14 +517,28 @@ class CustomerSerializer(serializers.ModelSerializer):
         }
 
     def get_contract_summary(self, obj):
-        contract = getattr(obj, 'emi_contracts', None) and obj.emi_contracts.first()
+        contract = self._get_contract(obj)
         if not contract:
             return None
         from emi.models import InstallmentStatus
-        overdue_count = contract.installments.filter(status=InstallmentStatus.OVERDUE).count()
-        next_inst = contract.installments.filter(
-            status__in=[InstallmentStatus.UPCOMING, InstallmentStatus.DUE]
-        ).order_by('due_date').first()
+        
+        # Read from prefetched installments cache in memory if available to prevent N+1 queries
+        if hasattr(contract, '_prefetched_objects_cache') and 'installments' in contract._prefetched_objects_cache:
+            insts = list(contract.installments.all())
+            overdue_count = sum(1 for i in insts if i.status == InstallmentStatus.OVERDUE)
+            pending_insts = [i for i in insts if i.status in (InstallmentStatus.UPCOMING, InstallmentStatus.DUE)]
+            pending_insts.sort(key=lambda x: str(x.due_date or '9999-12-31'))
+            next_inst = pending_insts[0] if pending_insts else None
+            paid_sum = sum(float(i.paid_amount or 0) for i in insts if i.status == InstallmentStatus.PAID)
+            paid_amount_str = f"{paid_sum:.2f}"
+            remaining_amount_str = f"{(float(contract.financed_amount or 0) - paid_sum):.2f}"
+        else:
+            overdue_count = contract.installments.filter(status=InstallmentStatus.OVERDUE).count()
+            next_inst = contract.installments.filter(
+                status__in=[InstallmentStatus.UPCOMING, InstallmentStatus.DUE]
+            ).order_by('due_date').first()
+            paid_amount_str = str(contract.total_paid)
+            remaining_amount_str = str(contract.total_remaining)
         
         request = self.context.get('request')
         from django.urls import reverse
@@ -529,8 +555,8 @@ class CustomerSerializer(serializers.ModelSerializer):
             "id": contract.id,
             "status": contract.status,
             "total_amount": str(contract.total_amount),
-            "paid_amount": str(contract.total_paid),
-            "remaining_amount": str(contract.total_remaining),
+            "paid_amount": paid_amount_str,
+            "remaining_amount": remaining_amount_str,
             "overdue_count": overdue_count,
             "next_due_date": next_inst.due_date if next_inst else None,
             "agreement_url": agr_url,
@@ -542,7 +568,7 @@ class CustomerSerializer(serializers.ModelSerializer):
         photo_url = request.build_absolute_uri(obj.customer_photo.url) if obj.customer_photo and request else (obj.customer_photo.url if obj.customer_photo else None)
         sig_url = request.build_absolute_uri(obj.customer_signature.url) if obj.customer_signature and request else (obj.customer_signature.url if obj.customer_signature else None)
         
-        contract = getattr(obj, 'emi_contracts', None) and obj.emi_contracts.first()
+        contract = self._get_contract(obj)
         agr_url = None
         agr_pdf_url = None
         if contract:
@@ -564,13 +590,16 @@ class CustomerSerializer(serializers.ModelSerializer):
         }
 
     def get_emi_status(self, obj):
-        contract = getattr(obj, 'emi_contracts', None) and obj.emi_contracts.first()
+        contract = self._get_contract(obj)
         if not contract:
             return 'no_emi'
         if contract.status == 'COMPLETED':
             return 'completed'
         from emi.models import InstallmentStatus
-        has_overdue = contract.installments.filter(status=InstallmentStatus.OVERDUE).exists()
+        if hasattr(contract, '_prefetched_objects_cache') and 'installments' in contract._prefetched_objects_cache:
+            has_overdue = any(i.status == InstallmentStatus.OVERDUE for i in contract.installments.all())
+        else:
+            has_overdue = contract.installments.filter(status=InstallmentStatus.OVERDUE).exists()
         if has_overdue or contract.status == 'LOCKED':
             return 'overdue'
         return 'on_emi'

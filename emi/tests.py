@@ -633,6 +633,48 @@ class EMIBackendTests(TestCase):
         resp = self.client.get(url)
         self.assertIn(resp.status_code, [status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND])
 
+    def test_query_optimization_and_prefetched_cache(self):
+        """Verify CustomerEMIContract list uses prefetching and in-memory installment calculations without N+1 queries"""
+        from emi.models import CustomerEMIContract, EMIInstallment, InstallmentStatus
+        from emi.serializers import CustomerEMIContractSerializer
+        
+        # Create test installments
+        inst1 = EMIInstallment.objects.create(
+            contract=self.contract,
+            installment_number=1,
+            due_date=timezone.localdate() - timedelta(days=30),
+            amount=Decimal('1000.00'),
+            paid_amount=Decimal('1000.00'),
+            status=InstallmentStatus.PAID
+        )
+        inst2 = EMIInstallment.objects.create(
+            contract=self.contract,
+            installment_number=2,
+            due_date=timezone.localdate() + timedelta(days=30),
+            amount=Decimal('1000.00'),
+            status=InstallmentStatus.UPCOMING
+        )
+
+        # Fetch with select_related and prefetch_related
+        qs = CustomerEMIContract.objects.filter(id=self.contract.id).select_related(
+            'customer', 'retailer', 'plan_template', 'lock_device'
+        ).prefetch_related('installments')
+        
+        contract = qs.first()
+        self.assertTrue(hasattr(contract, '_prefetched_objects_cache'))
+        self.assertIn('installments', contract._prefetched_objects_cache)
+        
+        # Verify properties read from prefetched cache
+        self.assertEqual(contract.paid_installments_count, 1)
+        self.assertEqual(contract.remaining_installments_count, 1)
+        self.assertEqual(float(contract.total_paid), 1000.0)
+        self.assertEqual(float(contract.total_remaining), 11000.0)
+        
+        # Serializer representation
+        ser = CustomerEMIContractSerializer(contract)
+        self.assertEqual(ser.data['id'], self.contract.id)
+        self.assertEqual(ser.data['paid_installments_count'], 1)
+
 
 @override_settings(
     ROCKETPAY_SIMULATION=True,

@@ -657,6 +657,45 @@ class AccountsBackendTests(TestCase):
         }, format='json')
         self.assertEqual(resp_unauth.status_code, status.HTTP_403_FORBIDDEN)
 
+    def test_customer_serializer_prefetched_cache_optimization(self):
+        """Verify CustomerSerializer reads device and contract summaries from prefetched cache"""
+        from accounts.serializers import CustomerSerializer
+        from devices.models import Device, DeviceCategory, OSType, DeviceLockStatus, LockProvider
+
+        customer = User.objects.create_user(
+            username='cust_prefetch_test',
+            email='cust_prefetch@test.com',
+            role=Role.CUSTOMER,
+            parent=self.retailer,
+            mobile_number='+919876111222'
+        )
+        device = Device.objects.create(
+            customer=customer,
+            retailer=self.retailer,
+            imei='866671060000999',
+            brand='VIVO',
+            model='Y35',
+            device_category=DeviceCategory.MOBILE,
+            os_type=OSType.ANDROID,
+            status=DeviceLockStatus.ACTIVE,
+            is_activated=True,
+            lock_provider=LockProvider.ROCKETPAY
+        )
+
+        # Query with prefetch_related
+        cust_qs = User.objects.filter(id=customer.id).select_related('parent').prefetch_related(
+            'registered_devices',
+            'emi_contracts__installments'
+        )
+        loaded_cust = cust_qs.first()
+        self.assertTrue(hasattr(loaded_cust, '_prefetched_objects_cache'))
+        self.assertIn('registered_devices', loaded_cust._prefetched_objects_cache)
+
+        ser = CustomerSerializer(loaded_cust)
+        self.assertEqual(ser.data['status'], 'ACTIVE')
+        self.assertEqual(ser.data['device_summary']['imei'], '866671060000999')
+        self.assertTrue(ser.data['is_device_activated'])
+
 
 @override_settings(ROCKETPAY_SIMULATION=True, PARTNER_MDM_SIMULATION=True)
 class PrimeLockerProRequirementsTests(TestCase):

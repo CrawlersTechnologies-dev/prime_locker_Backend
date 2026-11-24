@@ -121,6 +121,11 @@ class CustomerEMIContractViewSet(viewsets.ModelViewSet):
             retailer_ids = [u.id for u in subordinates if u.role == 'RETAILER']
             qs = CustomerEMIContract.objects.filter(retailer_id__in=retailer_ids)
 
+        # Optimize N+1 queries by selecting ForeignKey records and prefetching installments
+        qs = qs.select_related(
+            'customer', 'retailer', 'plan_template', 'lock_device'
+        ).prefetch_related('installments')
+
         # Filters from query params (Item 4 from audit doc)
         customer_param = self.request.query_params.get('customer')
         if customer_param:
@@ -721,7 +726,7 @@ class EMIInstallmentViewSet(viewsets.GenericViewSet):
     Handles payment recording on individual installments (Screen A-21 Record Payment).
     """
     permission_classes = [permissions.IsAuthenticated]
-    queryset = EMIInstallment.objects.all()
+    queryset = EMIInstallment.objects.all().select_related('contract__customer', 'contract__retailer', 'collected_by')
     serializer_class = EMIInstallmentSerializer
 
     @action(detail=True, methods=['post'], url_path='record-payment')

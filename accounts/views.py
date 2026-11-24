@@ -94,7 +94,7 @@ class BaseRoleViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        queryset = User.objects.filter(role=self.target_role)
+        queryset = User.objects.filter(role=self.target_role).select_related('parent')
         
         from .models import is_company_user
         if not is_company_user(user):
@@ -946,7 +946,11 @@ class CustomerViewSet(BaseRoleViewSet):
                     models.Q(registered_devices__status__in=[DeviceLockStatus.ACTIVE, DeviceLockStatus.LOCKED])
                 ).distinct()
 
-        return queryset
+        # Optimize N+1 queries by prefetching customer's devices and emi_contracts with installments
+        return queryset.select_related('parent').prefetch_related(
+            'registered_devices',
+            'emi_contracts__installments'
+        )
 
     def partial_update(self, request, *args, **kwargs):
         customer = self.get_object()

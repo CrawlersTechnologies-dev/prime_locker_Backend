@@ -167,6 +167,8 @@ class CustomerEMIContract(models.Model):
 
     @property
     def total_paid(self):
+        if hasattr(self, '_prefetched_objects_cache') and 'installments' in self._prefetched_objects_cache:
+            return sum(float(i.paid_amount or 0) for i in self.installments.all() if i.status == InstallmentStatus.PAID)
         return self.installments.filter(status=InstallmentStatus.PAID).aggregate(
             total=models.Sum('paid_amount')
         )['total'] or 0.00
@@ -177,10 +179,14 @@ class CustomerEMIContract(models.Model):
 
     @property
     def paid_installments_count(self):
+        if hasattr(self, '_prefetched_objects_cache') and 'installments' in self._prefetched_objects_cache:
+            return sum(1 for i in self.installments.all() if i.status == InstallmentStatus.PAID)
         return self.installments.filter(status=InstallmentStatus.PAID).count()
 
     @property
     def remaining_installments_count(self):
+        if hasattr(self, '_prefetched_objects_cache') and 'installments' in self._prefetched_objects_cache:
+            return sum(1 for i in self.installments.all() if i.status != InstallmentStatus.PAID)
         return self.installments.exclude(status=InstallmentStatus.PAID).count()
 
     @property

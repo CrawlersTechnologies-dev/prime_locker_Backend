@@ -95,6 +95,9 @@ class DeviceViewSet(viewsets.ModelViewSet):
             retailer_ids = [u.id for u in downline_users if u.role == 'RETAILER']
             qs = Device.objects.filter(retailer_id__in=retailer_ids)
 
+        # Optimize N+1 queries by pre-fetching related ForeignKey records touched by DeviceSerializer
+        qs = qs.select_related('customer', 'retailer', 'activation_key', 'emi_contract')
+
         # Query Filters
         category = self.request.query_params.get('device_category')
         if category:
