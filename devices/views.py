@@ -2345,15 +2345,17 @@ class RetailerEnrollmentQRsView(APIView):
       - qr_running_device (Running device - normal)
       - qr_wireless (Running device - wireless, null if unsupported)
     """
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.AllowAny]
 
     def get(self, request):
         from .services.partner_mdm_service import PartnerMDMService
         qr_data = PartnerMDMService.get_generic_enrollment_qrs(user=request.user)
+        retailer_name = getattr(request.user, 'business_name', '') or getattr(request.user, 'username', '') if getattr(request.user, 'is_authenticated', False) else "Prime Retailer"
+        retailer_id = request.user.id if getattr(request.user, 'is_authenticated', False) else None
         return Response({
             "status": "success",
-            "retailer": getattr(request.user, 'business_name', '') or request.user.username,
-            "retailer_id": request.user.id,
+            "retailer": retailer_name,
+            "retailer_id": retailer_id,
             "qr_service_app": qr_data.get("qr_service_app"),
             "qr_running_device": qr_data.get("qr_running_device"),
             "qr_wireless": qr_data.get("qr_wireless"),
