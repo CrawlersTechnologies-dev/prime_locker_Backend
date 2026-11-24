@@ -387,6 +387,26 @@ class DeviceViewSet(viewsets.ModelViewSet):
                 setattr(device, sim_f, val)
                 update_fields.append(sim_f)
 
+        # Update real hardware model if provided by APK / telemetry
+        reported_model = request.data.get('model') or request.data.get('device_model') or request.query_params.get('model')
+        reported_brand = request.data.get('brand') or request.query_params.get('brand')
+        reported_name = request.data.get('device_name') or request.query_params.get('device_name')
+        if reported_model:
+            is_generic = (
+                not device.model or
+                str(device.model).startswith('Model TAC-') or
+                str(device.model).startswith('Model 35') or
+                device.model in ('Unknown', 'Android Device')
+            )
+            if is_generic:
+                device.model = str(reported_model).strip()
+                update_fields.append('model')
+                if reported_brand:
+                    device.brand = str(reported_brand).strip()
+                    update_fields.append('brand')
+                device.device_name = str(reported_name).strip() if reported_name else f"{device.brand} {device.model}".strip()
+                update_fields.append('device_name')
+
         device.save(update_fields=list(set(update_fields)))
         return Response({
             "message": f"Device {device.imei} pinged successfully.",
@@ -394,6 +414,9 @@ class DeviceViewSet(viewsets.ModelViewSet):
             "last_online_at": device.last_online_at,
             "battery_level": device.battery_level,
             "status": device.status,
+            "brand": device.brand,
+            "model": device.model,
+            "device_name": device.device_name,
             "current_location": {
                 "latitude": device.current_latitude,
                 "longitude": device.current_longitude,
@@ -1039,6 +1062,177 @@ class DeviceViewSet(viewsets.ModelViewSet):
             "block_factory_reset": device.block_factory_reset,
             "frp_protection_enabled": device.frp_protection_enabled
         })
+
+    @action(detail=True, methods=['post'], url_path='reset-enrollment')
+    def reset_enrollment(self, request, pk=None):
+        """
+        Re-enroll device keeping the same customer.
+        Endpoint: POST /api/devices/{id}/reset-enrollment/
+        Resets activation state (is_activated=False, status=INACTIVE, clears FCM token and last_online_at),
+        re-triggers MDM provisioning with Partner MDM / RocketPay / Apple MDM,
+        regenerates QR codes, and returns the device ready for immediate re-scanning.
+        """
+        denied = self._block_customer(request)
+        if denied:
+            return denied
+        device = self.get_object()
+
+        customer = device.customer
+        if not customer:
+            return Response(
+                {"error": "This device has no assigned customer to re-enroll."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        cust_name = getattr(customer, 'get_full_name', lambda: '')() or customer.first_name or customer.username
+        cust_phone = getattr(customer, 'mobile_number', '') or ''
+        cust_address = getattr(customer, 'address', '') or ''
+
+        # 1. Reset device activation and hardware tracking fields
+        device.status = DeviceLockStatus.INACTIVE
+        device.is_activated = False
+        device.activated_at = None
+        device.last_online_at = None
+        device.fcm_token = ""
+        device.ip_address = ""
+        device.provider_status = "PENDING"
+        device.block_factory_reset = False
+        device.frp_protection_enabled = False
+
+        # 2. Trigger MDM re-enrollment / refresh QR codes
+        qr_code_data = None
+        qr_codes_data = {}
+        provider_device_id = device.provider_device_id
+
+        if device.lock_provider == LockProvider.PARTNER_MDM:
+            from .services.partner_mdm_service import PartnerMDMService
+            loan_data = {}
+            if hasattr(device, 'emi_contract') and device.emi_contract:
+                contract = device.emi_contract
+                loan_data = {
+                    'device_price': float(contract.total_amount or 15000),
+                    'down_payment': float(contract.down_payment or 0),
+                    'processing_fee': float(contract.processing_fee or 0),
+                    'number_of_emi': int(contract.total_emis or 6),
+                    'monthly_emi': float(contract.monthly_emi or 2000),
+                    'first_emi_date': str(contract.start_date or timezone.localdate())
+                }
+            pm_res = PartnerMDMService.enroll_device(
+                device=device,
+                customer_name=cust_name,
+                customer_mobile=cust_phone,
+                customer_address=cust_address,
+                loan_data=loan_data,
+                user=request.user
+            )
+            if pm_res.get('success'):
+                provider_device_id = str(pm_res.get('provider_device_id') or provider_device_id)
+                qr_code_data = pm_res.get('qr_code_url')
+                qr_codes_data = pm_res.get('qr_codes') or {}
+                device.provider_device_id = provider_device_id
+                device.provider_status = pm_res.get('provider_status', 'PENDING')
+                if qr_code_data:
+                    device.qr_code_url = qr_code_data
+                if qr_codes_data:
+                    device.qr_codes = qr_codes_data
+            else:
+                generic_qrs = PartnerMDMService.get_generic_enrollment_qrs(user=request.user)
+                qr_code_data = generic_qrs.get('qr_service_app') or device.qr_code_url
+                qr_codes_data = {
+                    'qr_service_app': generic_qrs.get('qr_service_app'),
+                    'qr_running_device': generic_qrs.get('qr_running_device'),
+                    'qr_wireless': generic_qrs.get('qr_wireless')
+                }
+                if qr_code_data:
+                    device.qr_code_url = qr_code_data
+                device.qr_codes = qr_codes_data
+
+        elif device.lock_provider == LockProvider.ROCKETPAY:
+            from .services.rocketpay_service import RocketPayService
+            mdm_type = "DLC" if device.device_state != DeviceScannerState.RUNNING else "DPC"
+            rp_res = RocketPayService.enroll_device(
+                device=device,
+                customer_name=cust_name,
+                customer_mobile=cust_phone,
+                retailer_name=getattr(request.user, 'business_name', '') or request.user.username,
+                user=request.user,
+                mdm_type=mdm_type,
+                frp_email=getattr(customer, 'google_account_email', '') or '',
+                is_running=(device.device_state == DeviceScannerState.RUNNING)
+            )
+            if rp_res.get('success'):
+                provider_device_id = str(rp_res.get('provider_device_id') or provider_device_id)
+                qr_code_data = rp_res.get('qr_code_data')
+                device.provider_device_id = provider_device_id
+                device.provider_status = rp_res.get('provider_status', 'PENDING')
+                if qr_code_data:
+                    device.qr_code_url = qr_code_data
+                    device.qr_codes = {"qr_service_app": qr_code_data}
+                    qr_codes_data = device.qr_codes
+
+        elif device.lock_provider == LockProvider.APPLE_MDM:
+            from .services.apple_mdm import AppleMDMService
+            apple_res = AppleMDMService.add_device(
+                imei=device.imei,
+                serial_number=device.serial_number or device.imei,
+                customer_name=cust_name,
+                customer_mobile=cust_phone,
+                customer_email=getattr(customer, 'email', '') or '',
+                imei2=device.secondary_imei or ''
+            )
+            device_reg_num = (apple_res.get('data') or {}).get('deviceRegNum') or ''
+            if device_reg_num:
+                device.provider_device_id = str(device_reg_num)
+            device.provider_status = 'PENDING'
+
+        device.save(update_fields=[
+            'status', 'is_activated', 'activated_at', 'last_online_at',
+            'fcm_token', 'ip_address', 'provider_status', 'provider_device_id',
+            'qr_code_url', 'qr_codes', 'block_factory_reset', 'frp_protection_enabled'
+        ])
+
+        AuditLog.objects.create(
+            user=request.user,
+            action="DEVICE_RESET_FOR_REENROLLMENT",
+            ip_address=get_client_ip(request),
+            details={
+                "device_id": device.id,
+                "imei": device.imei,
+                "customer_id": customer.id,
+                "customer_name": cust_name,
+                "lock_provider": device.lock_provider,
+                "provider_device_id": device.provider_device_id,
+                "status": device.status
+            }
+        )
+
+        return Response({
+            "status": "success",
+            "message": f"Device {device.imei} enrollment reset successfully for customer {cust_name}. Ready for re-enrollment.",
+            "device": {
+                "id": device.id,
+                "imei": device.imei,
+                "secondary_imei": device.secondary_imei,
+                "brand": device.brand,
+                "model": device.model,
+                "device_name": device.device_name,
+                "status": device.status,
+                "is_activated": device.is_activated,
+                "is_online": device.is_online,
+                "provider_status": device.provider_status,
+                "lock_provider": device.lock_provider,
+                "qr_code_url": device.qr_code_url,
+                "qr_codes": device.qr_codes or {},
+                "qr_service_app": (device.qr_codes or {}).get("qr_service_app") or device.qr_code_url,
+                "qr_running_device": (device.qr_codes or {}).get("qr_running_device"),
+                "offline_unlock_code": device.offline_unlock_code
+            },
+            "customer": {
+                "id": customer.id,
+                "name": cust_name,
+                "phone": cust_phone
+            }
+        }, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=['post'], url_path='toggle-hide-app')
     def toggle_hide_app(self, request, pk=None):
@@ -1901,6 +2095,23 @@ class DeviceHeartbeatView(APIView):
             if sim_f in serializer.validated_data and serializer.validated_data[sim_f]:
                 setattr(device, sim_f, serializer.validated_data[sim_f])
 
+        # Update real hardware model if sent by device APK and currently has TAC/generic guess
+        reported_model = serializer.validated_data.get('model') or serializer.validated_data.get('device_model')
+        reported_brand = serializer.validated_data.get('brand')
+        reported_name = serializer.validated_data.get('device_name')
+        if reported_model:
+            is_generic = (
+                not device.model or
+                str(device.model).startswith('Model TAC-') or
+                str(device.model).startswith('Model 35') or
+                device.model in ('Unknown', 'Android Device')
+            )
+            if is_generic:
+                device.model = str(reported_model).strip()
+                if reported_brand:
+                    device.brand = str(reported_brand).strip()
+                device.device_name = str(reported_name).strip() if reported_name else f"{device.brand} {device.model}".strip()
+
         device.save()
 
         # Fetch pending commands
@@ -2352,15 +2563,27 @@ class RetailerEnrollmentQRsView(APIView):
         qr_data = PartnerMDMService.get_generic_enrollment_qrs(user=request.user)
         retailer_name = getattr(request.user, 'business_name', '') or getattr(request.user, 'username', '') if getattr(request.user, 'is_authenticated', False) else "Prime Retailer"
         retailer_id = request.user.id if getattr(request.user, 'is_authenticated', False) else None
+        service_app_qr = qr_data.get("qr_service_app")
+        running_device_qr = qr_data.get("qr_running_device")
+        test_dpc_qr = qr_data.get("qr_test_dpc")
+        wireless_qr = qr_data.get("qr_wireless")
         return Response({
             "status": "success",
             "retailer": retailer_name,
             "retailer_id": retailer_id,
-            "qr_service_app": qr_data.get("qr_service_app"),
-            "qr_running_device": qr_data.get("qr_running_device"),
-            "qr_wireless": qr_data.get("qr_wireless"),
-            "qr_test_dpc": qr_data.get("qr_test_dpc"),
+            "step1_connect_app": service_app_qr,
+            "step2_install_app": running_device_qr,
+            "qr_service_app": service_app_qr,
+            "qr_running_device": running_device_qr,
+            "qr_wireless": wireless_qr,
+            "qr_test_dpc": test_dpc_qr,
+            "app_download_url": "https://apirenewjss.com/apk/primelocker.apk",
             "provider": qr_data.get("provider", "PARTNER_MDM"),
             "simulation": qr_data.get("simulation", False),
+            "instructions": {
+                "step1": "Scan with standard camera or Prime app to download & connect Prime Locker APK",
+                "step2": "Scan to configure MDM running profile / permissions on device",
+                "new_device_6tap": "Use qr_test_dpc strictly on factory reset welcome screen (tap 6 times on blank area)"
+            },
             "data": qr_data
         }, status=status.HTTP_200_OK)

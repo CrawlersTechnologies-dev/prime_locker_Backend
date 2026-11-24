@@ -930,6 +930,113 @@ class PartnerMDMBackendTests(TestCase):
         self.pm_device.refresh_from_db()
         self.assertEqual(self.pm_device.status, DeviceLockStatus.UNENROLLED)
 
+    def test_reset_enrollment_for_same_customer(self):
+        """Verify POST /api/devices/{id}/reset-enrollment/ re-enrolls device while keeping same customer"""
+        from accounts.models import AuditLog
+        # 1. Setup active device with customer and old telemetry
+        self.pm_device.status = DeviceLockStatus.ACTIVE
+        self.pm_device.is_activated = True
+        self.pm_device.fcm_token = 'old_fcm_token_xyz'
+        self.pm_device.last_online_at = timezone.now()
+        self.pm_device.save()
+
+        orig_customer = self.pm_device.customer
+        self.assertIsNotNone(orig_customer)
+
+        # 2. Call reset-enrollment
+        resp = self.client.post(f'/api/devices/{self.pm_device.id}/reset-enrollment/')
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data['status'], 'success')
+        self.assertIn('qr_service_app', resp.data['device'])
+
+        # 3. Verify in DB
+        self.pm_device.refresh_from_db()
+        self.assertEqual(self.pm_device.customer, orig_customer)
+        self.assertEqual(self.pm_device.status, DeviceLockStatus.INACTIVE)
+        self.assertFalse(self.pm_device.is_activated)
+        self.assertIsNone(self.pm_device.last_online_at)
+        self.assertEqual(self.pm_device.fcm_token, '')
+        self.assertEqual(self.pm_device.provider_status, 'PENDING')
+        self.assertTrue(self.pm_device.qr_code_url)
+
+        # 4. Verify Audit Log
+        log = AuditLog.objects.filter(action="DEVICE_RESET_FOR_REENROLLMENT", user=self.retailer).first()
+        self.assertIsNotNone(log)
+        self.assertEqual(log.details['imei'], self.pm_device.imei)
+
+    def test_device_offline_initially_and_online_on_ping(self):
+        """Verify newly created device is offline (Never) and becomes online immediately upon ping"""
+        from devices.models import Device, DeviceCategory, OSType, DeviceLockStatus, LockProvider
+        # 1. New device without any ping
+        new_dev = Device.objects.create(
+            retailer=self.retailer,
+            customer=self.pm_device.customer,
+            imei="352099009876543",
+            brand="Samsung",
+            model="Galaxy M34",
+            device_category=DeviceCategory.MOBILE,
+            os_type=OSType.ANDROID,
+            lock_provider=LockProvider.PARTNER_MDM,
+            status=DeviceLockStatus.INACTIVE,
+            is_activated=False
+        )
+        self.assertIsNone(new_dev.last_online_at)
+        self.assertFalse(new_dev.is_online)
+
+        # 2. Ping device via POST /api/devices/{id}/ping/
+        ping_resp = self.client.post(f'/api/devices/{new_dev.id}/ping/', {
+            'battery_level': 85,
+            'latitude': 19.0760,
+            'longitude': 72.8777
+        })
+        self.assertEqual(ping_resp.status_code, status.HTTP_200_OK)
+        self.assertTrue(ping_resp.data['is_online'])
+        self.assertIsNotNone(ping_resp.data['last_online_at'])
+        self.assertEqual(ping_resp.data['status'], DeviceLockStatus.ACTIVE)
+
+        new_dev.refresh_from_db()
+        self.assertTrue(new_dev.is_online)
+        self.assertTrue(new_dev.is_activated)
+        self.assertEqual(new_dev.status, DeviceLockStatus.ACTIVE)
+
+    def test_store_real_model_not_tac_guess(self):
+        """Verify explicit client model (Galaxy A14 5G) is preserved and not replaced by TAC guess"""
+        from keys.models import DeviceKey, KeyStatus
+        from devices.models import ApprovedDeviceTAC, TACEnvironment
+        ApprovedDeviceTAC.objects.create(
+            tac='35999900',
+            brand='Samsung',
+            model_number='Galaxy A14 5G',
+            marketing_name='Galaxy A14 5G',
+            environment=TACEnvironment.ALL,
+            active=True
+        )
+        key = DeviceKey.objects.create(
+            key_string='AND-MODEL-TEST-001',
+            device_type='ANDROID',
+            status=KeyStatus.AVAILABLE,
+            current_owner=self.retailer
+        )
+        payload = {
+            'full_name': 'Ankit Verma',
+            'mobile_number': '+919866655555',
+            'imei': '359999001234567',  # Unknown TAC prefix 35
+            'brand': 'Samsung',
+            'model': 'Galaxy A14 5G',
+            'device_name': 'Samsung Galaxy A14 5G',
+            'activation_key_string': key.key_string,
+            'lock_provider': 'PARTNER_MDM',
+            'monthly_emi': 1500,
+            'number_of_emi': 6
+        }
+        resp = self.client.post('/api/customers/enroll/', payload, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+
+        dev = Device.objects.get(imei='359999001234567')
+        self.assertEqual(dev.model, 'Galaxy A14 5G')
+        self.assertEqual(dev.brand, 'Samsung')
+        self.assertEqual(dev.device_name, 'Samsung Galaxy A14 5G')
+
 
 from devices.models import AppVersion, AppType
 

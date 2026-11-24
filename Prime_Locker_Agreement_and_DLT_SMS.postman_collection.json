@@ -2159,6 +2159,108 @@
             },
             "description": "Queries live Cashfree mandate status, UMRN, and checkout authorization URL."
           }
+        },
+        {
+          "name": "10.11 Reset Device for Same Customer (POST /api/devices/{id}/reset-enrollment/)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Phone wiped by customer / re-provisioning\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/devices/{{device_id}}/reset-enrollment/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "devices",
+                "{{device_id}}",
+                "reset-enrollment",
+                ""
+              ]
+            },
+            "description": "Resets device hardware enrollment state (is_activated=false, status=INACTIVE, provider_status=PENDING) keeping existing customer and EMI contract. Generates fresh QR codes for immediate rescanning."
+          }
+        },
+        {
+          "name": "10.12 Transfer Retailer Between Roles (POST /api/retailers/{id}/transfer-role/)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"new_role\": \"SUB_DISTRIBUTOR\",\n  \"new_parent_id\": 2,\n  \"remarks\": \"Promoted to Sub Distributor\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/retailers/{{retailer_id}}/transfer-role/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "retailers",
+                "{{retailer_id}}",
+                "transfer-role",
+                ""
+              ]
+            },
+            "description": "Transfers a retailer between hierarchy roles (e.g. RETAILER -> SUB_DISTRIBUTOR -> DISTRIBUTOR) with upline parent reassignment while preserving digital keys, customer records, and ledger balances."
+          }
+        },
+        {
+          "name": "10.13 Direct Device Ping & Status Verification (POST /api/devices/{id}/ping/)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"battery_level\": 90,\n  \"latitude\": 19.0760,\n  \"longitude\": 72.8777,\n  \"address\": \"Mumbai, Maharashtra\",\n  \"sim_operator\": \"Jio True 5G\",\n  \"sim_number\": \"+919876543210\",\n  \"sim_serial\": \"8991000123456789012F\",\n  \"model\": \"Galaxy A14 5G\",\n  \"brand\": \"Samsung\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/devices/{{device_id}}/ping/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "devices",
+                "{{device_id}}",
+                "ping",
+                ""
+              ]
+            },
+            "description": "Direct simulated or device heartbeat ping. Instantly marks device online (is_online=true), activates device if inactive, and updates battery, coordinates, SIM details, and hardware model."
+          }
         }
       ]
     }

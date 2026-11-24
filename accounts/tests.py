@@ -600,6 +600,63 @@ class AccountsBackendTests(TestCase):
         self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(resp.data.get('error_code'), 'ZERO_KEY_BALANCE')
 
+    def test_transfer_retailer_role(self):
+        """Verify role transfer from RETAILER to SUB_DISTRIBUTOR via /api/retailers/{id}/transfer-role/ and /api/users/{id}/transfer-role/"""
+        admin = User.objects.create_superuser(
+            username='super_admin_test_transfer',
+            email='admin_trans@test.com',
+            password='Password@123',
+            role=Role.SUPER_ADMIN
+        )
+        distributor = User.objects.create_user(
+            username='distributor_test_transfer',
+            email='dist_trans@test.com',
+            password='Password@123',
+            role=Role.DISTRIBUTOR
+        )
+
+        admin_client = APIClient()
+        admin_client.force_authenticate(user=admin)
+
+        resp = admin_client.post(f'/api/retailers/{self.retailer.id}/transfer-role/', {
+            'new_role': 'SUB_DISTRIBUTOR',
+            'new_parent_id': distributor.id,
+            'remarks': 'Promoted to Sub Distributor'
+        }, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data['user']['role'], 'SUB_DISTRIBUTOR')
+        self.assertEqual(resp.data['user']['old_role'], 'RETAILER')
+
+        self.retailer.refresh_from_db()
+        self.assertEqual(self.retailer.role, Role.SUB_DISTRIBUTOR)
+        self.assertEqual(self.retailer.parent, distributor)
+
+        # Also verify via /api/users/{id}/transfer-role/
+        resp2 = admin_client.post(f'/api/users/{self.retailer.id}/transfer-role/', {
+            'new_role': 'DISTRIBUTOR',
+            'remarks': 'Promoted to Distributor'
+        }, format='json')
+        self.assertEqual(resp2.status_code, status.HTTP_200_OK)
+        self.retailer.refresh_from_db()
+        self.assertEqual(self.retailer.role, Role.DISTRIBUTOR)
+
+        # Demote back to RETAILER under distributor
+        resp3 = admin_client.post(f'/api/users/{self.retailer.id}/transfer-role/', {
+            'new_role': 'RETAILER',
+            'new_parent_id': distributor.id
+        }, format='json')
+        self.assertEqual(resp3.status_code, status.HTTP_200_OK)
+        self.retailer.refresh_from_db()
+        self.assertEqual(self.retailer.role, Role.RETAILER)
+
+        # Retailer cannot transfer roles (forbidden)
+        ret_client = APIClient()
+        ret_client.force_authenticate(user=self.retailer)
+        resp_unauth = ret_client.post(f'/api/users/{self.retailer.id}/transfer-role/', {
+            'new_role': 'SUPER_DISTRIBUTOR'
+        }, format='json')
+        self.assertEqual(resp_unauth.status_code, status.HTTP_403_FORBIDDEN)
+
 
 @override_settings(ROCKETPAY_SIMULATION=True, PARTNER_MDM_SIMULATION=True)
 class PrimeLockerProRequirementsTests(TestCase):

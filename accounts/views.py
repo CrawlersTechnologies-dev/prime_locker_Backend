@@ -210,6 +210,19 @@ class BaseRoleViewSet(viewsets.ModelViewSet):
         partner = self.get_object()
         return self._do_partner_password_reset(partner, request)
 
+    @action(detail=True, methods=['post'], url_path='transfer-role')
+    def transfer_role(self, request, pk=None):
+        """
+        Admin or Upline transfers a partner between roles (e.g. POST /api/retailers/{id}/transfer-role/).
+        Body: {
+            "new_role": "SUB_DISTRIBUTOR", // required
+            "new_parent_id": 5,             // optional
+            "remarks": "Promoted to Sub Distributor" // optional
+        }
+        """
+        target_user = self.get_object()
+        return self._do_partner_role_transfer(target_user, request)
+
     @action(detail=False, methods=['post'], url_path='reset-password')
     def reset_partner_password(self, request):
         """
@@ -342,6 +355,159 @@ class BaseRoleViewSet(viewsets.ModelViewSet):
             "name": f"{partner.first_name} {partner.last_name}".strip() or partner.username,
             "mobile_number": partner.mobile_number,
             "temporary_password": new_password
+        }, status=status.HTTP_200_OK)
+
+    def _do_partner_role_transfer(self, target_user, request):
+        user = request.user
+
+        # 1. Permission check
+        if getattr(user, 'role', '') in ('CUSTOMER', 'RETAILER', 'STAFF_VIEWER'):
+            return Response(
+                {"detail": "You do not have permission to transfer user roles."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        from accounts.permissions import is_downstream_user
+        from accounts.models import is_company_user, Role, NotificationType
+
+        if not is_company_user(user):
+            if not (is_downstream_user(user, target_user) or target_user in user.get_all_subordinates()):
+                return Response(
+                    {"detail": f"You do not have permission to transfer this {target_user.role}."},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
+        if user.id == target_user.id:
+            return Response(
+                {"detail": "You cannot transfer your own role."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if target_user.role == Role.SUPER_ADMIN or is_company_user(target_user):
+            return Response(
+                {"detail": "Company staff and Super Admin roles cannot be transferred via this endpoint."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 2. Validate new_role
+        new_role = request.data.get('new_role', '').strip().upper()
+        valid_roles = [Role.SUPER_DISTRIBUTOR, Role.DISTRIBUTOR, Role.SUB_DISTRIBUTOR, Role.RETAILER]
+        if not new_role or new_role not in valid_roles:
+            return Response(
+                {"detail": f"Invalid 'new_role'. Allowed transfer roles: {', '.join(valid_roles)}."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 3. Resolve & validate parent
+        new_parent_id = request.data.get('new_parent_id') or request.data.get('parent_id')
+        new_parent = None
+
+        allowed_parent_roles = {
+            Role.RETAILER: [Role.SUB_DISTRIBUTOR, Role.DISTRIBUTOR, Role.SUPER_DISTRIBUTOR, Role.SUPER_ADMIN],
+            Role.SUB_DISTRIBUTOR: [Role.DISTRIBUTOR, Role.SUPER_DISTRIBUTOR, Role.SUPER_ADMIN],
+            Role.DISTRIBUTOR: [Role.SUPER_DISTRIBUTOR, Role.SUPER_ADMIN],
+            Role.SUPER_DISTRIBUTOR: [Role.SUPER_ADMIN],
+        }
+
+        if new_parent_id:
+            try:
+                new_parent = User.objects.get(id=new_parent_id)
+            except User.DoesNotExist:
+                return Response(
+                    {"detail": f"Specified new_parent with id '{new_parent_id}' does not exist."},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+            if new_parent.id == target_user.id:
+                return Response(
+                    {"detail": "A user cannot be their own parent."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            # Prevent circular hierarchy
+            if is_downstream_user(target_user, new_parent):
+                return Response(
+                    {"detail": "Cannot assign a downstream subordinate as the new parent (circular hierarchy)."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            if new_parent.role not in allowed_parent_roles.get(new_role, []):
+                return Response(
+                    {"detail": f"A '{new_role}' cannot have parent with role '{new_parent.role}'. Allowed parent roles: {', '.join(allowed_parent_roles.get(new_role, []))}."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        else:
+            # Check existing parent compatibility
+            current_parent = target_user.parent
+            if current_parent and current_parent.role in allowed_parent_roles.get(new_role, []):
+                new_parent = current_parent
+            elif current_parent and current_parent.parent and current_parent.parent.role in allowed_parent_roles.get(new_role, []):
+                # Auto-promote to grandparent if compatible
+                new_parent = current_parent.parent
+            elif is_company_user(user):
+                # If admin is performing the transfer, assign to admin or root
+                new_parent = user if user.role in allowed_parent_roles.get(new_role, []) else None
+            else:
+                return Response(
+                    {"detail": f"The current parent '{getattr(current_parent, 'username', 'None')}' ({getattr(current_parent, 'role', 'None')}) is incompatible with new role '{new_role}'. Please specify 'new_parent_id'."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+        old_role = target_user.role
+        old_parent = target_user.parent
+
+        target_user.role = new_role
+        target_user.parent = new_parent
+        target_user.save(update_fields=['role', 'parent'])
+
+        AuditLog.objects.create(
+            user=user,
+            action="USER_ROLE_TRANSFERRED",
+            ip_address=get_client_ip(request),
+            details={
+                "target_id": target_user.id,
+                "target_username": target_user.username,
+                "old_role": old_role,
+                "new_role": new_role,
+                "old_parent_id": old_parent.id if old_parent else None,
+                "old_parent_username": old_parent.username if old_parent else None,
+                "new_parent_id": new_parent.id if new_parent else None,
+                "new_parent_username": new_parent.username if new_parent else None,
+                "remarks": request.data.get('remarks', '')
+            }
+        )
+
+        try:
+            from accounts.views import send_system_notification
+            send_system_notification(
+                recipient=target_user,
+                title="Role Updated",
+                message=f"Your Prime Locker account role has been transferred from {old_role} to {new_role}.",
+                notification_type=NotificationType.SYSTEM,
+                reference_id=target_user.id,
+                sender=user
+            )
+        except Exception:
+            pass
+
+        return Response({
+            "status": "success",
+            "message": f"User '{target_user.username}' successfully transferred from {old_role} to {new_role}.",
+            "user": {
+                "id": target_user.id,
+                "username": target_user.username,
+                "name": f"{target_user.first_name} {target_user.last_name}".strip() or target_user.username,
+                "business_name": target_user.business_name,
+                "mobile_number": target_user.mobile_number,
+                "old_role": old_role,
+                "role": target_user.role,
+                "parent": {
+                    "id": new_parent.id,
+                    "username": new_parent.username,
+                    "role": new_parent.role,
+                    "name": f"{new_parent.first_name} {new_parent.last_name}".strip() or new_parent.username
+                } if new_parent else None
+            }
         }, status=status.HTTP_200_OK)
 
 class SuperDistributorViewSet(BaseRoleViewSet):
@@ -857,6 +1023,10 @@ class CustomerViewSet(BaseRoleViewSet):
 
         is_ios = (os_type_input == 'IOS') or (device_type_input == 'IOS') or (brand_input == 'APPLE')
 
+        client_brand = data.get('brand') or data.get('device_brand') or data.get('phone_brand')
+        client_model = data.get('model') or data.get('device_model') or data.get('phone_model') or data.get('model_name')
+        client_device_name = data.get('device_name') or data.get('phone_name')
+
         if is_ios:
             if not serial_number and not imei:
                 return Response(
@@ -866,11 +1036,11 @@ class CustomerViewSet(BaseRoleViewSet):
             if not imei:
                 imei = serial_number
             os_type = OSType.IOS
-            brand = data.get('brand') or 'Apple'
-            model = data.get('model') or 'iPhone'
+            brand = client_brand or 'Apple'
+            model = client_model or 'iPhone'
             device_category = DeviceCategory.MOBILE
             device_state = data.get('device_state', DeviceScannerState.NEW)
-            device_name = data.get('device_name') or f"{brand} {model}".strip()
+            device_name = client_device_name or f"{brand} {model}".strip()
             lock_provider = LockProvider.APPLE_MDM
         else:
             if not imei:
@@ -879,12 +1049,20 @@ class CustomerViewSet(BaseRoleViewSet):
                     status=status.HTTP_400_BAD_REQUEST
                 )
             detected = lookup_imei(imei)
-            brand = data.get('brand') or detected.get('brand', 'Android Device')
-            model = data.get('model') or detected.get('model', f"Model {imei[:8]}")
+            brand = client_brand or detected.get('brand', 'Android Device')
+
+            # Real model prioritization: strictly use client-sent model if provided; do NOT let TAC guess overwrite it
+            if client_model and not str(client_model).startswith('Model TAC-'):
+                model = str(client_model).strip()
+            elif detected.get('is_identified'):
+                model = detected.get('model', f"Model {imei[:8]}")
+            else:
+                model = client_model or detected.get('model', f"Model {imei[:8]}")
+
             device_category = data.get('device_category') or detected.get('device_category', DeviceCategory.MOBILE)
             os_type = data.get('os_type') or detected.get('os_type', OSType.ANDROID)
             device_state = data.get('device_state', DeviceScannerState.NEW)
-            device_name = data.get('device_name') or f"{brand} {model}".strip()
+            device_name = client_device_name or f"{brand} {model}".strip()
             lock_provider = data.get('lock_provider')
             if not lock_provider:
                 mdm_type = (data.get('mdm_type') or '').upper()
@@ -3141,3 +3319,20 @@ class RetailerUPIMandateStatusView(APIView):
 
     def post(self, request):
         return self._handle(request)
+
+
+class UserRoleTransferView(APIView):
+    """
+    POST /api/users/{id}/transfer-role/
+    Allows authorized Admin / Upline to transfer any user between partner roles.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            target_user = User.objects.get(pk=pk)
+        except User.DoesNotExist:
+            return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        dummy_vs = BaseRoleViewSet()
+        return dummy_vs._do_partner_role_transfer(target_user, request)

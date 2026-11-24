@@ -222,7 +222,34 @@ class DeviceSerializer(serializers.ModelSerializer):
                     })
 
         imei = attrs.get('imei')
-        # Auto-detect brand & model if omitted
+        # Check if model, brand, or device_name provided directly or via client aliases
+        raw_model = (
+            attrs.get('model') or
+            (self.initial_data.get('model') if hasattr(self, 'initial_data') and isinstance(self.initial_data, dict) else None) or
+            (self.initial_data.get('device_model') if hasattr(self, 'initial_data') and isinstance(self.initial_data, dict) else None) or
+            (self.initial_data.get('phone_model') if hasattr(self, 'initial_data') and isinstance(self.initial_data, dict) else None) or
+            (self.initial_data.get('model_name') if hasattr(self, 'initial_data') and isinstance(self.initial_data, dict) else None)
+        )
+        raw_brand = (
+            attrs.get('brand') or
+            (self.initial_data.get('brand') if hasattr(self, 'initial_data') and isinstance(self.initial_data, dict) else None) or
+            (self.initial_data.get('device_brand') if hasattr(self, 'initial_data') and isinstance(self.initial_data, dict) else None) or
+            (self.initial_data.get('phone_brand') if hasattr(self, 'initial_data') and isinstance(self.initial_data, dict) else None)
+        )
+        raw_name = (
+            attrs.get('device_name') or
+            (self.initial_data.get('device_name') if hasattr(self, 'initial_data') and isinstance(self.initial_data, dict) else None) or
+            (self.initial_data.get('phone_name') if hasattr(self, 'initial_data') and isinstance(self.initial_data, dict) else None)
+        )
+
+        if raw_model and not attrs.get('model'):
+            attrs['model'] = str(raw_model).strip()
+        if raw_brand and not attrs.get('brand'):
+            attrs['brand'] = str(raw_brand).strip()
+        if raw_name and not attrs.get('device_name'):
+            attrs['device_name'] = str(raw_name).strip()
+
+        # Auto-detect brand & model ONLY if completely omitted
         if imei and (not attrs.get('brand') or not attrs.get('model')):
             detected = lookup_imei(imei)
             if detected.get('is_valid'):
@@ -408,6 +435,10 @@ class DeviceHeartbeatSerializer(serializers.Serializer):
     sim_serial = serializers.CharField(max_length=50, required=False, allow_blank=True)
     sim_operator_2 = serializers.CharField(max_length=100, required=False, allow_blank=True)
     sim_number_2 = serializers.CharField(max_length=30, required=False, allow_blank=True)
+    brand = serializers.CharField(max_length=50, required=False, allow_blank=True)
+    model = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    device_model = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    device_name = serializers.CharField(max_length=100, required=False, allow_blank=True)
 
 
 class LockMessageTemplateSerializer(serializers.ModelSerializer):

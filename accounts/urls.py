@@ -31,6 +31,7 @@ from .views import (
     RetailerBankVerifyView,
     RetailerUPIMandateRegisterView,
     RetailerUPIMandateStatusView,
+    UserRoleTransferView,
 )
 
 router = DefaultRouter()
@@ -66,5 +67,6 @@ urlpatterns = [
     path('settings/', PlatformSettingsView.as_view(), name='platform_settings'),
     path('settings/terms-and-conditions/', RetailerTermsAndConditionsView.as_view(), name='retailer_terms_and_conditions'),
     path('whatsapp/campaigns/', WhatsAppCampaignView.as_view(), name='whatsapp_campaigns'),
+    path('users/<int:pk>/transfer-role/', UserRoleTransferView.as_view(), name='user_transfer_role'),
     path('', include(router.urls)),
 ]
