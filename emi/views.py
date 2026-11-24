@@ -381,17 +381,63 @@ class CustomerEMIContractViewSet(viewsets.ModelViewSet):
             "status": contract.status
         })
 
+    @action(detail=False, methods=['get'], url_path='mandate-options')
+    def mandate_options(self, request):
+        """
+        Returns supported Autopay / e-Mandate options (UPI AutoPay and eNACH Bank Mandate)
+        for customer EMI loan setup.
+        """
+        options = [
+            {
+                "code": "UPI",
+                "name": "UPI AutoPay",
+                "badge": "Recommended",
+                "is_default": True,
+                "description": "Instant recurring deduction via Google Pay, PhonePe, Paytm, or BHIM.",
+                "max_limit": 15000.00,
+                "approval_method": "Enter UPI PIN once (₹1 refundable authentication)",
+                "turnaround_time": "Instant (10-15 seconds)",
+                "supported_apps": ["Google Pay", "PhonePe", "Paytm", "BHIM", "CRED"]
+            },
+            {
+                "code": "ENACH",
+                "name": "eNACH Bank Mandate",
+                "badge": "NetBanking / Debit Card",
+                "is_default": False,
+                "description": "Standing instruction directly from bank account via NetBanking or Debit Card.",
+                "max_limit": 100000.00,
+                "approval_method": "Authenticate via NetBanking login or Debit Card + OTP",
+                "turnaround_time": "Instant to 2 hours",
+                "supported_banks": ["SBI", "HDFC", "ICICI", "Axis", "Kotak", "Punjab National Bank", "Bank of Baroda", "All Major Indian Banks"]
+            }
+        ]
+        return Response({
+            "success": True,
+            "supported_modes": options,
+            "default_mode": "UPI",
+            "instructions": "Pass 'auth_mode': 'UPI' or 'auth_mode': 'ENACH' in POST /api/emi/contracts/{id}/create-mandate/ to initiate recurring mandate."
+        }, status=status.HTTP_200_OK)
+
     @action(detail=True, methods=['post'], url_path='create-mandate')
     def create_mandate(self, request, pk=None):
         """
-        Point 10: Create Cashfree UPI Auto-Pay / e-Mandate for automatic monthly EMI deduction.
+        Create Cashfree UPI Auto-Pay or eNACH Bank Mandate for automatic monthly EMI deduction.
         Accessible by Customer of this contract, Retailer, or Admin.
+        Accepts:
+          - auth_mode: 'UPI' (default) or 'ENACH'
+          - return_url: optional callback URL
         """
         contract = self.get_object()
         if request.user.role == 'CUSTOMER' and contract.customer != request.user:
             return Response({"detail": "You do not have permission to setup mandate for this contract."}, status=status.HTTP_403_FORBIDDEN)
         
-        auth_mode = request.data.get('auth_mode', 'UPI').upper()
+        auth_mode = str(request.data.get('auth_mode') or 'UPI').upper().strip()
+        if auth_mode not in ['UPI', 'ENACH', 'CARD']:
+            return Response(
+                {"detail": f"Invalid auth_mode '{auth_mode}'. Allowed choices are 'UPI', 'ENACH', or 'CARD'."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
         return_url = request.data.get('return_url')
         res = CashfreeService.create_upi_mandate(contract, auth_mode=auth_mode, return_url=return_url)
         if not res.get('success'):
@@ -400,10 +446,13 @@ class CustomerEMIContractViewSet(viewsets.ModelViewSet):
         auth_url = res.get('mandate_auth_url')
         if auth_url and auth_url.startswith('/'):
             auth_url = request.build_absolute_uri(auth_url)
+            if 'auth_mode=' not in auth_url:
+                delim = '&' if '?' in auth_url else '?'
+                auth_url = f"{auth_url}{delim}auth_mode={auth_mode}"
             res['mandate_auth_url'] = auth_url
 
         if not auth_url and res.get('mandate_id'):
-            auth_url = request.build_absolute_uri(f"/api/emi/mandate/checkout/{res['mandate_id']}/")
+            auth_url = request.build_absolute_uri(f"/api/emi/mandate/checkout/{res['mandate_id']}/?auth_mode={auth_mode}")
             res['mandate_auth_url'] = auth_url
 
         contract.mandate_id = res['mandate_id']
@@ -415,7 +464,7 @@ class CustomerEMIContractViewSet(viewsets.ModelViewSet):
 
         AuditLog.objects.create(
             user=request.user,
-            action="CREATE_UPI_MANDATE",
+            action=f"CREATE_{auth_mode}_MANDATE",
             ip_address=get_client_ip(request),
             details={"contract_id": contract.id, "mandate_id": res['mandate_id'], "auth_mode": auth_mode}
         )
@@ -1256,6 +1305,7 @@ class CashfreeMandateCheckoutView(View):
 
         config = CashfreeService.get_config()
         cf_mode = 'production' if config.get('ENV') == 'PROD' else 'sandbox'
+        auth_mode = (request.GET.get('auth_mode') or request.POST.get('auth_mode') or 'UPI').upper()
 
         context = {
             'mandate_id': mandate_id,
@@ -1266,6 +1316,7 @@ class CashfreeMandateCheckoutView(View):
             'umrn': umrn,
             'is_simulation': is_sim,
             'cf_mode': cf_mode,
+            'auth_mode': auth_mode,
         }
         return render(request, 'emi/cashfree_checkout.html', context)
 

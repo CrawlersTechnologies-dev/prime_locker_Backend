@@ -421,11 +421,40 @@ class EMIBackendTests(TestCase):
             self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
             self.assertTrue(resp.data['success'])
             self.assertEqual(resp.data['mandate_status'], 'PENDING_AUTH')
+            self.assertEqual(resp.data['auth_mode'], 'UPI')
             self.assertIn('mandate_auth_url', resp.data)
 
             self.contract.refresh_from_db()
             self.assertEqual(self.contract.mandate_status, 'PENDING_AUTH')
             self.assertTrue(bool(self.contract.mandate_id))
+
+    def test_mandate_options_endpoint(self):
+        """Tests GET /api/emi-contracts/mandate-options/ returns UPI and eNACH options"""
+        resp = self.client.get('/api/emi-contracts/mandate-options/')
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertTrue(resp.data['success'])
+        modes = [m['code'] for m in resp.data['supported_modes']]
+        self.assertIn('UPI', modes)
+        self.assertIn('ENACH', modes)
+        self.assertEqual(resp.data['default_mode'], 'UPI')
+
+    def test_cashfree_create_enach_mandate(self):
+        """Tests POST /api/emi-contracts/:id/create-mandate/ with eNACH auth_mode"""
+        create_mandate_url = f'/api/emi-contracts/{self.contract.id}/create-mandate/'
+        with override_settings(CASHFREE_CONFIG={'APP_ID': '', 'SECRET_KEY': ''}):
+            resp = self.client.post(create_mandate_url, {'auth_mode': 'ENACH'}, format='json')
+            self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+            self.assertTrue(resp.data['success'])
+            self.assertEqual(resp.data['mandate_status'], 'PENDING_AUTH')
+            self.assertEqual(resp.data['auth_mode'], 'ENACH')
+            self.assertIn('auth_mode=ENACH', resp.data['mandate_auth_url'])
+
+    def test_cashfree_create_mandate_invalid_auth_mode_rejected(self):
+        """Tests POST /api/emi-contracts/:id/create-mandate/ rejects unsupported auth_mode"""
+        create_mandate_url = f'/api/emi-contracts/{self.contract.id}/create-mandate/'
+        resp = self.client.post(create_mandate_url, {'auth_mode': 'BITCOIN'}, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('Invalid auth_mode', resp.data['detail'])
 
     def test_cashfree_mandate_webhook_and_status(self):
         self.contract.mandate_id = 'cf_mandate_webhook_test_123'

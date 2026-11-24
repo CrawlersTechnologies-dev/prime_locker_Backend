@@ -568,7 +568,7 @@ class CashfreeService:
                 "max_amount": str(max_amount),
                 "frequency": "MONTHLY",
                 "simulation": True,
-                "message": "UPI Auto-Pay mandate generated in Cashfree simulation mode. Open auth URL to approve."
+                "message": f"{'eNACH Bank' if auth_mode == 'ENACH' else 'UPI AutoPay'} mandate generated in Cashfree simulation mode. Open auth URL to approve."
             }
 
         url = f"{config['BASE_URL']}/subscriptions"

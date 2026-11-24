@@ -2040,6 +2040,125 @@
             },
             "description": "Returns current active offline unlock code and expiry timestamp for the device."
           }
+        },
+        {
+          "name": "10.7 Get Autopay Mandate Options (UPI & eNACH)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/emi-contracts/mandate-options/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "emi-contracts",
+                "mandate-options",
+                ""
+              ]
+            },
+            "description": "Returns supported recurring Autopay options (UPI AutoPay and eNACH Bank Mandate) with limits, descriptions, and default modes."
+          }
+        },
+        {
+          "name": "10.8 Create Autopay Mandate - UPI AutoPay (POST /create-mandate/)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"auth_mode\": \"UPI\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/emi-contracts/{{contract_id}}/create-mandate/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "emi-contracts",
+                "{{contract_id}}",
+                "create-mandate",
+                ""
+              ]
+            },
+            "description": "Creates a Cashfree UPI AutoPay recurring mandate for the customer EMI contract, returning mandate_auth_url for instant UPI PIN authorization."
+          }
+        },
+        {
+          "name": "10.9 Create Autopay Mandate - eNACH Bank Mandate (POST /create-mandate/)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"auth_mode\": \"ENACH\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/emi-contracts/{{contract_id}}/create-mandate/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "emi-contracts",
+                "{{contract_id}}",
+                "create-mandate",
+                ""
+              ]
+            },
+            "description": "Creates a Cashfree eNACH recurring bank mandate for the customer EMI contract, returning mandate_auth_url for NetBanking / Debit Card authorization."
+          }
+        },
+        {
+          "name": "10.10 Check Mandate Status & UMRN (GET /mandate-status/)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/emi-contracts/{{contract_id}}/mandate-status/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "emi-contracts",
+                "{{contract_id}}",
+                "mandate-status",
+                ""
+              ]
+            },
+            "description": "Queries live Cashfree mandate status, UMRN, and checkout authorization URL."
+          }
         }
       ]
     }

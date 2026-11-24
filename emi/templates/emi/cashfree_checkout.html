@@ -293,7 +293,7 @@
 
     <div class="card">
       <div class="card-title">
-        <span>UPI AutoPay Mandate</span>
+        <span>{% if auth_mode == 'ENACH' %}eNACH Bank Mandate{% else %}UPI AutoPay Mandate{% endif %}</span>
         {% if is_already_active %}
           <span class="status-badge badge-active">Active</span>
         {% else %}
@@ -302,7 +302,9 @@
       </div>
       <div class="card-subtitle">
         {% if is_already_active %}
-          Your recurring EMI AutoPay mandate has been authorized and is active.
+          Your recurring EMI mandate has been authorized and is active.
+        {% elif auth_mode == 'ENACH' %}
+          Authorize monthly recurring EMI standing instruction directly from your bank account via NetBanking or Debit Card.
         {% else %}
           Authorize monthly EMI deduction directly from your UPI app (Google Pay, PhonePe, Paytm, BHIM).
         {% endif %}
@@ -350,17 +352,18 @@
         <form method="POST">
           {% csrf_token %}
           <input type="hidden" name="simulate_approve" value="1">
-          <button type="submit" class="btn btn-primary">Simulate Customer Approval (Active)</button>
+          <input type="hidden" name="auth_mode" value="{{ auth_mode }}">
+          <button type="submit" class="btn btn-primary">Simulate Customer Approval ({% if auth_mode == 'ENACH' %}eNACH{% else %}UPI AutoPay{% endif %})</button>
         </form>
 
       {% else %}
         <div class="loading-wrap" id="loading-indicator">
           <div class="spinner"></div>
-          <p class="loading-text">Connecting to Cashfree UPI AutoPay...</p>
+          <p class="loading-text">Connecting to Cashfree {% if auth_mode == 'ENACH' %}eNACH{% else %}UPI AutoPay{% endif %}...</p>
         </div>
 
         <button id="launch-checkout-btn" class="btn btn-primary" type="button">
-          Open UPI AutoPay
+          Open {% if auth_mode == 'ENACH' %}eNACH Mandate{% else %}UPI AutoPay{% endif %}
         </button>
 
         <div id="error-box" class="error-box"></div>
