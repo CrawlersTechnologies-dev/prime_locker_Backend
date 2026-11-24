@@ -34,6 +34,7 @@ class DeviceSerializer(serializers.ModelSerializer):
     qr_running_device = serializers.SerializerMethodField(read_only=True)
     qr_test_dpc = serializers.SerializerMethodField(read_only=True)
     sim_details = serializers.SerializerMethodField(read_only=True)
+    imei2 = serializers.CharField(write_only=True, required=False, allow_blank=True, allow_null=True)
 
     class Meta:
         model = Device
@@ -48,6 +49,7 @@ class DeviceSerializer(serializers.ModelSerializer):
             'device_state',
             'imei',
             'secondary_imei',
+            'imei2',
             'serial_number',
             'brand',
             'model',
@@ -196,6 +198,29 @@ class DeviceSerializer(serializers.ModelSerializer):
         return None
 
     def validate(self, attrs):
+        # 1. Handle imei2 alias (maps imei2 -> secondary_imei)
+        if 'imei2' in attrs:
+            imei2_val = attrs.pop('imei2')
+            if imei2_val is not None:
+                attrs['secondary_imei'] = imei2_val
+
+        # 2. Block IMEI modification if device is already activated
+        if self.instance is not None:
+            new_imei = attrs.get('imei')
+            new_imei2 = attrs.get('secondary_imei')
+            is_imei_changed = bool(new_imei and new_imei != self.instance.imei)
+            is_imei2_changed = bool(new_imei2 is not None and new_imei2 != self.instance.secondary_imei)
+
+            if is_imei_changed or is_imei2_changed:
+                is_active = (
+                    getattr(self.instance, 'is_activated', False) or
+                    self.instance.status in [DeviceLockStatus.ACTIVE, DeviceLockStatus.LOCKED]
+                )
+                if is_active:
+                    raise serializers.ValidationError({
+                        "imei": "Device IMEI cannot be modified once the device has been activated."
+                    })
+
         imei = attrs.get('imei')
         # Auto-detect brand & model if omitted
         if imei and (not attrs.get('brand') or not attrs.get('model')):
@@ -216,6 +241,18 @@ class DeviceSerializer(serializers.ModelSerializer):
             attrs['device_name'] = f"{brand} {model}".strip() or "Device"
 
         return attrs
+
+    def update(self, instance, validated_data):
+        old_imei = instance.imei
+        device = super().update(instance, validated_data)
+        if 'imei' in validated_data and validated_data['imei'] != old_imei:
+            if device.activation_key:
+                device.activation_key.activated_on_device_id = device.imei
+                device.activation_key.save(update_fields=['activated_on_device_id'])
+            if not validated_data.get('device_name') and (validated_data.get('brand') or validated_data.get('model')):
+                device.device_name = f"{device.brand or ''} {device.model or ''}".strip() or "Device"
+                device.save(update_fields=['device_name'])
+        return device
 
     def create(self, validated_data):
         key_string = validated_data.pop('activation_key_string', None)

@@ -1929,6 +1929,117 @@
             },
             "description": "Enrolls an Apple iPhone via the primary /customers/enroll/ endpoint. Accepts serial_number (does NOT require IMEI), sets os_type to IOS and lock_provider to APPLE_MDM, consumes an iOS key from retailer balance, and registers the device with Loksiz MDM."
           }
+        },
+        {
+          "name": "10.3 Inactive Device IMEI & IMEI2 Edit (PATCH /devices/{id}/)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"imei\": \"352099009999001\",\n  \"imei2\": \"352099009999002\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/devices/{{device_id}}/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "devices",
+                "{{device_id}}",
+                ""
+              ]
+            },
+            "description": "Allows updating IMEI and secondary IMEI (imei2) while device is inactive / not activated. Automatically blocked if device is already active."
+          }
+        },
+        {
+          "name": "10.4 Live Device Location Coordinates (GET /devices/{id}/location/)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/devices/{{device_id}}/location/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "devices",
+                "{{device_id}}",
+                "location",
+                ""
+              ]
+            },
+            "description": "Returns live GPS coordinates (latitude, longitude, address, maps_url) of the device."
+          }
+        },
+        {
+          "name": "10.5 Device SIM Details & Status (GET /devices/{id}/sim-details/)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/devices/{{device_id}}/sim-details/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "devices",
+                "{{device_id}}",
+                "sim-details",
+                ""
+              ]
+            },
+            "description": "Returns full dual-SIM details (carrier, phone number, ICCID, slot status, swap history)."
+          }
+        },
+        {
+          "name": "10.6 Device Offline Unlock Code (GET /devices/{id}/offline-unlock-code/)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/devices/{{device_id}}/offline-unlock-code/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "devices",
+                "{{device_id}}",
+                "offline-unlock-code",
+                ""
+              ]
+            },
+            "description": "Returns current active offline unlock code and expiry timestamp for the device."
+          }
         }
       ]
     }

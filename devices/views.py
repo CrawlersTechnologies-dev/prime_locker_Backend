@@ -342,26 +342,65 @@ class DeviceViewSet(viewsets.ModelViewSet):
     def device_ping(self, request, pk=None):
         """
         Direct Ping endpoint for a specific device: POST /api/devices/{id}/ping/
-        Immediately marks device as online and updates telemetry.
+        Immediately marks device as online and updates telemetry (battery, location, SIM).
         """
         device = self.get_object()
         device.last_online_at = timezone.now()
         device.is_activated = True
         if device.status == DeviceLockStatus.INACTIVE:
             device.status = DeviceLockStatus.ACTIVE
+
+        update_fields = ['last_online_at', 'is_activated', 'status']
+
         battery = request.data.get('battery_level') or request.query_params.get('battery_level')
         if battery is not None:
             try:
                 device.battery_level = int(battery)
+                update_fields.append('battery_level')
             except (ValueError, TypeError):
                 pass
-        device.save(update_fields=['last_online_at', 'is_activated', 'status', 'battery_level'])
+
+        # GPS Location telemetry
+        lat = request.data.get('latitude') or request.data.get('current_latitude') or request.query_params.get('latitude')
+        lng = request.data.get('longitude') or request.data.get('current_longitude') or request.query_params.get('longitude')
+        addr = request.data.get('address') or request.data.get('current_address') or request.query_params.get('address')
+        if lat and lng:
+            try:
+                device.current_latitude = float(lat)
+                device.current_longitude = float(lng)
+                device.current_address = addr
+                device.last_location_at = timezone.now()
+                update_fields.extend(['current_latitude', 'current_longitude', 'current_address', 'last_location_at'])
+                DeviceLocationLog.objects.create(
+                    device=device,
+                    latitude=float(lat),
+                    longitude=float(lng),
+                    address=addr
+                )
+            except (ValueError, TypeError):
+                pass
+
+        # SIM Card telemetry
+        for sim_f in ['sim_operator', 'sim_number', 'sim_serial', 'sim_operator_2', 'sim_number_2']:
+            val = request.data.get(sim_f) or request.query_params.get(sim_f)
+            if val:
+                setattr(device, sim_f, val)
+                update_fields.append(sim_f)
+
+        device.save(update_fields=list(set(update_fields)))
         return Response({
             "message": f"Device {device.imei} pinged successfully.",
             "is_online": device.is_online,
             "last_online_at": device.last_online_at,
             "battery_level": device.battery_level,
-            "status": device.status
+            "status": device.status,
+            "current_location": {
+                "latitude": device.current_latitude,
+                "longitude": device.current_longitude,
+                "address": device.current_address,
+                "last_location_at": device.last_location_at
+            },
+            "sim_details": device.get_sim_details()
         })
 
     @action(detail=True, methods=['post'], url_path='uninstall')
@@ -619,10 +658,12 @@ class DeviceViewSet(viewsets.ModelViewSet):
             }
         })
 
-    @action(detail=True, methods=['post'], url_path='generate-offline-code')
+    @action(detail=True, methods=['get', 'post'], url_path='generate-offline-code')
     def generate_offline_code_view(self, request, pk=None):
         """
-        Generates a secure offline unlock code with expiry options (Missing API M7).
+        Generates or retrieves a secure offline unlock code with expiry options (Missing API M7).
+        GET returns current or active code.
+        POST generates a new code or challenge/response code.
         expiry_option choices: 'UNTIL_NEXT_DUE_DATE' (default), '24_HOURS', 'PERMANENT'
         For RocketPay DLC devices, calls RocketPay's real UNLOCK_CODE API (RP1).
         """
@@ -631,6 +672,16 @@ class DeviceViewSet(viewsets.ModelViewSet):
             return denied
         from .models import generate_offline_code
         device = self.get_object()
+
+        # If GET request and device already has an offline unlock code, return it directly
+        if request.method == 'GET' and device.offline_unlock_code:
+            return Response({
+                "message": "Offline unlock code retrieved successfully.",
+                "device_imei": device.imei,
+                "offline_unlock_code": device.offline_unlock_code,
+                "expiry_option": device.offline_code_expiry_type or 'UNTIL_NEXT_DUE_DATE',
+                "expires_at": device.offline_code_expires_at
+            })
 
         # RP1: If RocketPay device, request official challenge/response unlock code
         if device.lock_provider == LockProvider.ROCKETPAY:
@@ -643,10 +694,18 @@ class DeviceViewSet(viewsets.ModelViewSet):
                     {"error": rp_res.get('error', 'Failed to generate offline unlock code via RocketPay.')},
                     status=status.HTTP_400_BAD_REQUEST
                 )
+        elif device.lock_provider == LockProvider.PARTNER_MDM:
+            from .services.partner_mdm_service import PartnerMDMService
+            mdm_res = PartnerMDMService.get_offline_code(device)
+            if mdm_res.get('success') and mdm_res.get('offline_unlock_code'):
+                new_code = mdm_res.get('offline_unlock_code')
+            else:
+                new_code = generate_offline_code()
         else:
             new_code = generate_offline_code()
 
-        expiry_option = request.data.get('expiry_option', 'UNTIL_NEXT_DUE_DATE').upper()
+        expiry_option = (request.data.get('expiry_option') if request.method == 'POST' else None) or 'UNTIL_NEXT_DUE_DATE'
+        expiry_option = expiry_option.upper()
         expires_at = None
 
         if expiry_option == '24_HOURS':
@@ -694,6 +753,20 @@ class DeviceViewSet(viewsets.ModelViewSet):
             "expiry_option": expiry_option,
             "expires_at": expires_at
         })
+
+    @action(detail=True, methods=['get', 'post'], url_path='offline-unlock-code')
+    def offline_unlock_code_view(self, request, pk=None):
+        """
+        Alias endpoint: GET/POST /api/devices/{id}/offline-unlock-code/
+        """
+        return self.generate_offline_code_view(request, pk)
+
+    @action(detail=True, methods=['get', 'post'], url_path='offline-code')
+    def offline_code_view(self, request, pk=None):
+        """
+        Alias endpoint: GET/POST /api/devices/{id}/offline-code/
+        """
+        return self.generate_offline_code_view(request, pk)
 
     @action(detail=True, methods=['get'], url_path='apps')
     def get_apps(self, request, pk=None):
@@ -888,6 +961,38 @@ class DeviceViewSet(viewsets.ModelViewSet):
             "history": serializer.data
         })
 
+    @action(detail=True, methods=['get'], url_path='location')
+    def device_location(self, request, pk=None):
+        """
+        Returns the current live GPS coordinates of the device.
+        Endpoint: GET /api/devices/{id}/location/
+        """
+        device = self.get_object()
+        # If partner MDM device and local coordinates are not yet recorded, fetch from partner MDM
+        if (device.current_latitude is None or device.current_longitude is None) and device.lock_provider == LockProvider.PARTNER_MDM:
+            try:
+                from .services.partner_mdm_service import PartnerMDMService
+                loc_res = PartnerMDMService.get_location(device)
+                if loc_res.get('success') and loc_res.get('latitude') is not None:
+                    device.current_latitude = loc_res.get('latitude')
+                    device.current_longitude = loc_res.get('longitude')
+                    device.last_location_at = timezone.now()
+                    device.save(update_fields=['current_latitude', 'current_longitude', 'last_location_at'])
+            except Exception as e:
+                logger.warning("Failed to fetch live location from partner MDM: %s", e)
+
+        lat = float(device.current_latitude) if device.current_latitude is not None else None
+        lng = float(device.current_longitude) if device.current_longitude is not None else None
+        return Response({
+            "imei": device.imei,
+            "latitude": lat,
+            "longitude": lng,
+            "address": device.current_address,
+            "last_location_at": device.last_location_at,
+            "maps_url": f"https://maps.google.com/?q={lat},{lng}" if lat is not None and lng is not None else None,
+            "is_available": bool(lat is not None and lng is not None)
+        })
+
     @action(detail=True, methods=['post'], url_path='toggle-reset-block')
     def toggle_reset_block(self, request, pk=None):
         """
@@ -1067,6 +1172,22 @@ class DeviceViewSet(viewsets.ModelViewSet):
             "sim_changed": False,
             "sim_details": device.get_sim_details()
         }, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['get'], url_path='sim-details')
+    def sim_details_view(self, request, pk=None):
+        """
+        Returns full dual-SIM details, carrier info, ICCID, and swap history.
+        Endpoint: GET /api/devices/{id}/sim-details/
+        """
+        device = self.get_object()
+        return Response(device.get_sim_details(), status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['get'], url_path='sim')
+    def sim_view(self, request, pk=None):
+        """
+        Alias endpoint: GET /api/devices/{id}/sim/
+        """
+        return self.sim_details_view(request, pk)
 
     @action(detail=True, methods=['post'], url_path='attach-emi')
     def attach_emi(self, request, pk=None):

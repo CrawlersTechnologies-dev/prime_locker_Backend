@@ -214,6 +214,124 @@ class DevicesBackendTests(TestCase):
         self.assertTrue(resp.data.get('code'))
         self.assertTrue(resp.data.get('in_app_notification_dispatched'))
 
+    def test_inactive_device_imei_and_imei2_edit_allowed(self):
+        """Tests PATCH /api/devices/:id/ allows imei and imei2 edit when device is inactive"""
+        inactive_dev = Device.objects.create(
+            customer=self.customer,
+            retailer=self.retailer,
+            imei='352099001111001',
+            secondary_imei='352099001111002',
+            brand='SAMSUNG',
+            model='Galaxy A14',
+            status=DeviceLockStatus.INACTIVE,
+            is_activated=False
+        )
+        patch_payload = {
+            'imei': '352099009999001',
+            'imei2': '352099009999002'
+        }
+        resp = self.client.patch(f'/api/devices/{inactive_dev.id}/', data=patch_payload, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        inactive_dev.refresh_from_db()
+        self.assertEqual(inactive_dev.imei, '352099009999001')
+        self.assertEqual(inactive_dev.secondary_imei, '352099009999002')
+
+    def test_active_device_imei_edit_blocked(self):
+        """Tests PATCH /api/devices/:id/ blocks imei edit when device is already activated"""
+        active_dev = Device.objects.create(
+            customer=self.customer,
+            retailer=self.retailer,
+            imei='352099002222001',
+            brand='SAMSUNG',
+            model='Galaxy A14',
+            status=DeviceLockStatus.ACTIVE,
+            is_activated=True
+        )
+        resp = self.client.patch(f'/api/devices/{active_dev.id}/', data={'imei': '352099009999003'}, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('imei', resp.data)
+        self.assertIn('cannot be modified once the device has been activated', resp.data['imei'][0])
+
+    def test_live_location_endpoint_and_ping(self):
+        """Tests live location updates via device ping and GET /api/devices/:id/location/"""
+        dev = Device.objects.create(
+            customer=self.customer,
+            retailer=self.retailer,
+            imei='352099003333001',
+            brand='XIAOMI',
+            model='Redmi 12',
+            status=DeviceLockStatus.ACTIVE,
+            is_activated=True
+        )
+        ping_resp = self.client.post(f'/api/devices/{dev.id}/ping/', {
+            'latitude': 19.0760,
+            'longitude': 72.8777,
+            'address': 'Mumbai, Maharashtra, India'
+        }, format='json')
+        self.assertEqual(ping_resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(ping_resp.data['current_location']['latitude'], 19.0760)
+
+        loc_resp = self.client.get(f'/api/devices/{dev.id}/location/')
+        self.assertEqual(loc_resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(loc_resp.data['latitude'], 19.0760)
+        self.assertEqual(loc_resp.data['longitude'], 72.8777)
+        self.assertEqual(loc_resp.data['address'], 'Mumbai, Maharashtra, India')
+        self.assertTrue(loc_resp.data['is_available'])
+
+    def test_sim_details_endpoint_and_ping(self):
+        """Tests SIM details updates via device ping and GET /api/devices/:id/sim-details/"""
+        dev = Device.objects.create(
+            customer=self.customer,
+            retailer=self.retailer,
+            imei='352099004444001',
+            brand='REALME',
+            model='C55',
+            status=DeviceLockStatus.ACTIVE,
+            is_activated=True
+        )
+        ping_resp = self.client.post(f'/api/devices/{dev.id}/ping/', {
+            'sim_operator': 'Jio 4G',
+            'sim_number': '+919876543210',
+            'sim_serial': '89918723918239123'
+        }, format='json')
+        self.assertEqual(ping_resp.status_code, status.HTTP_200_OK)
+        self.assertTrue(ping_resp.data['sim_details']['has_sim'])
+
+        sim_resp = self.client.get(f'/api/devices/{dev.id}/sim-details/')
+        self.assertEqual(sim_resp.status_code, status.HTTP_200_OK)
+        self.assertTrue(sim_resp.data['has_sim'])
+        self.assertEqual(sim_resp.data['slot_1']['carrier'], 'Jio 4G')
+        self.assertEqual(sim_resp.data['slot_1']['phone_number'], '+919876543210')
+        self.assertEqual(sim_resp.data['slot_1']['iccid'], '89918723918239123')
+        self.assertEqual(sim_resp.data['slot_1']['status'], 'INSERTED')
+
+        alias_resp = self.client.get(f'/api/devices/{dev.id}/sim/')
+        self.assertEqual(alias_resp.status_code, status.HTTP_200_OK)
+
+    def test_offline_unlock_code_get_endpoints(self):
+        """Tests GET endpoints for offline unlock code"""
+        dev = Device.objects.create(
+            customer=self.customer,
+            retailer=self.retailer,
+            imei='352099005555001',
+            brand='ONEPLUS',
+            model='Nord CE 3',
+            status=DeviceLockStatus.ACTIVE,
+            is_activated=True,
+            offline_unlock_code='789012'
+        )
+        resp1 = self.client.get(f'/api/devices/{dev.id}/offline-unlock-code/')
+        self.assertEqual(resp1.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp1.data['offline_unlock_code'], '789012')
+
+        resp2 = self.client.get(f'/api/devices/{dev.id}/offline-code/')
+        self.assertEqual(resp2.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp2.data['offline_unlock_code'], '789012')
+
+        resp3 = self.client.get(f'/api/devices/{dev.id}/generate-offline-code/')
+        self.assertEqual(resp3.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp3.data['offline_unlock_code'], '789012')
+
 
 class InstallationVideoTests(TestCase):
     def setUp(self):
