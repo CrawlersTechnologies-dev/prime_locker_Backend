@@ -154,7 +154,7 @@ class CustomerEMIContract(models.Model):
     mandate_umrn = models.CharField(max_length=100, blank=True, null=True, help_text="Unique Mandate Reference Number")
     mandate_auth_url = models.URLField(max_length=500, blank=True, null=True, help_text="Link for customer to authorize UPI AutoPay")
     
-    status = models.CharField(max_length=20, choices=EMIContractStatus.choices, default=EMIContractStatus.ACTIVE)
+    status = models.CharField(max_length=20, choices=EMIContractStatus.choices, default=EMIContractStatus.ACTIVE, db_index=True)
     
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -216,7 +216,7 @@ class EMIInstallment(models.Model):
     due_date = models.DateField(db_index=True)
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     paid_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
-    status = models.CharField(max_length=20, choices=InstallmentStatus.choices, default=InstallmentStatus.UPCOMING)
+    status = models.CharField(max_length=20, choices=InstallmentStatus.choices, default=InstallmentStatus.UPCOMING, db_index=True)
     
     # Collection tracking
     collected_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='collected_installments')

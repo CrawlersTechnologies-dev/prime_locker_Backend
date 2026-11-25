@@ -2016,42 +2016,54 @@ class DashboardView(APIView):
             downline_qs = User.objects.filter(id__in=downline_ids)
             retailer_ids = [u.id for u in downline_users if u.role == 'RETAILER']
 
-        network_kpis = {
-            "super_distributors": downline_qs.filter(role='SUPER_DISTRIBUTOR').count(),
-            "distributors": downline_qs.filter(role='DISTRIBUTOR').count(),
-            "sub_distributors": downline_qs.filter(role='SUB_DISTRIBUTOR').count(),
-            "retailers": downline_qs.filter(role='RETAILER').count(),
-            "customers": downline_qs.filter(role='CUSTOMER').count(),
-            "active_users": downline_qs.filter(is_active=True).count(),
-            "inactive_users": downline_qs.filter(is_active=False).count(),
-            "uninstalled_customers": downline_qs.filter(
-                role='CUSTOMER',
-                registered_devices__status='UNENROLLED'
-            ).distinct().count(),
-        }
+        from django.db.models import Case, When, IntegerField
 
-        # 2. Device & EMI Status KPIs
-        contracts_qs = CustomerEMIContract.objects.filter(retailer_id__in=retailer_ids)
-        total_devices = contracts_qs.count()
-        active_devices = contracts_qs.filter(status=EMIContractStatus.ACTIVE).count()
-        locked_devices = contracts_qs.filter(status=EMIContractStatus.LOCKED).count()
-        completed_contracts = contracts_qs.filter(status=EMIContractStatus.COMPLETED).count()
+        agg_network = downline_qs.aggregate(
+            super_distributors=Count(Case(When(role='SUPER_DISTRIBUTOR', then=1), output_field=IntegerField())),
+            distributors=Count(Case(When(role='DISTRIBUTOR', then=1), output_field=IntegerField())),
+            sub_distributors=Count(Case(When(role='SUB_DISTRIBUTOR', then=1), output_field=IntegerField())),
+            retailers=Count(Case(When(role='RETAILER', then=1), output_field=IntegerField())),
+            customers=Count(Case(When(role='CUSTOMER', then=1), output_field=IntegerField())),
+            active_users=Count(Case(When(is_active=True, then=1), output_field=IntegerField())),
+            inactive_users=Count(Case(When(is_active=False, then=1), output_field=IntegerField())),
+        )
 
         from devices.models import Device, DeviceLockStatus
-        uninstalled_dev_count = Device.objects.filter(
-            retailer_id__in=retailer_ids,
-            status=DeviceLockStatus.UNENROLLED
-        ).count()
         uninstalled_cust_count = downline_qs.filter(
             role='CUSTOMER',
             registered_devices__status=DeviceLockStatus.UNENROLLED
         ).distinct().count()
 
+        network_kpis = {
+            "super_distributors": agg_network.get('super_distributors') or 0,
+            "distributors": agg_network.get('distributors') or 0,
+            "sub_distributors": agg_network.get('sub_distributors') or 0,
+            "retailers": agg_network.get('retailers') or 0,
+            "customers": agg_network.get('customers') or 0,
+            "active_users": agg_network.get('active_users') or 0,
+            "inactive_users": agg_network.get('inactive_users') or 0,
+            "uninstalled_customers": uninstalled_cust_count,
+        }
+
+        # 2. Device & EMI Status KPIs
+        contracts_qs = CustomerEMIContract.objects.filter(retailer_id__in=retailer_ids)
+        agg_dev = contracts_qs.aggregate(
+            total=Count('id'),
+            active=Count(Case(When(status=EMIContractStatus.ACTIVE, then=1), output_field=IntegerField())),
+            locked=Count(Case(When(status=EMIContractStatus.LOCKED, then=1), output_field=IntegerField())),
+            completed=Count(Case(When(status=EMIContractStatus.COMPLETED, then=1), output_field=IntegerField())),
+        )
+
+        uninstalled_dev_count = Device.objects.filter(
+            retailer_id__in=retailer_ids,
+            status=DeviceLockStatus.UNENROLLED
+        ).count()
+
         device_and_emi_kpis = {
-            "total_registered_devices": total_devices,
-            "active_unlocked_devices": active_devices,
-            "locked_devices": locked_devices,
-            "completed_emi_contracts": completed_contracts,
+            "total_registered_devices": agg_dev.get('total') or 0,
+            "active_unlocked_devices": agg_dev.get('active') or 0,
+            "locked_devices": agg_dev.get('locked') or 0,
+            "completed_emi_contracts": agg_dev.get('completed') or 0,
             "uninstalled_devices": uninstalled_dev_count,
             "uninstalled_customers": uninstalled_cust_count,
         }
@@ -2333,15 +2345,41 @@ class CurrentUserView(APIView):
         from keys.services import get_user_available_keys_breakdown
         by_type = get_user_available_keys_breakdown(user)
 
-        # Children counts
-        subordinates = user.get_all_subordinates()
-        children_counts = {
-            'distributors': sum(1 for u in subordinates if u.role == 'DISTRIBUTOR'),
-            'sub_distributors': sum(1 for u in subordinates if u.role == 'SUB_DISTRIBUTOR'),
-            'retailers': sum(1 for u in subordinates if u.role == 'RETAILER'),
-            'customers': sum(1 for u in subordinates if u.role == 'CUSTOMER'),
-            'total': len(subordinates)
-        }
+        # Children counts (optimized SQL aggregation to prevent loading all users into memory)
+        from .models import is_company_user
+        if is_company_user(user):
+            from django.db.models import Count
+            role_map = dict(
+                User.objects.exclude(id=user.id)
+                .values('role')
+                .annotate(c=Count('id'))
+                .values_list('role', 'c')
+            )
+            children_counts = {
+                'distributors': role_map.get('DISTRIBUTOR', 0),
+                'sub_distributors': role_map.get('SUB_DISTRIBUTOR', 0),
+                'retailers': role_map.get('RETAILER', 0),
+                'customers': role_map.get('CUSTOMER', 0),
+                'total': sum(role_map.values()),
+            }
+        elif user.role == 'RETAILER':
+            cust_count = User.objects.filter(parent=user, role='CUSTOMER').count()
+            children_counts = {
+                'distributors': 0,
+                'sub_distributors': 0,
+                'retailers': 0,
+                'customers': cust_count,
+                'total': cust_count,
+            }
+        else:
+            subordinates = user.get_all_subordinates()
+            children_counts = {
+                'distributors': sum(1 for u in subordinates if u.role == 'DISTRIBUTOR'),
+                'sub_distributors': sum(1 for u in subordinates if u.role == 'SUB_DISTRIBUTOR'),
+                'retailers': sum(1 for u in subordinates if u.role == 'RETAILER'),
+                'customers': sum(1 for u in subordinates if u.role == 'CUSTOMER'),
+                'total': len(subordinates),
+            }
 
         logo_url = None
         if user.logo:

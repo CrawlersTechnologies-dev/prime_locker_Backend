@@ -18,8 +18,8 @@ class KeyDeviceType(models.TextChoices):
 
 class DeviceKey(models.Model):
     key_string = models.CharField(max_length=50, unique=True, db_index=True)
-    device_type = models.CharField(max_length=50) # e.g., 'MOBILE', 'TV'
-    status = models.CharField(max_length=20, choices=KeyStatus.choices, default=KeyStatus.AVAILABLE)
+    device_type = models.CharField(max_length=50, db_index=True) # e.g., 'MOBILE', 'TV'
+    status = models.CharField(max_length=20, choices=KeyStatus.choices, default=KeyStatus.AVAILABLE, db_index=True)
     
     # Ownership tracking
     current_owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name='owned_keys')
@@ -47,7 +47,7 @@ class KeyTransaction(models.Model):
     key = models.ForeignKey(DeviceKey, on_delete=models.CASCADE, related_name='transactions')
     from_user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='transfers_out')
     to_user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='transfers_in')
-    action = models.CharField(max_length=20, choices=KeyAction.choices)
+    action = models.CharField(max_length=20, choices=KeyAction.choices, db_index=True)
     notes = models.TextField(null=True, blank=True)
     timestamp = models.DateTimeField(auto_now_add=True)
     

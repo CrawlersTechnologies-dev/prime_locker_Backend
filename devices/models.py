@@ -143,8 +143,8 @@ class Device(models.Model):
     loan_account_number = models.CharField(max_length=100, blank=True, null=True, help_text="Loan Application / Account Number")
     
     # Status & Connectivity
-    status = models.CharField(max_length=20, choices=DeviceLockStatus.choices, default=DeviceLockStatus.INACTIVE)
-    is_activated = models.BooleanField(default=False, help_text="True once physical device has completed enrollment")
+    status = models.CharField(max_length=20, choices=DeviceLockStatus.choices, default=DeviceLockStatus.INACTIVE, db_index=True)
+    is_activated = models.BooleanField(default=False, db_index=True, help_text="True once physical device has completed enrollment")
     activated_at = models.DateTimeField(null=True, blank=True)
     last_online_at = models.DateTimeField(null=True, blank=True)
     ip_address = models.CharField(max_length=45, blank=True, null=True)

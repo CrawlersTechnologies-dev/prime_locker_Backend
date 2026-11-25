@@ -292,14 +292,40 @@ class SuperDistributorSerializer(serializers.ModelSerializer):
         representation['keys_used'] = keys_used
 
         # Counts of downstream children
-        downstream = instance.get_all_subordinates()
-        representation['counts_of_children'] = {
-            'distributors': sum(1 for u in downstream if u.role == 'DISTRIBUTOR'),
-            'sub_distributors': sum(1 for u in downstream if u.role == 'SUB_DISTRIBUTOR'),
-            'retailers': sum(1 for u in downstream if u.role == 'RETAILER'),
-            'customers': sum(1 for u in downstream if u.role == 'CUSTOMER'),
-            'total': len(downstream)
-        }
+        from .models import is_company_user
+        if instance.role == 'RETAILER':
+            cust_count = instance.children.filter(role='CUSTOMER').count()
+            representation['counts_of_children'] = {
+                'distributors': 0,
+                'sub_distributors': 0,
+                'retailers': 0,
+                'customers': cust_count,
+                'total': cust_count
+            }
+        elif is_company_user(instance):
+            from django.db.models import Count
+            role_map = dict(
+                User.objects.exclude(id=instance.id)
+                .values('role')
+                .annotate(c=Count('id'))
+                .values_list('role', 'c')
+            )
+            representation['counts_of_children'] = {
+                'distributors': role_map.get('DISTRIBUTOR', 0),
+                'sub_distributors': role_map.get('SUB_DISTRIBUTOR', 0),
+                'retailers': role_map.get('RETAILER', 0),
+                'customers': role_map.get('CUSTOMER', 0),
+                'total': sum(role_map.values())
+            }
+        else:
+            downstream = instance.get_all_subordinates()
+            representation['counts_of_children'] = {
+                'distributors': sum(1 for u in downstream if u.role == 'DISTRIBUTOR'),
+                'sub_distributors': sum(1 for u in downstream if u.role == 'SUB_DISTRIBUTOR'),
+                'retailers': sum(1 for u in downstream if u.role == 'RETAILER'),
+                'customers': sum(1 for u in downstream if u.role == 'CUSTOMER'),
+                'total': len(downstream)
+            }
 
         return representation
 

@@ -30,7 +30,7 @@ class UserManager(BaseUserManager):
         return self.create_user(username, email, password, **extra_fields)
 
 class User(AbstractUser):
-    role = models.CharField(max_length=50, choices=Role.choices, default=Role.CUSTOMER)
+    role = models.CharField(max_length=50, choices=Role.choices, default=Role.CUSTOMER, db_index=True)
     parent = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True, related_name='children')
     mobile_number = models.CharField(max_length=15, unique=True, null=True, blank=True)
     alternate_mobile_number = models.CharField(max_length=15, null=True, blank=True)
@@ -56,6 +56,7 @@ class User(AbstractUser):
     approval_step = models.CharField(
         max_length=20,
         default='ACTIVE',
+        db_index=True,
         choices=[
             ('PENDING', 'Pending'),
             ('ACTIVE', 'Active'),
@@ -111,14 +112,24 @@ class User(AbstractUser):
 
     objects = UserManager()
 
+    class Meta(AbstractUser.Meta):
+        indexes = [
+            models.Index(fields=['role', 'is_active']),
+        ]
+
     def get_all_subordinates(self):
         """Returns a flat list of all downstream subordinate users under this user."""
         if is_company_user(self):
             return list(User.objects.exclude(id=self.id))
-        subordinates = list(self.children.all())
-        for sub in subordinates:
-            subordinates.extend(sub.get_all_subordinates())
-        return subordinates
+        result = []
+        current_level_ids = [self.id]
+        while current_level_ids:
+            next_level = list(User.objects.filter(parent_id__in=current_level_ids))
+            if not next_level:
+                break
+            result.extend(next_level)
+            current_level_ids = [u.id for u in next_level]
+        return result
 
     def __str__(self):
         return f"{self.username} ({self.get_role_display()})"
@@ -138,7 +149,7 @@ class AuditLog(models.Model):
     user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
     action = models.CharField(max_length=255)
     ip_address = models.GenericIPAddressField(null=True, blank=True)
-    timestamp = models.DateTimeField(auto_now_add=True)
+    timestamp = models.DateTimeField(auto_now_add=True, db_index=True)
     details = models.JSONField(null=True, blank=True)
 
     def __str__(self):
