@@ -121,9 +121,25 @@ class UserSerializer(serializers.ModelSerializer):
             }
         if instance.role != 'CUSTOMER':
             from keys.services import get_user_available_keys_breakdown
-            representation['available_keys'] = get_user_available_keys_breakdown(instance)
+            by_type = get_user_available_keys_breakdown(instance)
+            representation['available_keys'] = by_type
+            total_avail = by_type.get('total', 0) if isinstance(by_type, dict) else (by_type or 0)
+            representation['available_key_count'] = total_avail
+            representation['available_keys_count'] = total_avail
+            representation['total_available_keys'] = total_avail
+            representation['keys_available'] = total_avail
+            representation['key_count'] = total_avail
+            representation['total_keys'] = total_avail
+            representation['count'] = total_avail
         else:
             representation['available_keys'] = None
+            representation['available_key_count'] = 0
+            representation['available_keys_count'] = 0
+            representation['total_available_keys'] = 0
+            representation['keys_available'] = 0
+            representation['key_count'] = 0
+            representation['total_keys'] = 0
+            representation['count'] = 0
         return representation
 
 class SuperDistributorSerializer(serializers.ModelSerializer):
@@ -280,8 +296,24 @@ class SuperDistributorSerializer(serializers.ModelSerializer):
 
         if instance.role != 'CUSTOMER':
             representation['available_keys'] = get_user_available_keys_breakdown(instance)
+            by_type = representation['available_keys']
+            total_avail = by_type.get('total', 0) if isinstance(by_type, dict) else (by_type or 0)
+            representation['available_key_count'] = total_avail
+            representation['available_keys_count'] = total_avail
+            representation['total_available_keys'] = total_avail
+            representation['keys_available'] = total_avail
+            representation['key_count'] = total_avail
+            representation['total_keys'] = total_avail
+            representation['count'] = total_avail
         else:
             representation['available_keys'] = None
+            representation['available_key_count'] = 0
+            representation['available_keys_count'] = 0
+            representation['total_available_keys'] = 0
+            representation['keys_available'] = 0
+            representation['key_count'] = 0
+            representation['total_keys'] = 0
+            representation['count'] = 0
 
         # Key transaction totals
         keys_rec = KeyTransaction.objects.filter(to_user=instance).exclude(from_user=instance).count()

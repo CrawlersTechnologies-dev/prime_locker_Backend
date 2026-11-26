@@ -96,6 +96,13 @@ def get_service_balance_info(user, service_code):
         'available_balance': balance,
         'can_enroll': balance > 0,
         'message': None if balance > 0 else ZERO_KEY_MESSAGE,
+        'available_key_count': balance,
+        'available_keys_count': balance,
+        'total_available': balance,
+        'total_available_keys': balance,
+        'count': balance,
+        'key_count': balance,
+        'total_keys': balance,
     }
 
 
@@ -133,7 +140,17 @@ def get_user_available_keys_breakdown(user):
 
     return {
         'total': total_count,
+        'count': total_count,
+        'available_keys': total_count,
+        'available_key_count': total_count,
+        'available_keys_count': total_count,
+        'total_available_keys': total_count,
+        'total_keys': total_count,
+        'keys_available': total_count,
+        'key_count': total_count,
         'mdm_keys': mdm_count,
+        'android_keys': mdm_count,
+        'dpc_keys': mdm_count,
         'ios_keys': ios_count,
         'dlc_keys': dlc_count,
         'tv_keys': tv_count,

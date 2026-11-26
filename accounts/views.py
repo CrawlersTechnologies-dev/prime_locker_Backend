@@ -2168,6 +2168,11 @@ class DashboardView(APIView):
 
         key_inventory_kpis = {
             "available_keys": available_keys,
+            "available_key_count": available_keys,
+            "available_keys_count": available_keys,
+            "total_available_keys": available_keys,
+            "count": available_keys,
+            "key_count": available_keys,
             "activated_keys": activated_keys,
             "revoked_keys": revoked_keys,
             "dlc_keys_left": dlc_keys_left,
@@ -2229,8 +2234,22 @@ class DashboardView(APIView):
                 "name": user_name,
                 "username": user.username,
                 "role": user.role,
-                "business_name": user.business_name
+                "business_name": user.business_name,
+                "available_keys": available_keys,
+                "available_key_count": available_keys,
+                "available_keys_count": available_keys,
+                "total_available_keys": available_keys,
+                "keys_available": available_keys,
+                "key_count": available_keys,
+                "count": available_keys,
             },
+            "available_keys": available_keys,
+            "available_key_count": available_keys,
+            "available_keys_count": available_keys,
+            "total_available_keys": available_keys,
+            "keys_available": available_keys,
+            "key_count": available_keys,
+            "count": available_keys,
             "network_kpis": network_kpis,
             "device_and_emi_kpis": device_and_emi_kpis,
             "financial_kpis": financial_kpis,
@@ -2385,6 +2404,8 @@ class CurrentUserView(APIView):
         if user.logo:
             logo_url = request.build_absolute_uri(user.logo.url) if request else user.logo.url
 
+        total_avail = by_type.get('total', 0) if isinstance(by_type, dict) else (by_type or 0)
+
         return Response({
             "id": user.id,
             "username": user.username,
@@ -2409,6 +2430,13 @@ class CurrentUserView(APIView):
             "date_joined": user.date_joined,
             "parent": parent_data,
             "available_keys": by_type,
+            "available_key_count": total_avail,
+            "available_keys_count": total_avail,
+            "total_available_keys": total_avail,
+            "keys_available": total_avail,
+            "key_count": total_avail,
+            "keys_count": total_avail,
+            "total_keys": total_avail,
             "children_counts": children_counts,
             "permissions": {
                 "is_super_admin": user.role == 'SUPER_ADMIN',

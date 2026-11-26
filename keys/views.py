@@ -211,6 +211,12 @@ class KeyViewSet(viewsets.GenericViewSet, viewsets.mixins.ListModelMixin, viewse
             "ios_keys_left": ios_keys_left,
             "tv_keys_left": tv_keys_left,
             "total_keys_left": total_keys_left,
+            "available_key_count": total_keys_left,
+            "available_keys_count": total_keys_left,
+            "total_available_keys": total_keys_left,
+            "count": total_keys_left,
+            "key_count": total_keys_left,
+            "total_keys": total_keys_left,
             "available_keys": breakdown,
             "keys_left": {
                 "dlc_keys_left": dlc_keys_left,
@@ -235,7 +241,7 @@ class KeyViewSet(viewsets.GenericViewSet, viewsets.mixins.ListModelMixin, viewse
             or request.query_params.get('os_type')
             or request.query_params.get('mdm_type')
         )
-        if service_param:
+        if service_param and str(service_param).strip().upper() not in ('ALL', 'TOTAL', 'ANY', 'SUM'):
             code = resolve_service_code(service=service_param)
             return Response(get_service_balance_info(request.user, code))
 
@@ -248,8 +254,16 @@ class KeyViewSet(viewsets.GenericViewSet, viewsets.mixins.ListModelMixin, viewse
         return Response({
             'services': services,
             'total_available': total_available,
+            'available_key_count': total_available,
+            'available_keys_count': total_available,
+            'available_balance': total_available,
+            'count': total_available,
+            'key_count': total_available,
+            'total_keys': total_available,
             'available_keys': breakdown,
             'mdm_keys': breakdown.get('mdm_keys', 0),
+            'android_keys': breakdown.get('android_keys', 0),
+            'dpc_keys': breakdown.get('dpc_keys', 0),
             'ios_keys': breakdown.get('ios_keys', 0),
             'dlc_keys': breakdown.get('dlc_keys', 0),
             'tv_keys': breakdown.get('tv_keys', 0),
@@ -734,10 +748,20 @@ class KeyViewSet(viewsets.GenericViewSet, viewsets.mixins.ListModelMixin, viewse
         for item in grouped_list:
             qty = item["quantity"]
             first = item["first_key"]
+            item["count"] = qty
+            item["key_count"] = qty
+            item["total_keys"] = qty
+            item["total_count"] = qty
+            item["keys_count"] = qty
+            item["display_count"] = str(qty)
             if qty > 1:
-                item["key_string"] = f"{first} (+{qty - 1} more)"
+                item["key_string"] = f"{qty} Keys ({first} (+{qty - 1} more))"
+                item["display_key"] = f"{qty} Keys"
+                item["batch_summary"] = f"{qty} Keys"
             else:
                 item["key_string"] = first
+                item["display_key"] = first
+                item["batch_summary"] = "1 Key"
 
         if request.query_params.get('export') == 'csv':
             from reports.utils import generate_csv_response
