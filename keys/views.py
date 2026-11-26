@@ -797,9 +797,45 @@ class KeyRequestViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        qs = KeyRequest.objects.filter(
-            models.Q(requester=user) | models.Q(parent=user)
-        )
+        from accounts.models import is_company_user
+        if is_company_user(user):
+            qs = KeyRequest.objects.all().select_related('requester', 'parent')
+        else:
+            downline_ids = [u.id for u in user.get_all_subordinates()]
+            qs = KeyRequest.objects.filter(
+                models.Q(requester=user) |
+                models.Q(parent=user) |
+                models.Q(requester_id__in=downline_ids)
+            ).select_related('requester', 'parent')
+
+        status_param = self.request.query_params.get('status')
+        if status_param:
+            norm_status = status_param.strip().upper()
+            if norm_status in ('DECLINED', 'REJECTED'):
+                qs = qs.filter(status=KeyRequestStatus.REJECTED)
+            elif norm_status == 'APPROVED':
+                qs = qs.filter(status=KeyRequestStatus.APPROVED)
+            elif norm_status == 'PENDING':
+                qs = qs.filter(status=KeyRequestStatus.PENDING)
+            elif norm_status not in ('ALL', ''):
+                qs = qs.filter(status=norm_status)
+
+        device_type_param = self.request.query_params.get('device_type')
+        if device_type_param:
+            qs = qs.filter(device_type__iexact=device_type_param.strip())
+
+        os_type_param = self.request.query_params.get('os_type')
+        if os_type_param:
+            qs = qs.filter(os_type__iexact=os_type_param.strip())
+
+        requester_param = self.request.query_params.get('requester')
+        if requester_param:
+            qs = qs.filter(requester_id=requester_param)
+
+        parent_param = self.request.query_params.get('parent')
+        if parent_param:
+            qs = qs.filter(parent_id=parent_param)
+
         search = self.request.query_params.get('search')
         if search:
             qs = qs.filter(
@@ -810,12 +846,39 @@ class KeyRequestViewSet(viewsets.ModelViewSet):
                 models.Q(os_type__icontains=search) |
                 models.Q(notes__icontains=search)
             )
-        return qs.order_by('-created_at')
+
+        ordering = self.request.query_params.get('ordering', '-created_at')
+        if ordering:
+            qs = qs.order_by(ordering)
+        else:
+            qs = qs.order_by('-created_at')
+
+        return qs
+
+    @action(detail=False, methods=['get'])
+    def counts(self, request):
+        """Returns counts of pending, approved, and rejected/declined key requests."""
+        qs = self.get_queryset()
+        total = qs.count()
+        pending = qs.filter(status=KeyRequestStatus.PENDING).count()
+        approved = qs.filter(status=KeyRequestStatus.APPROVED).count()
+        rejected = qs.filter(status=KeyRequestStatus.REJECTED).count()
+        return Response({
+            "total": total,
+            "pending": pending,
+            "approved": approved,
+            "rejected": rejected,
+            "declined": rejected,
+        })
 
     def perform_create(self, serializer):
-        if not self.request.user.parent:
-            from rest_framework.exceptions import ValidationError
-            raise ValidationError({"detail": "You do not have a parent assigned to request keys from."})
+        parent = self.request.user.parent
+        if not parent:
+            from accounts.models import User
+            parent = User.objects.filter(role='SUPER_ADMIN', is_active=True).order_by('id').first()
+            if not parent:
+                from rest_framework.exceptions import ValidationError
+                raise ValidationError({"detail": "You do not have a parent assigned to request keys from."})
         
         from .services import resolve_service_code, SERVICE_META
         device_type = serializer.validated_data.get('device_type', '').upper()
@@ -828,7 +891,7 @@ class KeyRequestViewSet(viewsets.ModelViewSet):
             
         instance = serializer.save(
             requester=self.request.user,
-            parent=self.request.user.parent,
+            parent=parent,
             os_type=os_type,
             status=KeyRequestStatus.PENDING
         )
@@ -879,9 +942,12 @@ class KeyRequestViewSet(viewsets.ModelViewSet):
                 pass
             
         with transaction.atomic():
-            from .services import resolve_service_code, get_service_key_queryset, SERVICE_ALIASES
+            from .services import resolve_service_code, get_service_key_queryset, SERVICE_ALIASES, SERVICE_META
             requested_target = (key_req.os_type or key_req.device_type or '').upper()
             norm_target = requested_target.replace(' ', '_').replace('-', '_')
+
+            # 1. First look for available keys owned directly by request.user
+            available_keys = []
             if norm_target in SERVICE_ALIASES:
                 svc_code = resolve_service_code(service=requested_target)
                 available_keys = list(get_service_key_queryset(request.user, svc_code)[:approve_qty])
@@ -893,7 +959,69 @@ class KeyRequestViewSet(viewsets.ModelViewSet):
                         device_type__iexact=key_req.device_type,
                     )[:approve_qty]
                 )
-            
+
+            # 2. If request.user is a company staff / admin and needs more keys, draw from company pool
+            if len(available_keys) < approve_qty and is_company_user(request.user):
+                from accounts.models import User
+                company_user_ids = list(
+                    User.objects.filter(
+                        role__in=['SUPER_ADMIN', 'COMPANY_ADMIN', 'STAFF_OPERATOR']
+                    ).values_list('id', flat=True)
+                )
+                existing_key_ids = [k.id for k in available_keys]
+                needed = approve_qty - len(available_keys)
+
+                if norm_target in SERVICE_ALIASES:
+                    svc_code = resolve_service_code(service=requested_target)
+                    meta = SERVICE_META.get(svc_code, SERVICE_META['ANDROID_MDM'])
+                    extra_keys = list(
+                        DeviceKey.objects.filter(
+                            current_owner_id__in=company_user_ids,
+                            status=KeyStatus.AVAILABLE,
+                        ).exclude(id__in=existing_key_ids).filter(meta['filter'])[:needed]
+                    )
+                else:
+                    extra_keys = list(
+                        DeviceKey.objects.filter(
+                            current_owner_id__in=company_user_ids,
+                            status=KeyStatus.AVAILABLE,
+                            device_type__iexact=key_req.device_type,
+                        ).exclude(id__in=existing_key_ids)[:needed]
+                    )
+                available_keys.extend(extra_keys)
+
+            # 3. If still not enough and request.user is SUPER_ADMIN, auto-generate remaining keys
+            if len(available_keys) < approve_qty and request.user.role == 'SUPER_ADMIN':
+                needed = approve_qty - len(available_keys)
+                dev_type = key_req.device_type or 'ANDROID'
+                if norm_target in SERVICE_ALIASES:
+                    svc_code = resolve_service_code(service=requested_target)
+                    dev_type = SERVICE_META.get(svc_code, {}).get('device_type', dev_type)
+
+                prefix_map = {
+                    'ANDROID': 'AND',
+                    'IOS': 'IOS',
+                    'TV': 'TV',
+                    'DLC': 'DLC',
+                    'MOBILE': 'MOB'
+                }
+                prefix = prefix_map.get(dev_type.upper(), 'MOB')
+                new_keys = []
+                for _ in range(needed):
+                    for _attempt in range(10):
+                        k_str = f"{prefix}-{generate_random_string(8)}"
+                        if not DeviceKey.objects.filter(key_string=k_str).exists():
+                            break
+                    new_keys.append(DeviceKey(
+                        key_string=k_str,
+                        device_type=dev_type.upper(),
+                        current_owner=request.user,
+                        status=KeyStatus.AVAILABLE
+                    ))
+                DeviceKey.objects.bulk_create(new_keys)
+                created_keys = list(DeviceKey.objects.filter(key_string__in=[k.key_string for k in new_keys]))
+                available_keys.extend(created_keys)
+
             if len(available_keys) < approve_qty:
                 return Response({
                     "detail": f"You do not have enough {requested_target} keys available to fulfill this request. Available: {len(available_keys)}, Requested: {approve_qty}."
@@ -906,11 +1034,11 @@ class KeyRequestViewSet(viewsets.ModelViewSet):
             transactions = [
                 KeyTransaction(
                     batch_id=batch_id,
-                    key_id=k_id, 
+                    key_id=k.id, 
                     from_user=request.user, 
                     to_user=key_req.requester, 
                     action=KeyAction.ALLOCATED
-                ) for k_id in key_ids
+                ) for k in available_keys
             ]
             KeyTransaction.objects.bulk_create(transactions)
             
@@ -950,8 +1078,14 @@ class KeyRequestViewSet(viewsets.ModelViewSet):
         return Response({
             "message": f"Successfully approved {approve_qty} {requested_target} keys.",
             "transferred_keys": transferred_key_strings,
-            "approved_quantity": approve_qty
+            "approved_quantity": approve_qty,
+            "status": KeyRequestStatus.APPROVED
         })
+
+    @action(detail=True, methods=['post'], url_path='decline')
+    def decline(self, request, pk=None):
+        """Alias for reject to support Admin Panel 'Decline' action."""
+        return self.reject(request, pk=pk)
 
     @action(detail=True, methods=['post'])
     def reject(self, request, pk=None):
@@ -959,7 +1093,7 @@ class KeyRequestViewSet(viewsets.ModelViewSet):
         
         from accounts.models import is_company_user
         if key_req.parent != request.user and not is_company_user(request.user):
-            return Response({"detail": "You are not authorized to reject this request."}, status=status.HTTP_403_FORBIDDEN)
+            return Response({"detail": "You are not authorized to decline this request."}, status=status.HTTP_403_FORBIDDEN)
             
         if key_req.status != KeyRequestStatus.PENDING:
             return Response({"detail": f"Request is already {key_req.status}."}, status=status.HTTP_400_BAD_REQUEST)
@@ -977,8 +1111,8 @@ class KeyRequestViewSet(viewsets.ModelViewSet):
         send_system_notification(
             recipient=key_req.requester,
             sender=request.user,
-            title="Key Request Rejected",
-            message=f"Your key request for {key_req.quantity} {key_req.device_type} keys was rejected. Reason: {reason or 'Not specified'}",
+            title="Key Request Declined",
+            message=f"Your key request for {key_req.quantity} {key_req.device_type} keys was declined. Reason: {reason or 'Not specified'}",
             notification_type=NotificationType.KEY_REQUEST_REJECTED,
             reference_id=key_req.id
         )
@@ -995,4 +1129,8 @@ class KeyRequestViewSet(viewsets.ModelViewSet):
             }
         )
 
-        return Response({"message": "Request rejected.", "reason": reason})
+        return Response({
+            "message": "Request declined successfully.",
+            "reason": reason,
+            "status": KeyRequestStatus.REJECTED
+        })

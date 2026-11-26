@@ -2164,7 +2164,16 @@ class DashboardView(APIView):
             .annotate(count=Count('id'))
             .order_by('device_type', 'status')
         )
-        pending_requests = KeyRequest.objects.filter(parent=user, status=KeyRequestStatus.PENDING).count()
+        from accounts.models import is_company_user
+        if user.role == 'SUPER_ADMIN' or is_company_user(user):
+            pending_requests = KeyRequest.objects.filter(status=KeyRequestStatus.PENDING).count()
+            approved_requests = KeyRequest.objects.filter(status=KeyRequestStatus.APPROVED).count()
+            rejected_requests = KeyRequest.objects.filter(status=KeyRequestStatus.REJECTED).count()
+        else:
+            downline_ids = [u.id for u in downline_qs]
+            pending_requests = KeyRequest.objects.filter(Q(parent=user) | Q(requester_id__in=downline_ids), status=KeyRequestStatus.PENDING).count()
+            approved_requests = KeyRequest.objects.filter(Q(parent=user) | Q(requester_id__in=downline_ids), status=KeyRequestStatus.APPROVED).count()
+            rejected_requests = KeyRequest.objects.filter(Q(parent=user) | Q(requester_id__in=downline_ids), status=KeyRequestStatus.REJECTED).count()
 
         key_inventory_kpis = {
             "available_keys": available_keys,
@@ -2186,6 +2195,11 @@ class DashboardView(APIView):
                 "total_keys_left": dlc_keys_left + android_keys_left + ios_keys_left
             },
             "pending_key_requests_received": pending_requests,
+            "pending_key_requests": pending_requests,
+            "approved_key_requests": approved_requests,
+            "rejected_key_requests": rejected_requests,
+            "declined_key_requests": rejected_requests,
+            "total_key_requests": pending_requests + approved_requests + rejected_requests,
             "by_device_type": by_type
         }
 
@@ -2250,6 +2264,12 @@ class DashboardView(APIView):
             "keys_available": available_keys,
             "key_count": available_keys,
             "count": available_keys,
+            "pending_key_requests": pending_requests,
+            "pending_key_requests_received": pending_requests,
+            "approved_key_requests": approved_requests,
+            "rejected_key_requests": rejected_requests,
+            "declined_key_requests": rejected_requests,
+            "total_key_requests": pending_requests + approved_requests + rejected_requests,
             "network_kpis": network_kpis,
             "device_and_emi_kpis": device_and_emi_kpis,
             "financial_kpis": financial_kpis,

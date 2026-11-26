@@ -101,6 +101,20 @@ class KeyRequestSerializer(serializers.ModelSerializer):
     service = serializers.CharField(write_only=True, required=False, allow_blank=True)
     service_code = serializers.CharField(write_only=True, required=False, allow_blank=True)
     requester_details = serializers.SerializerMethodField(read_only=True)
+    parent_details = serializers.SerializerMethodField(read_only=True)
+    requester_name = serializers.SerializerMethodField(read_only=True)
+    requester_username = serializers.SerializerMethodField(read_only=True)
+    requester_role = serializers.SerializerMethodField(read_only=True)
+    requester_business_name = serializers.SerializerMethodField(read_only=True)
+    requester_mobile = serializers.SerializerMethodField(read_only=True)
+    parent_name = serializers.SerializerMethodField(read_only=True)
+    parent_username = serializers.SerializerMethodField(read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    is_pending = serializers.SerializerMethodField(read_only=True)
+    is_approved = serializers.SerializerMethodField(read_only=True)
+    is_rejected = serializers.SerializerMethodField(read_only=True)
+    is_declined = serializers.SerializerMethodField(read_only=True)
+    declined = serializers.SerializerMethodField(read_only=True)
     platform_display = serializers.SerializerMethodField(read_only=True)
     requester_key_balance = serializers.SerializerMethodField(read_only=True)
     requester_keys_used_this_month = serializers.SerializerMethodField(read_only=True)
@@ -128,8 +142,58 @@ class KeyRequestSerializer(serializers.ModelSerializer):
             "id": obj.requester.id,
             "name": f"{obj.requester.first_name} {obj.requester.last_name}".strip() or obj.requester.username,
             "role": obj.requester.role,
-            "business_name": obj.requester.business_name
+            "business_name": obj.requester.business_name,
+            "mobile_number": obj.requester.mobile_number,
         }
+
+    def get_parent_details(self, obj):
+        if not obj.parent:
+            return None
+        return {
+            "id": obj.parent.id,
+            "name": f"{obj.parent.first_name} {obj.parent.last_name}".strip() or obj.parent.username,
+            "role": obj.parent.role,
+            "business_name": obj.parent.business_name,
+            "mobile_number": obj.parent.mobile_number,
+        }
+
+    def get_requester_name(self, obj):
+        return f"{obj.requester.first_name} {obj.requester.last_name}".strip() or obj.requester.username
+
+    def get_requester_username(self, obj):
+        return obj.requester.username
+
+    def get_requester_role(self, obj):
+        return obj.requester.role
+
+    def get_requester_business_name(self, obj):
+        return obj.requester.business_name or ""
+
+    def get_requester_mobile(self, obj):
+        return obj.requester.mobile_number or ""
+
+    def get_parent_name(self, obj):
+        if not obj.parent:
+            return ""
+        return f"{obj.parent.first_name} {obj.parent.last_name}".strip() or obj.parent.username
+
+    def get_parent_username(self, obj):
+        return obj.parent.username if obj.parent else ""
+
+    def get_is_pending(self, obj):
+        return obj.status == 'PENDING'
+
+    def get_is_approved(self, obj):
+        return obj.status == 'APPROVED'
+
+    def get_is_rejected(self, obj):
+        return obj.status == 'REJECTED'
+
+    def get_is_declined(self, obj):
+        return obj.status == 'REJECTED'
+
+    def get_declined(self, obj):
+        return obj.status == 'REJECTED'
 
     def get_platform_display(self, obj):
         target = (obj.os_type or obj.device_type or '').upper()
