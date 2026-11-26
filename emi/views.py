@@ -266,6 +266,23 @@ class CustomerEMIContractViewSet(viewsets.ModelViewSet):
                     reason=reason or "Manual lock from EMI contract",
                     user=request.user
                 )
+            elif device.lock_provider == LockProvider.PARTNER_MDM:
+                from devices.services.partner_mdm_service import PartnerMDMService
+                PartnerMDMService.lock_device(
+                    device=device,
+                    reason=reason or "Manual lock from EMI contract",
+                    user=request.user
+                )
+            elif device.lock_provider == LockProvider.APPLE_MDM or getattr(device, 'os_type', None) == 'IOS':
+                from devices.services.apple_mdm import AppleMDMService
+                phone = getattr(device.retailer, 'mobile_number', '') if device.retailer else ''
+                AppleMDMService.take_action(
+                    device_reg_num=device.provider_device_id or device.serial_number or device.imei,
+                    action="LOCK",
+                    message=reason or device.lock_message or "Payment overdue. Please contact admin.",
+                    phone_number=phone,
+                    foot_note="Prime Locker Protection"
+                )
 
             send_system_notification(
                 recipient=contract.retailer,
@@ -348,6 +365,19 @@ class CustomerEMIContractViewSet(viewsets.ModelViewSet):
                     device=device,
                     reason=reason or "Manual unlock from EMI contract",
                     user=request.user
+                )
+            elif device.lock_provider == LockProvider.PARTNER_MDM:
+                from devices.services.partner_mdm_service import PartnerMDMService
+                PartnerMDMService.unlock_device(
+                    device=device,
+                    reason=reason or "Manual unlock from EMI contract",
+                    user=request.user
+                )
+            elif device.lock_provider == LockProvider.APPLE_MDM or getattr(device, 'os_type', None) == 'IOS':
+                from devices.services.apple_mdm import AppleMDMService
+                AppleMDMService.take_action(
+                    device_reg_num=device.provider_device_id or device.serial_number or device.imei,
+                    action="UNLOCK"
                 )
 
             send_system_notification(
@@ -773,6 +803,23 @@ class EMIInstallmentViewSet(viewsets.GenericViewSet):
                 from accounts.views import send_system_notification
                 from accounts.models import NotificationType
 
+                # Sync payment to Apple MDM if applicable
+                apple_dev = contract.target_lock_device or Device.objects.filter(emi_contract=contract).first() or Device.objects.filter(imei=contract.device_imei).first()
+                if apple_dev and (apple_dev.lock_provider == LockProvider.APPLE_MDM or getattr(apple_dev, 'os_type', None) == 'IOS'):
+                    apple_reg = apple_dev.provider_device_id or apple_dev.serial_number or apple_dev.imei
+                    if apple_reg:
+                        try:
+                            from devices.services.apple_mdm import AppleMDMService
+                            AppleMDMService.pay_emi(
+                                device_reg_num=apple_reg,
+                                amount=float(installment.paid_amount or installment.amount),
+                                payment_mode=str(installment.payment_mode or 'CASH'),
+                                transaction_reference=str(installment.transaction_ref or ''),
+                                remarks=f"Installment #{installment.installment_number} payment recorded in Prime Locker"
+                            )
+                        except Exception:
+                            pass
+
                 # Check if all installments are now paid
                 unpaid_count = contract.installments.exclude(status=InstallmentStatus.PAID).count()
                 overdue_count = contract.installments.filter(status=InstallmentStatus.OVERDUE).count()
@@ -783,7 +830,7 @@ class EMIInstallmentViewSet(viewsets.GenericViewSet):
 
                     # RP10: If all contracts secured by this lock_device are COMPLETED, unregister RocketPay key (RBI requirement)
                     target_dev = contract.target_lock_device or Device.objects.filter(emi_contract=contract).first() or Device.objects.filter(imei=contract.device_imei).first()
-                    if target_dev and target_dev.lock_provider in [LockProvider.ROCKETPAY, LockProvider.PARTNER_MDM]:
+                    if target_dev and (target_dev.lock_provider in [LockProvider.ROCKETPAY, LockProvider.PARTNER_MDM, LockProvider.APPLE_MDM] or getattr(target_dev, 'os_type', None) == 'IOS'):
                         other_active = CustomerEMIContract.objects.filter(
                             models.Q(lock_device=target_dev) | models.Q(device_imei=target_dev.imei)
                         ).exclude(id=contract.id).exclude(status=EMIContractStatus.COMPLETED).exists()
@@ -799,6 +846,9 @@ class EMIInstallmentViewSet(viewsets.GenericViewSet):
                                         RocketPayService.unregister_key(d)
                                     elif d.lock_provider == LockProvider.PARTNER_MDM:
                                         PartnerMDMService.remove_device(d)
+                                    elif d.lock_provider == LockProvider.APPLE_MDM or getattr(d, 'os_type', None) == 'IOS':
+                                        from devices.services.apple_mdm import AppleMDMService
+                                        AppleMDMService.uninstall_device(d.provider_device_id or d.serial_number or d.imei)
                             transaction.on_commit(_trigger_on_commit_unregister)
                 elif overdue_count == 0 and contract.status == EMIContractStatus.LOCKED:
                     contract.status = EMIContractStatus.ACTIVE
@@ -846,6 +896,12 @@ class EMIInstallmentViewSet(viewsets.GenericViewSet):
                                     device=dev,
                                     reason="EMI payment received - auto unlock",
                                     user=u
+                                )
+                            elif dev.lock_provider == LockProvider.APPLE_MDM or getattr(dev, 'os_type', None) == 'IOS':
+                                from devices.services.apple_mdm import AppleMDMService
+                                AppleMDMService.take_action(
+                                    device_reg_num=dev.provider_device_id or dev.serial_number or dev.imei,
+                                    action="UNLOCK"
                                 )
                             r = User.objects.filter(id=retailer_id).first()
                             c = User.objects.filter(id=customer_id).first()

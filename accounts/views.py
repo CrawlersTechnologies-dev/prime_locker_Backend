@@ -1300,6 +1300,23 @@ class CustomerViewSet(BaseRoleViewSet):
                 device.provider_status = 'PENDING'
                 device.save(update_fields=['provider_device_id', 'provider_status'])
 
+                if device_reg_num and (data.get('monthly_emi') or data.get('number_of_emi') or data.get('emi_months') or data.get('tenure')):
+                    try:
+                        AppleMDMService.add_emi_details(
+                            device_reg_num=device_reg_num,
+                            loan_no=loan_account_number or f"LOAN-{device.id}",
+                            finance_type_bank=loan_provider or "Prime Locker",
+                            product_price=float(data.get('product_price') or data.get('device_price') or data.get('price') or 15000),
+                            down_payment=float(data.get('down_payment', 0)),
+                            balance_amount=float(data.get('balance_amount') or (float(data.get('product_price') or data.get('device_price') or 15000) - float(data.get('down_payment', 0)))),
+                            tenure=int(data.get('tenure') or data.get('number_of_emi') or data.get('emi_months') or 6),
+                            per_month_emi=float(data.get('monthly_emi', 2000)),
+                            due_date=str(data.get('first_emi_date') or timezone.localdate()),
+                            tenure_type="MONTHLY"
+                        )
+                    except Exception as exc:
+                        logger.warning(f"Failed to push initial Apple MDM EMI details: {exc}")
+
             # Activate Key if present
             if key_obj:
                 key_obj.status = KeyStatus.ACTIVATED

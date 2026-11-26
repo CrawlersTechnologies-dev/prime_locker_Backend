@@ -1878,11 +1878,12 @@ class DeviceViewSet(viewsets.ModelViewSet):
             foot_note=foot_note
         )
 
-        if action_name == 'LOCK':
-            device.status = DeviceLockStatus.LOCKED
-        elif action_name == 'UNLOCK':
-            device.status = DeviceLockStatus.ACTIVE
-        device.save(update_fields=['status'])
+        if res.get('error') == 0:
+            if action_name == 'LOCK':
+                device.status = DeviceLockStatus.LOCKED
+            elif action_name == 'UNLOCK':
+                device.status = DeviceLockStatus.ACTIVE
+            device.save(update_fields=['status'])
 
         return Response(res, status=status.HTTP_200_OK if res.get('error') == 0 else status.HTTP_400_BAD_REQUEST)
 
@@ -1975,6 +1976,110 @@ class DeviceViewSet(viewsets.ModelViewSet):
             device.wallpaper_locked = True
             device.save(update_fields=['wallpaper_locked'])
         return Response(res, status=status.HTTP_200_OK if res.get('error') == 0 else status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['post'], url_path='apple-sync-customer')
+    def apple_sync_customer(self, request, pk=None):
+        """
+        POST /api/devices/{id}/apple-sync-customer/
+        Syncs local customer records and EMI contract details to Loksiz Apple MDM server.
+        If device is not yet registered on Loksiz (e.g. was pending Apple Configurator),
+        it calls add_device. If already registered, it calls update_device and add_emi_details.
+        """
+        denied = self._block_customer(request)
+        if denied:
+            return denied
+        device = self.get_object()
+
+        from .services.apple_mdm import AppleMDMService
+        from emi.models import CustomerEMIContract
+
+        customer = device.customer
+        cust_name = getattr(customer, 'get_full_name', lambda: '')() or (customer.first_name if customer else '') or (customer.username if customer else '')
+        cust_phone = getattr(customer, 'mobile_number', '') if customer else ''
+        cust_email = getattr(customer, 'email', '') if customer else ''
+
+        clean_imei = (device.imei or '').strip()
+        clean_sn = (device.serial_number or '').strip()
+
+        if not clean_imei and not clean_sn:
+            return Response(
+                {"error": 1, "msg": "Device must have an IMEI or Serial Number to sync with Apple MDM."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        sync_results = {}
+
+        # 1. Register or Update Device & Customer Info on Loksiz
+        if device.provider_device_id:
+            update_res = AppleMDMService.update_device(
+                device_reg_num=device.provider_device_id,
+                customer_name=cust_name,
+                customer_mobile=cust_phone,
+                customer_email=cust_email,
+                imei=clean_imei,
+                serial_number=clean_sn
+            )
+            sync_results['device_sync'] = update_res
+            if update_res.get('error') != 0:
+                add_res = AppleMDMService.add_device(
+                    imei=clean_imei,
+                    serial_number=clean_sn or clean_imei,
+                    customer_name=cust_name,
+                    customer_mobile=cust_phone,
+                    customer_email=cust_email,
+                    imei2=device.secondary_imei
+                )
+                sync_results['device_sync'] = add_res
+                if add_res.get('error') == 0:
+                    device_reg = (add_res.get('data') or {}).get('deviceRegNum') or ''
+                    if device_reg:
+                        device.provider_device_id = str(device_reg)
+                        device.lock_provider = LockProvider.APPLE_MDM
+                        device.os_type = OSType.IOS
+                        device.save(update_fields=['provider_device_id', 'lock_provider', 'os_type'])
+        else:
+            add_res = AppleMDMService.add_device(
+                imei=clean_imei,
+                serial_number=clean_sn or clean_imei,
+                customer_name=cust_name,
+                customer_mobile=cust_phone,
+                customer_email=cust_email,
+                imei2=device.secondary_imei
+            )
+            sync_results['device_sync'] = add_res
+            if add_res.get('error') == 0:
+                device_reg = (add_res.get('data') or {}).get('deviceRegNum') or ''
+                if device_reg:
+                    device.provider_device_id = str(device_reg)
+                    device.lock_provider = LockProvider.APPLE_MDM
+                    device.os_type = OSType.IOS
+                    device.save(update_fields=['provider_device_id', 'lock_provider', 'os_type'])
+
+        # 2. Sync EMI details if contract exists
+        contract = getattr(device, 'emi_contract', None) or CustomerEMIContract.objects.filter(device_imei=device.imei).first()
+        dev_reg = device.provider_device_id
+        if contract and dev_reg:
+            emi_res = AppleMDMService.add_emi_details(
+                device_reg_num=dev_reg,
+                loan_no=contract.loan_account_number or f"LOAN-{contract.id}",
+                finance_type_bank=contract.loan_provider or "Prime Locker",
+                product_price=float(contract.product_price or contract.financed_amount),
+                down_payment=float(contract.down_payment or 0),
+                balance_amount=float(contract.financed_amount),
+                tenure=int(contract.tenure_months),
+                per_month_emi=float(contract.monthly_emi_amount),
+                due_date=str(contract.first_emi_date),
+                tenure_type="MONTHLY"
+            )
+            sync_results['emi_sync'] = emi_res
+
+        has_error = sync_results.get('device_sync', {}).get('error', 0) != 0
+        return Response({
+            "message": "Apple MDM sync executed successfully." if not has_error else "Apple MDM sync encountered errors.",
+            "device_id": device.id,
+            "provider_device_id": device.provider_device_id,
+            "results": sync_results
+        }, status=status.HTTP_400_BAD_REQUEST if has_error else status.HTTP_200_OK)
 
 
 

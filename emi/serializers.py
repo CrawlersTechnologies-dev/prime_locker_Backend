@@ -265,11 +265,32 @@ class CustomerEMIContractSerializer(serializers.ModelSerializer):
             )
         EMIInstallment.objects.bulk_create(installments)
 
-        from devices.models import Device
+        from devices.models import Device, LockProvider
         device = Device.objects.filter(imei=contract.device_imei).first()
         if device:
             device.emi_contract = contract
             device.save(update_fields=['emi_contract'])
+
+            # Automatically forward EMI loan schedule details to Apple MDM if applicable
+            if device.lock_provider == LockProvider.APPLE_MDM or getattr(device, 'os_type', None) == 'IOS':
+                dev_reg = device.provider_device_id or device.serial_number or device.imei
+                if dev_reg:
+                    try:
+                        from devices.services.apple_mdm import AppleMDMService
+                        AppleMDMService.add_emi_details(
+                            device_reg_num=dev_reg,
+                            loan_no=contract.loan_account_number or f"LOAN-{contract.id}",
+                            finance_type_bank=contract.loan_provider or "Prime Locker",
+                            product_price=float(contract.product_price or contract.financed_amount),
+                            down_payment=float(contract.down_payment or 0),
+                            balance_amount=float(contract.financed_amount),
+                            tenure=int(contract.tenure_months),
+                            per_month_emi=float(contract.monthly_emi_amount),
+                            due_date=str(contract.first_emi_date),
+                            tenure_type="MONTHLY"
+                        )
+                    except Exception:
+                        pass
 
         return contract
 

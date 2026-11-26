@@ -291,7 +291,7 @@ class CashfreeService:
                 from devices.models import LockProvider
                 from django.db.models import Q
                 target_dev = contract.target_lock_device or Device.objects.filter(emi_contract=contract).first() or Device.objects.filter(imei=contract.device_imei).first()
-                if target_dev and target_dev.lock_provider in [LockProvider.ROCKETPAY, LockProvider.PARTNER_MDM]:
+                if target_dev and (target_dev.lock_provider in [LockProvider.ROCKETPAY, LockProvider.PARTNER_MDM, LockProvider.APPLE_MDM] or getattr(target_dev, 'os_type', None) == 'IOS'):
                     other_active = CustomerEMIContract.objects.filter(
                         Q(lock_device=target_dev) | Q(device_imei=target_dev.imei)
                     ).exclude(id=contract.id).exclude(status=EMIContractStatus.COMPLETED).exists()
@@ -307,6 +307,9 @@ class CashfreeService:
                                     RocketPayService.unregister_key(d)
                                 elif d.lock_provider == LockProvider.PARTNER_MDM:
                                     PartnerMDMService.remove_device(d)
+                                elif d.lock_provider == LockProvider.APPLE_MDM or getattr(d, 'os_type', None) == 'IOS':
+                                    from devices.services.apple_mdm import AppleMDMService
+                                    AppleMDMService.uninstall_device(d.provider_device_id or d.serial_number or d.imei)
                         transaction.on_commit(_trigger_on_commit_unregister)
             elif overdue_count == 0 and contract.status == EMIContractStatus.LOCKED:
                 contract.status = EMIContractStatus.ACTIVE
@@ -358,6 +361,12 @@ class CashfreeService:
                                 device=dev,
                                 reason="Cashfree payment captured - auto unlock",
                                 user=u
+                            )
+                        elif dev.lock_provider == LockProvider.APPLE_MDM or getattr(dev, 'os_type', None) == 'IOS':
+                            from devices.services.apple_mdm import AppleMDMService
+                            AppleMDMService.take_action(
+                                device_reg_num=dev.provider_device_id or dev.serial_number or dev.imei,
+                                action="UNLOCK"
                             )
                         r = User.objects.filter(id=ret_id).first()
                         c = User.objects.filter(id=cust_id).first()

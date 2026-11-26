@@ -69,11 +69,27 @@ class Command(BaseCommand):
                         parameters={"reason": f"Auto-lock: EMI overdue past {grace_period} days grace period"}
                     )
 
-                    # If RocketPay DLC controlled, invoke RocketPay OEM lock
+                    # Remote OEM lock invocation
                     if device.lock_provider == LockProvider.ROCKETPAY:
                         RocketPayService.lock_device(
                             device=device,
                             reason=f"EMI installment overdue past {grace_period} days grace period"
+                        )
+                    elif device.lock_provider == LockProvider.PARTNER_MDM:
+                        from devices.services.partner_mdm_service import PartnerMDMService
+                        PartnerMDMService.lock_device(
+                            device=device,
+                            reason=f"EMI installment overdue past {grace_period} days grace period"
+                        )
+                    elif device.lock_provider == LockProvider.APPLE_MDM or getattr(device, 'os_type', None) == 'IOS':
+                        from devices.services.apple_mdm import AppleMDMService
+                        phone = getattr(contract.retailer, 'mobile_number', '') if contract.retailer else ''
+                        AppleMDMService.take_action(
+                            device_reg_num=device.provider_device_id or device.serial_number or device.imei,
+                            action="LOCK",
+                            message=device.lock_message or "Payment overdue. Please contact admin.",
+                            phone_number=phone,
+                            foot_note="Prime Locker Protection"
                         )
 
                     # Send in-app notification to retailer and customer

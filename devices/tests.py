@@ -1387,3 +1387,76 @@ class AppleMDMBackendTests(TestCase):
         self.assertAlmostEqual(float(self.apple_device.current_latitude), 28.6139, places=4)
         self.assertAlmostEqual(float(self.apple_device.current_longitude), 77.2090, places=4)
 
+    @patch('devices.services.apple_mdm.AppleMDMService.update_device')
+    @patch('devices.services.apple_mdm.AppleMDMService.add_emi_details')
+    def test_apple_sync_customer_and_emi(self, mock_add_emi, mock_update):
+        from emi.models import CustomerEMIContract, EMIContractStatus
+        mock_update.return_value = {"error": 0, "msg": "Device updated"}
+        mock_add_emi.return_value = {"error": 0, "msg": "EMI details added"}
+
+        contract = CustomerEMIContract.objects.create(
+            customer=self.customer,
+            retailer=self.retailer,
+            device_imei=self.apple_device.imei,
+            lock_device=self.apple_device,
+            total_amount=Decimal('15000.00'),
+            tenure_months=6,
+            monthly_emi_amount=Decimal('2500.00'),
+            financed_amount=Decimal('15000.00'),
+            first_emi_date=timezone.localdate(),
+            status=EMIContractStatus.ACTIVE
+        )
+        self.apple_device.emi_contract = contract
+        self.apple_device.save()
+
+        resp = self.client.post(f'/api/devices/{self.apple_device.id}/apple-sync-customer/')
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertIn('device_sync', resp.data['results'])
+        self.assertIn('emi_sync', resp.data['results'])
+        mock_update.assert_called_once()
+        mock_add_emi.assert_called_once()
+
+    @patch('devices.services.apple_mdm.AppleMDMService.take_action')
+    def test_emi_contract_lock_unlock_delegates_to_apple_mdm(self, mock_act):
+        from emi.models import CustomerEMIContract, EMIContractStatus
+        mock_act.return_value = {"error": 0, "msg": "Action LOCK performed"}
+
+        contract = CustomerEMIContract.objects.create(
+            customer=self.customer,
+            retailer=self.retailer,
+            device_imei=self.apple_device.imei,
+            lock_device=self.apple_device,
+            total_amount=Decimal('15000.00'),
+            tenure_months=6,
+            monthly_emi_amount=Decimal('2500.00'),
+            financed_amount=Decimal('15000.00'),
+            first_emi_date=timezone.localdate(),
+            status=EMIContractStatus.ACTIVE
+        )
+        self.apple_device.emi_contract = contract
+        self.apple_device.save()
+
+        # Lock from EMI contract
+        resp_lock = self.client.post(f'/api/emi-contracts/{contract.id}/lock/', {"reason": "Overdue payment"})
+        self.assertEqual(resp_lock.status_code, status.HTTP_200_OK)
+        self.apple_device.refresh_from_db()
+        self.assertEqual(self.apple_device.status, DeviceLockStatus.LOCKED)
+        mock_act.assert_called_with(
+            device_reg_num='1726567890123',
+            action='LOCK',
+            message='Overdue payment',
+            phone_number='+919876543210',
+            foot_note='Prime Locker Protection'
+        )
+
+        # Unlock from EMI contract
+        mock_act.return_value = {"error": 0, "msg": "Action UNLOCK performed"}
+        resp_unlock = self.client.post(f'/api/emi-contracts/{contract.id}/unlock/', {"reason": "Payment received"})
+        self.assertEqual(resp_unlock.status_code, status.HTTP_200_OK)
+        self.apple_device.refresh_from_db()
+        self.assertEqual(self.apple_device.status, DeviceLockStatus.ACTIVE)
+        mock_act.assert_called_with(
+            device_reg_num='1726567890123',
+            action='UNLOCK'
+        )
+
