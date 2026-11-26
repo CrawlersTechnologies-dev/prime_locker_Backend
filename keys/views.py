@@ -453,6 +453,7 @@ class KeyViewSet(viewsets.GenericViewSet, viewsets.mixins.ListModelMixin, viewse
                 }
             )
 
+            transferred_key_strings = [k.key_string for k in available_keys]
             return Response({
                 "message": f"Successfully allocated {quantity} {device_type} keys to {target_name} ({target_user.role}).",
                 "recipient": {
@@ -461,6 +462,11 @@ class KeyViewSet(viewsets.GenericViewSet, viewsets.mixins.ListModelMixin, viewse
                     "role": target_user.role,
                     "business_name": target_user.business_name
                 },
+                "device_type": device_type,
+                "quantity": quantity,
+                "batch_id": str(batch_id),
+                "transferred_keys": transferred_key_strings,
+                "first_key": transferred_key_strings[0] if transferred_key_strings else "",
                 "your_remaining_available_keys": remaining_count
             })
             

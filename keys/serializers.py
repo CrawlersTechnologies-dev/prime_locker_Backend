@@ -87,9 +87,21 @@ class GenerateKeysSerializer(serializers.Serializer):
 class TransferKeysSerializer(serializers.Serializer):
     target_role = serializers.CharField(max_length=50, required=False, allow_blank=True)
     target_user_id = serializers.IntegerField(required=True)
-    device_type = serializers.CharField(max_length=50, required=True)
+    device_type = serializers.CharField(max_length=50, required=False, allow_blank=True)
+    service = serializers.CharField(max_length=50, required=False, allow_blank=True)
+    service_code = serializers.CharField(max_length=50, required=False, allow_blank=True)
     quantity = serializers.IntegerField(min_value=1, max_value=10000, required=True)
     reference_note = serializers.CharField(required=False, allow_blank=True, default='')
+
+    def validate(self, attrs):
+        dev = attrs.get('device_type') or attrs.get('service') or attrs.get('service_code')
+        if not dev:
+            raise serializers.ValidationError({"device_type": "Please specify device_type or service to transfer."})
+        from keys.services import resolve_service_code
+        svc_code = resolve_service_code(service=dev)
+        attrs['service_code'] = svc_code
+        attrs['device_type'] = dev.upper()
+        return attrs
 
 class ActivateKeySerializer(serializers.Serializer):
     key_string = serializers.CharField(required=True)
