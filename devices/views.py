@@ -2448,10 +2448,16 @@ class DeviceHeartbeatView(APIView):
             device.offline_unlock_code = generate_offline_code()
             device.save(update_fields=['offline_unlock_code'])
 
+        from accounts.models import PlatformSettings
+        ps = PlatformSettings.get_settings()
+
         return Response({
             "imei": device.imei,
             "status": device.status,
             "lock_message": device.lock_message,
+            "support_phone": ps.support_phone,
+            "support_phones": ps.support_phones,
+            "support_phones_list": ps.get_support_phones_list(),
             "offline_unlock_code": device.offline_unlock_code,
             "code": device.offline_unlock_code,
             "unlock_code": device.offline_unlock_code,

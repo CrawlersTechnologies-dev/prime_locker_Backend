@@ -209,6 +209,11 @@ class Notification(models.Model):
 class PlatformSettings(models.Model):
     company_name = models.CharField(max_length=255, default='Prime Locker')
     support_phone = models.CharField(max_length=50, default='+91 8000-111-222')
+    support_phones = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="List of multiple support contact numbers or structured contact objects"
+    )
     support_email = models.CharField(max_length=100, default='support@primelocker.pro')
     company_address = models.TextField(default='100 MG Road, Bengaluru, Karnataka 560001')
     gstin = models.CharField(max_length=50, null=True, blank=True, default='29AAAAA0000A1Z5')
@@ -255,7 +260,56 @@ class PlatformSettings(models.Model):
     @classmethod
     def get_settings(cls):
         obj, _ = cls.objects.get_or_create(id=1)
+        if not obj.support_phones and obj.support_phone:
+            obj.clean_and_sync_support_phones()
+            obj.save(update_fields=['support_phones', 'support_phone'])
         return obj
+
+    def get_support_phones_list(self):
+        """Returns a flat list of support phone number strings"""
+        numbers = []
+        if isinstance(self.support_phones, list):
+            for item in self.support_phones:
+                if isinstance(item, dict):
+                    num = item.get('number') or item.get('phone')
+                    if num and str(num).strip():
+                        numbers.append(str(num).strip())
+                elif isinstance(item, str) and item.strip():
+                    numbers.append(item.strip())
+        if self.support_phone and self.support_phone.strip() not in numbers:
+            numbers.insert(0, self.support_phone.strip())
+        return numbers
+
+    def clean_and_sync_support_phones(self):
+        """Ensures support_phone and support_phones remain consistent"""
+        if not self.support_phones and self.support_phone:
+            if ',' in self.support_phone:
+                parts = [p.strip() for p in self.support_phone.split(',') if p.strip()]
+                self.support_phones = [
+                    {"number": p, "label": f"Support Line {i+1}", "is_primary": (i == 0), "type": "CALL"}
+                    for i, p in enumerate(parts)
+                ]
+                self.support_phone = parts[0]
+            else:
+                self.support_phones = [
+                    {"number": self.support_phone.strip(), "label": "Primary Support", "is_primary": True, "type": "CALL"}
+                ]
+        elif self.support_phones:
+            first_num = None
+            if isinstance(self.support_phones, list):
+                for item in self.support_phones:
+                    if isinstance(item, dict) and item.get('is_primary') and (item.get('number') or item.get('phone')):
+                        first_num = item.get('number') or item.get('phone')
+                        break
+                if not first_num and len(self.support_phones) > 0:
+                    first_item = self.support_phones[0]
+                    first_num = (first_item.get('number') or first_item.get('phone')) if isinstance(first_item, dict) else str(first_item)
+            if first_num:
+                self.support_phone = str(first_num).strip()
+
+    def save(self, *args, **kwargs):
+        self.clean_and_sync_support_phones()
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.company_name} Settings"

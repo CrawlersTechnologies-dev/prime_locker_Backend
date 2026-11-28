@@ -915,18 +915,87 @@ class NotificationSerializer(serializers.ModelSerializer):
 
 
 class PlatformSettingsSerializer(serializers.ModelSerializer):
+    support_phones_list = serializers.SerializerMethodField()
+
     class Meta:
         model = PlatformSettings
         fields = '__all__'
 
+    def get_support_phones_list(self, obj):
+        return obj.get_support_phones_list()
+
+    def validate_support_phones(self, value):
+        if not value:
+            return []
+        if isinstance(value, str):
+            parts = [p.strip() for p in value.split(',') if p.strip()]
+            return [
+                {"number": p, "label": f"Support Line {i+1}", "is_primary": (i == 0), "type": "CALL"}
+                for i, p in enumerate(parts)
+            ]
+        if isinstance(value, list):
+            cleaned = []
+            for i, item in enumerate(value):
+                if isinstance(item, str) and item.strip():
+                    cleaned.append({
+                        "number": item.strip(),
+                        "label": f"Support Line {i+1}",
+                        "is_primary": (i == 0),
+                        "type": "CALL"
+                    })
+                elif isinstance(item, dict):
+                    num = str(item.get('number') or item.get('phone') or "").strip()
+                    if num:
+                        cleaned.append({
+                            "number": num,
+                            "label": str(item.get('label') or f"Support Line {i+1}").strip(),
+                            "is_primary": bool(item.get('is_primary', i == 0)),
+                            "type": str(item.get('type') or "CALL").upper().strip()
+                        })
+            return cleaned
+        raise serializers.ValidationError("support_phones must be a list of phone numbers or contact objects.")
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        # Handle comma-separated string in legacy support_phone field
+        legacy_phone = attrs.get('support_phone')
+        if legacy_phone and ',' in legacy_phone and 'support_phones' not in attrs:
+            parts = [p.strip() for p in legacy_phone.split(',') if p.strip()]
+            attrs['support_phones'] = [
+                {"number": p, "label": f"Support Line {i+1}", "is_primary": (i == 0), "type": "CALL"}
+                for i, p in enumerate(parts)
+            ]
+            attrs['support_phone'] = parts[0]
+        elif 'support_phones' in attrs and attrs['support_phones'] and 'support_phone' not in attrs:
+            first_num = None
+            for it in attrs['support_phones']:
+                if it.get('is_primary'):
+                    first_num = it.get('number')
+                    break
+            if not first_num:
+                first_num = attrs['support_phones'][0].get('number')
+            if first_num:
+                attrs['support_phone'] = first_num
+        return attrs
+
     def to_representation(self, instance):
         representation = super().to_representation(instance)
         request = self.context.get('request')
-        is_super_admin = request and request.user and request.user.role == 'SUPER_ADMIN'
+        is_super_admin = request and request.user and getattr(request.user, 'role', None) == 'SUPER_ADMIN'
         if not is_super_admin:
             representation.pop('razorpay_key_secret', None)
             representation.pop('whatsapp_api_key', None)
+            representation.pop('rocketpay_webhook_secret', None)
         return representation
+
+
+class SupportContactSerializer(serializers.Serializer):
+    company_name = serializers.CharField()
+    support_phone = serializers.CharField()
+    support_phones = serializers.ListField()
+    support_phones_list = serializers.ListField()
+    support_email = serializers.CharField()
+    company_address = serializers.CharField()
 
 
 class StaffUserSerializer(serializers.ModelSerializer):

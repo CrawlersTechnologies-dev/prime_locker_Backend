@@ -1777,5 +1777,81 @@ class AdminResetPartnerPasswordTests(TestCase):
         self.assertTrue(self.retailer.check_password('MobileReset@123'))
 
 
+class PlatformSettingsSupportPhoneTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.admin = User.objects.create_user(
+            username='super_admin_support',
+            email='admin_support@test.com',
+            password='Password@123',
+            role=Role.SUPER_ADMIN
+        )
+        self.retailer = User.objects.create_user(
+            username='retailer_support',
+            email='retailer_support@test.com',
+            password='Password@123',
+            role=Role.RETAILER
+        )
+        self.client.force_authenticate(user=self.admin)
+
+    def test_multi_support_phones_patch_and_get(self):
+        """Admin can configure more than one support phone number with labels and types"""
+        payload = {
+            "company_name": "Prime Locker Pro",
+            "support_phones": [
+                {"number": "+91 8000-111-222", "label": "Toll Free Support", "is_primary": True, "type": "CALL"},
+                {"number": "+91 9999-888-777", "label": "WhatsApp Help Desk", "is_primary": False, "type": "WHATSAPP"},
+                {"number": "+91 8000-111-333", "label": "Finance & EMI Desk", "is_primary": False, "type": "CALL"}
+            ],
+            "support_email": "help@primelocker.pro"
+        }
+        res = self.client.patch('/api/settings/', payload, format='json')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(res.data['support_phones']), 3)
+        self.assertEqual(res.data['support_phone'], '+91 8000-111-222')
+        self.assertIn('+91 9999-888-777', res.data['support_phones_list'])
+
+        # GET /api/settings/ verifies persistence
+        get_res = self.client.get('/api/settings/')
+        self.assertEqual(get_res.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(get_res.data['support_phones']), 3)
+        self.assertEqual(get_res.data['support_phone'], '+91 8000-111-222')
+
+    def test_support_phones_simple_string_list_and_comma_separation(self):
+        """Supports simple list of strings and legacy comma-separated string"""
+        # 1. Simple list of strings
+        res1 = self.client.patch('/api/settings/', {
+            "support_phones": ["+91 9000-000-001", "+91 9000-000-002"]
+        }, format='json')
+        self.assertEqual(res1.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(res1.data['support_phones']), 2)
+        self.assertEqual(res1.data['support_phone'], '+91 9000-000-001')
+
+        # 2. Legacy comma-separated string in support_phone
+        res2 = self.client.patch('/api/settings/', {
+            "support_phone": "+91 9111-111-111, +91 9222-222-222"
+        }, format='json')
+        self.assertEqual(res2.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(res2.data['support_phones']), 2)
+        self.assertEqual(res2.data['support_phone'], '+91 9111-111-111')
+
+    def test_public_support_contacts_view(self):
+        """Unauthenticated clients (customer app, lock screen) can fetch support contacts"""
+        unauth_client = APIClient()
+        ps = PlatformSettings.get_settings()
+        ps.support_phones = [
+            {"number": "+91 8000-111-222", "label": "Helpline 1"},
+            {"number": "+91 8000-111-333", "label": "Helpline 2"}
+        ]
+        ps.save()
+
+        res = unauth_client.get('/api/support-contacts/')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(res.data['support_phones']), 2)
+        self.assertIn('+91 8000-111-222', res.data['support_phones_list'])
+        self.assertIn('+91 8000-111-333', res.data['support_phones_list'])
+
+
+
 
 

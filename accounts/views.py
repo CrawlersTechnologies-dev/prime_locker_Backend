@@ -2830,6 +2830,27 @@ class PlatformSettingsView(APIView):
         return self.patch(request)
 
 
+class SupportContactsView(APIView):
+    """
+    Public / customer / retailer endpoint: GET /api/support-contacts/
+    Returns company support contacts including primary helpline, multiple support numbers, and email.
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        from .models import PlatformSettings
+        settings_obj = PlatformSettings.get_settings()
+        return Response({
+            "company_name": settings_obj.company_name,
+            "primary_support_phone": settings_obj.support_phone,
+            "support_phone": settings_obj.support_phone,
+            "support_phones": settings_obj.support_phones,
+            "support_phones_list": settings_obj.get_support_phones_list(),
+            "support_email": settings_obj.support_email,
+            "company_address": settings_obj.company_address
+        })
+
+
 class StaffViewSet(viewsets.ModelViewSet):
     """
     Super Admin only: Manage internal company staff roles (Operations, Collections, Support, Viewer).

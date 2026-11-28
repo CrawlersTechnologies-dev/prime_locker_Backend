@@ -670,6 +670,9 @@ class PartnerMDMBackendTests(TestCase):
         }
         resp = client.post('/api/devices/ping/', ping_payload, format='json')
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertIn('support_phone', resp.data)
+        self.assertIn('support_phones', resp.data)
+        self.assertIn('support_phones_list', resp.data)
         self.pm_device.refresh_from_db()
         self.assertEqual(self.pm_device.sim_operator, "Airtel 5G")
         self.assertEqual(self.pm_device.sim_number, "+919876543210")
