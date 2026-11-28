@@ -10,7 +10,8 @@ from .views import (
     AppleMDMWebhookView,
     ApprovedDeviceTACViewSet,
     InstallationVideoViewSet,
-    RetailerEnrollmentQRsView
+    RetailerEnrollmentQRsView,
+    VerifyOfflineCodeView
 )
 
 router = DefaultRouter()
@@ -26,6 +27,7 @@ urlpatterns = [
     path('devices/ping/', DeviceHeartbeatView.as_view(), name='device-heartbeat'),
     path('devices/check-in/', DeviceHeartbeatView.as_view(), name='device-checkin-alias'),
     path('devices/heartbeat/', DeviceHeartbeatView.as_view(), name='device-heartbeat-alias'),
+    path('devices/verify-offline-code/', VerifyOfflineCodeView.as_view(), name='device-verify-offline-code-direct'),
     path('devices/rocketpay/webhook/', RocketPayWebhookView.as_view(), name='rocketpay-webhook-alias'),
     path('integrations/rocketpay/webhook/', RocketPayWebhookView.as_view(), name='rocketpay-webhook'),
     path('devices/apple-mdm/webhook/', AppleMDMWebhookView.as_view(), name='apple-mdm-webhook-alias'),

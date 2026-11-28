@@ -332,6 +332,82 @@ class DevicesBackendTests(TestCase):
         self.assertEqual(resp3.status_code, status.HTTP_200_OK)
         self.assertEqual(resp3.data['offline_unlock_code'], '789012')
 
+    def test_offline_unlock_code_enhanced_flow(self):
+        """Tests offline unlock code fields, verification, and master code"""
+        dev = Device.objects.create(
+            customer=self.customer,
+            retailer=self.retailer,
+            imei='352099005555099',
+            brand='SAMSUNG',
+            model='Galaxy A14',
+            status=DeviceLockStatus.LOCKED,
+            is_activated=True,
+            offline_unlock_code='123456'
+        )
+
+        # 1. GET returns all code aliases
+        res = self.client.get(f'/api/devices/{dev.id}/offline-unlock-code/')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data['offline_unlock_code'], '123456')
+        self.assertEqual(res.data['code'], '123456')
+        self.assertEqual(res.data['unlock_code'], '123456')
+        self.assertTrue(res.data.get('master_recovery_code'))
+        master_code = res.data['master_recovery_code']
+
+        # 2. Verify invalid code fails
+        verify_fail = self.client.post(f'/api/devices/{dev.id}/verify-offline-code/', {'code': '000000'})
+        self.assertEqual(verify_fail.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertFalse(verify_fail.data['valid'])
+
+        # 3. Verify valid code succeeds without unlocking
+        verify_ok = self.client.post(f'/api/devices/{dev.id}/verify-offline-code/', {'code': '123456'})
+        self.assertEqual(verify_ok.status_code, status.HTTP_200_OK)
+        self.assertTrue(verify_ok.data['valid'])
+        dev.refresh_from_db()
+        self.assertEqual(dev.status, DeviceLockStatus.LOCKED)
+
+        # 4. Verify valid code with unlock_device=True unlocks the device
+        verify_unlock = self.client.post(f'/api/devices/{dev.id}/verify-offline-code/', {'code': '123456', 'unlock_device': True})
+        self.assertEqual(verify_unlock.status_code, status.HTTP_200_OK)
+        self.assertTrue(verify_unlock.data['valid'])
+        dev.refresh_from_db()
+        self.assertEqual(dev.status, DeviceLockStatus.ACTIVE)
+
+        # 5. Lock device again and verify master recovery code unlocks
+        dev.status = DeviceLockStatus.LOCKED
+        dev.save()
+        direct_verify = self.client.post('/api/devices/verify-offline-code/', {
+            'imei': dev.imei,
+            'code': master_code,
+            'unlock_device': True
+        })
+        self.assertEqual(direct_verify.status_code, status.HTTP_200_OK)
+        self.assertTrue(direct_verify.data['valid'])
+        self.assertTrue(direct_verify.data['is_master_code'])
+        dev.refresh_from_db()
+        self.assertEqual(dev.status, DeviceLockStatus.ACTIVE)
+
+    @override_settings(PARTNER_MDM_SIMULATION=True)
+    def test_partner_mdm_offline_code_dynamic_fetch(self):
+        """Tests Partner MDM device dynamically retrieves 10-minute offline code"""
+        pm_dev = Device.objects.create(
+            customer=self.customer,
+            retailer=self.retailer,
+            imei='356938035643809',
+            brand='XIAOMI',
+            model='Redmi 12',
+            status=DeviceLockStatus.LOCKED,
+            is_activated=True,
+            lock_provider=LockProvider.PARTNER_MDM,
+            provider_device_id='3501',
+            offline_unlock_code='999999'
+        )
+        res = self.client.get(f'/api/devices/{pm_dev.id}/offline-unlock-code/')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data['code'], '235165')
+        self.assertEqual(res.data['expiry_option'], '10_MINUTES')
+        self.assertEqual(res.data['valid_until'], '10 minutes')
+
 
 class InstallationVideoTests(TestCase):
     def setUp(self):

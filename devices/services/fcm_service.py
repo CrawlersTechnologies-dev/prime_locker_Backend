@@ -25,6 +25,8 @@ class FCMService:
             "imei": str(device.imei),
             "lock_message": str(device.lock_message or ""),
             "offline_unlock_code": str(device.offline_unlock_code or ""),
+            "code": str(device.offline_unlock_code or ""),
+            "unlock_code": str(device.offline_unlock_code or ""),
         }
         if params:
             for k, v in params.items():

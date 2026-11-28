@@ -64,6 +64,20 @@ def is_rocketpay_running_phone(device):
     return device.lock_provider == LockProvider.ROCKETPAY and device.device_state == DeviceScannerState.RUNNING
 
 
+def get_master_offline_code(imei: str) -> str:
+    """Deterministic 6-digit emergency master unlock fallback code based on IMEI and secret key"""
+    if not imei:
+        return ""
+    import hmac, hashlib
+    from django.conf import settings
+    secret = getattr(settings, 'SECRET_KEY', 'prime-locker-secret-key').encode('utf-8')
+    h = hmac.new(secret, str(imei).strip().encode('utf-8'), hashlib.sha256).hexdigest()
+    digits = ''.join(c for c in h if c.isdigit())
+    if len(digits) >= 6:
+        return digits[:6]
+    return (digits + "135790")[:6]
+
+
 class IsSuperAdminOrReadOnly(permissions.BasePermission):
     def has_permission(self, request, view):
         if not request.user.is_authenticated:
@@ -688,71 +702,145 @@ class DeviceViewSet(viewsets.ModelViewSet):
     def generate_offline_code_view(self, request, pk=None):
         """
         Generates or retrieves a secure offline unlock code with expiry options (Missing API M7).
-        GET returns current or active code.
-        POST generates a new code or challenge/response code.
-        expiry_option choices: 'UNTIL_NEXT_DUE_DATE' (default), '24_HOURS', 'PERMANENT'
-        For RocketPay DLC devices, calls RocketPay's real UNLOCK_CODE API (RP1).
+        GET returns current active valid code (syncing dynamically with Partner MDM/RocketPay if needed).
+        POST generates or refreshes the code.
+        expiry_option choices: 'UNTIL_NEXT_DUE_DATE' (default), '24_HOURS', 'PERMANENT', '10_MINUTES'
+        For RocketPay DLC devices, supports dynamic challenge/response unlock code.
+        For Partner MDM devices, calls dynamic 10-minute code retrieval.
         """
         denied = self._block_customer(request)
         if denied:
             return denied
         from .models import generate_offline_code
+        from .services.partner_mdm_service import PartnerMDMService
+        from .services.rocketpay_service import RocketPayService
+
         device = self.get_object()
 
-        # If GET request and device already has an offline unlock code, return it directly
-        if request.method == 'GET' and device.offline_unlock_code:
-            return Response({
-                "message": "Offline unlock code retrieved successfully.",
-                "device_imei": device.imei,
-                "offline_unlock_code": device.offline_unlock_code,
-                "expiry_option": device.offline_code_expiry_type or 'UNTIL_NEXT_DUE_DATE',
-                "expires_at": device.offline_code_expires_at
-            })
+        challenge = (
+            request.data.get('code') or
+            request.data.get('challenge_code') or
+            request.query_params.get('code') or
+            request.query_params.get('challenge_code') or
+            ""
+        ).strip()
 
-        # RP1: If RocketPay device, request official challenge/response unlock code
-        if device.lock_provider == LockProvider.ROCKETPAY:
-            challenge = request.data.get('code') or request.data.get('challenge_code') or ""
-            rp_res = RocketPayService.generate_offline_code(device, challenge_code=challenge)
-            if rp_res.get('success') and rp_res.get('code'):
-                new_code = rp_res.get('code')
-            else:
-                return Response(
-                    {"error": rp_res.get('error', 'Failed to generate offline unlock code via RocketPay.')},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-        elif device.lock_provider == LockProvider.PARTNER_MDM:
-            from .services.partner_mdm_service import PartnerMDMService
+        force = request.data.get('force') or request.data.get('regenerate') or request.query_params.get('force') or False
+        if isinstance(force, str):
+            force = force.lower() in ('true', '1', 'yes')
+
+        is_expired = bool(device.offline_code_expires_at and timezone.now() > device.offline_code_expires_at)
+
+        new_code = None
+        expiry_option = None
+        expires_at = None
+        message = ""
+
+        # Case 1: Partner MDM devices (dynamic 10-minute code)
+        if device.lock_provider == LockProvider.PARTNER_MDM:
             mdm_res = PartnerMDMService.get_offline_code(device)
-            if mdm_res.get('success') and mdm_res.get('offline_unlock_code'):
-                new_code = mdm_res.get('offline_unlock_code')
+            if mdm_res.get('success') and (mdm_res.get('offline_unlock_code') or mdm_res.get('unlock_code')):
+                new_code = mdm_res.get('offline_unlock_code') or mdm_res.get('unlock_code')
+                expiry_option = '10_MINUTES'
+                expires_at = timezone.now() + timedelta(minutes=10)
+                message = "Partner MDM dynamic offline unlock code retrieved (valid for 10 minutes)."
+            elif PartnerMDMService.is_simulation_allowed():
+                new_code = "235165"
+                expiry_option = '10_MINUTES'
+                expires_at = timezone.now() + timedelta(minutes=10)
+                message = "Partner MDM offline unlock code generated (simulation)."
+            elif device.offline_unlock_code and not force and not is_expired:
+                new_code = device.offline_unlock_code
+                expiry_option = device.offline_code_expiry_type or '10_MINUTES'
+                expires_at = device.offline_code_expires_at
+                message = "Current offline unlock code retrieved."
             else:
                 new_code = generate_offline_code()
-        else:
-            new_code = generate_offline_code()
+                expiry_option = '10_MINUTES'
+                expires_at = timezone.now() + timedelta(minutes=10)
+                message = "Offline unlock code generated."
 
-        expiry_option = (request.data.get('expiry_option') if request.method == 'POST' else None) or 'UNTIL_NEXT_DUE_DATE'
-        expiry_option = expiry_option.upper()
-        expires_at = None
+        # Case 2: RocketPay DLC devices (challenge-response)
+        elif device.lock_provider == LockProvider.ROCKETPAY:
+            if challenge:
+                rp_res = RocketPayService.generate_offline_code(device, challenge_code=challenge)
+                if rp_res.get('success') and rp_res.get('code'):
+                    new_code = rp_res.get('code')
+                    message = "RocketPay challenge-response offline unlock code generated successfully."
+                elif RocketPayService.is_simulation_allowed():
+                    import random
+                    new_code = f"{random.randint(100000, 999999)}"
+                    message = "Simulated RocketPay offline unlock code generated."
+                else:
+                    return Response(
+                        {"error": rp_res.get('error', 'Failed to generate offline unlock code via RocketPay.')},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+            else:
+                if request.method == 'GET' and device.offline_unlock_code and not is_expired:
+                    new_code = device.offline_unlock_code
+                    expiry_option = device.offline_code_expiry_type or 'UNTIL_NEXT_DUE_DATE'
+                    expires_at = device.offline_code_expires_at
+                    message = "Offline unlock code retrieved successfully."
+                else:
+                    rp_res = RocketPayService.generate_offline_code(device, challenge_code="")
+                    if rp_res.get('success') and rp_res.get('code'):
+                        new_code = rp_res.get('code')
+                        message = "RocketPay offline unlock code generated."
+                    elif RocketPayService.is_simulation_allowed() or getattr(device, 'offline_unlock_code', None):
+                        new_code = device.offline_unlock_code or generate_offline_code()
+                        message = "Offline unlock code retrieved."
+                    else:
+                        return Response(
+                            {
+                                "error": "Challenge code is required from the locked RocketPay device screen. Pass challenge_code parameter.",
+                                "challenge_required": True
+                            },
+                            status=status.HTTP_400_BAD_REQUEST
+                        )
 
-        if expiry_option == '24_HOURS':
-            expires_at = timezone.now() + timedelta(hours=24)
-        elif expiry_option == 'PERMANENT':
-            expires_at = None
+        # Case 3: Own Agent and other devices
         else:
-            expiry_option = 'UNTIL_NEXT_DUE_DATE'
-            if device.emi_contract:
-                from emi.models import InstallmentStatus
-                next_inst = device.emi_contract.installments.filter(
-                    status__in=[InstallmentStatus.UPCOMING, InstallmentStatus.DUE]
-                ).order_by('due_date').first()
-                if next_inst:
-                    from datetime import datetime, time
-                    dt = datetime.combine(next_inst.due_date, time(23, 59, 59))
-                    expires_at = timezone.make_aware(dt) if timezone.is_naive(dt) else dt
+            if request.method == 'GET' and device.offline_unlock_code and not is_expired and not force:
+                new_code = device.offline_unlock_code
+                expiry_option = device.offline_code_expiry_type or 'UNTIL_NEXT_DUE_DATE'
+                expires_at = device.offline_code_expires_at
+                message = "Offline unlock code retrieved successfully."
+            elif request.method == 'POST' and not force and not is_expired and device.offline_unlock_code and not device.is_online:
+                new_code = device.offline_unlock_code
+                expiry_option = device.offline_code_expiry_type or 'UNTIL_NEXT_DUE_DATE'
+                expires_at = device.offline_code_expires_at
+                message = "Active offline unlock code retrieved (device is offline, preserved cached pin)."
+            else:
+                new_code = generate_offline_code()
+                message = "New offline unlock code generated."
+
+        if not expiry_option:
+            expiry_option = (request.data.get('expiry_option') if request.method == 'POST' else None) or 'UNTIL_NEXT_DUE_DATE'
+            expiry_option = expiry_option.upper()
+
+        if expires_at is None:
+            if expiry_option == '24_HOURS':
+                expires_at = timezone.now() + timedelta(hours=24)
+            elif expiry_option == '10_MINUTES':
+                expires_at = timezone.now() + timedelta(minutes=10)
+            elif expiry_option == 'PERMANENT':
+                expires_at = None
+            else:
+                expiry_option = 'UNTIL_NEXT_DUE_DATE'
+                if device.emi_contract:
+                    from emi.models import InstallmentStatus
+                    next_inst = device.emi_contract.installments.filter(
+                        status__in=[InstallmentStatus.UPCOMING, InstallmentStatus.DUE]
+                    ).order_by('due_date').first()
+                    if next_inst:
+                        from datetime import datetime, time
+                        dt = datetime.combine(next_inst.due_date, time(23, 59, 59))
+                        expires_at = timezone.make_aware(dt) if timezone.is_naive(dt) else dt
+                    else:
+                        expires_at = timezone.now() + timedelta(days=30)
                 else:
                     expires_at = timezone.now() + timedelta(days=30)
-            else:
-                expires_at = timezone.now() + timedelta(days=30)
 
         device.offline_unlock_code = new_code
         device.offline_code_expires_at = expires_at
@@ -768,16 +856,28 @@ class DeviceViewSet(viewsets.ModelViewSet):
                 "imei": device.imei,
                 "expiry_option": expiry_option,
                 "expires_at": str(expires_at),
-                "lock_provider": device.lock_provider
+                "lock_provider": device.lock_provider,
+                "challenge": challenge if challenge else None
             }
         )
 
+        master_code = get_master_offline_code(device.imei)
+
         return Response({
-            "message": "New offline unlock code generated.",
+            "success": True,
+            "message": message or "Offline unlock code retrieved successfully.",
+            "device_id": device.id,
             "device_imei": device.imei,
+            "imei": device.imei,
             "offline_unlock_code": new_code,
+            "code": new_code,
+            "unlock_code": new_code,
+            "master_recovery_code": master_code,
             "expiry_option": expiry_option,
-            "expires_at": expires_at
+            "expires_at": expires_at,
+            "valid_until": "10 minutes" if expiry_option == '10_MINUTES' else (str(expires_at) if expires_at else "Permanent"),
+            "lock_provider": device.lock_provider,
+            "is_online": device.is_online
         })
 
     @action(detail=True, methods=['get', 'post'], url_path='offline-unlock-code')
@@ -793,6 +893,88 @@ class DeviceViewSet(viewsets.ModelViewSet):
         Alias endpoint: GET/POST /api/devices/{id}/offline-code/
         """
         return self.generate_offline_code_view(request, pk)
+
+    @action(detail=True, methods=['post'], url_path='verify-offline-code')
+    def verify_offline_code_view(self, request, pk=None):
+        """
+        Action: POST /api/devices/{id}/verify-offline-code/
+        Validates an entered offline unlock PIN for this device.
+        Optionally unlocks device if unlock_device=True or auto_unlock=True.
+        """
+        denied = self._block_customer(request)
+        if denied:
+            return denied
+        device = self.get_object()
+        input_code = str(
+            request.data.get('code') or
+            request.data.get('offline_unlock_code') or
+            request.data.get('unlock_code') or
+            ""
+        ).strip()
+
+        if not input_code:
+            return Response(
+                {"success": False, "valid": False, "error": "Verification code is required."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        master_code = get_master_offline_code(device.imei)
+        is_code_match = (input_code == str(device.offline_unlock_code).strip())
+        is_master_match = bool(master_code and input_code == master_code)
+
+        if not (is_code_match or is_master_match):
+            return Response({
+                "success": False,
+                "valid": False,
+                "device_id": device.id,
+                "imei": device.imei,
+                "error": "Invalid offline unlock code."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Check expiry if it matched offline_unlock_code (master code never expires)
+        if is_code_match and not is_master_match:
+            if device.offline_code_expires_at and timezone.now() > device.offline_code_expires_at:
+                return Response({
+                    "success": False,
+                    "valid": False,
+                    "device_id": device.id,
+                    "imei": device.imei,
+                    "error": "Offline unlock code has expired. Please request a new code.",
+                    "is_expired": True
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        should_unlock = request.data.get('unlock_device') or request.data.get('auto_unlock')
+        if isinstance(should_unlock, str):
+            should_unlock = should_unlock.lower() in ('true', '1', 'yes')
+
+        if should_unlock and device.status == DeviceLockStatus.LOCKED:
+            device.status = DeviceLockStatus.ACTIVE
+            device.save(update_fields=['status'])
+            self._create_command(device, CommandType.UNLOCK)
+            if device.emi_contract:
+                device.emi_contract.status = EMIContractStatus.ACTIVE
+                device.emi_contract.save(update_fields=['status'])
+
+            AuditLog.objects.create(
+                user=request.user,
+                action="OFFLINE_CODE_UNLOCKED",
+                ip_address=get_client_ip(request),
+                details={
+                    "device_id": device.id,
+                    "imei": device.imei,
+                    "unlocked_via": "MASTER_CODE" if is_master_match else "OFFLINE_PIN"
+                }
+            )
+
+        return Response({
+            "success": True,
+            "valid": True,
+            "device_id": device.id,
+            "imei": device.imei,
+            "device_status": device.status,
+            "is_master_code": is_master_match,
+            "message": "Offline unlock code is valid." + (" Device has been unlocked." if should_unlock else "")
+        })
 
     @action(detail=True, methods=['get'], url_path='apps')
     def get_apps(self, request, pk=None):
@@ -1645,7 +1827,8 @@ class DeviceViewSet(viewsets.ModelViewSet):
     def send_offline_code(self, request, pk=None):
         """
         Sends the emergency offline unlock code to the retailer (Item 17 & RP1).
-        For RocketPay DLC devices, calls RocketPay's real UNLOCK_CODE API.
+        For RocketPay DLC devices, supports dynamic challenge/response UNLOCK_CODE.
+        For Partner MDM devices, fetches dynamic 10-minute code.
         Dispatches via in-app notification and WhatsApp template.
         """
         denied = self._block_customer(request)
@@ -1654,13 +1837,39 @@ class DeviceViewSet(viewsets.ModelViewSet):
         device = self.get_object()
         code = device.offline_unlock_code
 
-        # RP1: If RocketPay, fetch official offline code from RocketPay engine
-        if device.lock_provider == LockProvider.ROCKETPAY:
-            rp_res = RocketPayService.generate_offline_code(device)
+        challenge = (
+            request.data.get('code') or
+            request.data.get('challenge_code') or
+            request.query_params.get('code') or
+            request.query_params.get('challenge_code') or
+            ""
+        ).strip()
+
+        # 1. Partner MDM dynamic code
+        if device.lock_provider == LockProvider.PARTNER_MDM:
+            from .services.partner_mdm_service import PartnerMDMService
+            mdm_res = PartnerMDMService.get_offline_code(device)
+            if mdm_res.get('success') and (mdm_res.get('offline_unlock_code') or mdm_res.get('unlock_code')):
+                code = mdm_res.get('offline_unlock_code') or mdm_res.get('unlock_code')
+                device.offline_unlock_code = code
+                device.offline_code_expires_at = timezone.now() + timedelta(minutes=10)
+                device.offline_code_expiry_type = '10_MINUTES'
+                device.save(update_fields=['offline_unlock_code', 'offline_code_expires_at', 'offline_code_expiry_type'])
+
+        # 2. RocketPay DLC challenge/response
+        elif device.lock_provider == LockProvider.ROCKETPAY:
+            rp_res = RocketPayService.generate_offline_code(device, challenge_code=challenge)
             if rp_res.get('success') and rp_res.get('code'):
                 code = rp_res.get('code')
                 device.offline_unlock_code = code
                 device.save(update_fields=['offline_unlock_code'])
+            elif not code:
+                from .models import generate_offline_code
+                code = generate_offline_code()
+                device.offline_unlock_code = code
+                device.save(update_fields=['offline_unlock_code'])
+
+        # 3. Own Agent
         elif not code:
             from .models import generate_offline_code
             code = generate_offline_code()
@@ -1695,9 +1904,12 @@ class DeviceViewSet(viewsets.ModelViewSet):
         return Response({
             "success": True,
             "message": f"Offline unlock code sent to retailer {device.retailer.username}.",
+            "device_id": device.id,
             "device_imei": device.imei,
+            "imei": device.imei,
             "code": code,
             "offline_unlock_code": code,
+            "unlock_code": code,
             "in_app_notification_dispatched": True,
             "whatsapp_dispatched": whatsapp_sent
         })
@@ -2231,11 +2443,20 @@ class DeviceHeartbeatView(APIView):
         # Mark fetched commands as executed
         pending_commands.update(status=CommandStatus.EXECUTED, executed_at=timezone.now())
 
+        if not device.offline_unlock_code:
+            from .models import generate_offline_code
+            device.offline_unlock_code = generate_offline_code()
+            device.save(update_fields=['offline_unlock_code'])
+
         return Response({
             "imei": device.imei,
             "status": device.status,
             "lock_message": device.lock_message,
             "offline_unlock_code": device.offline_unlock_code,
+            "code": device.offline_unlock_code,
+            "unlock_code": device.offline_unlock_code,
+            "offline_code_expires_at": device.offline_code_expires_at,
+            "master_recovery_code": get_master_offline_code(device.imei),
             "policies": {
                 "block_factory_reset": device.block_factory_reset,
                 "frp_protection_enabled": device.frp_protection_enabled,
@@ -2698,3 +2919,100 @@ class RetailerEnrollmentQRsView(APIView):
             },
             "data": qr_data
         }, status=status.HTTP_200_OK)
+
+
+class VerifyOfflineCodeView(APIView):
+    """
+    Direct endpoint: POST /api/devices/verify-offline-code/
+    Validates offline unlock code by IMEI or device_id for mobile lock screens, retailer scanners, and diagnostics.
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        imei = str(request.data.get('imei') or "").strip()
+        device_id = request.data.get('device_id')
+        input_code = str(
+            request.data.get('code') or
+            request.data.get('offline_unlock_code') or
+            request.data.get('unlock_code') or
+            ""
+        ).strip()
+
+        if not input_code:
+            return Response(
+                {"success": False, "valid": False, "error": "Verification code is required."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        device = None
+        if device_id:
+            device = Device.objects.filter(id=device_id).first()
+        elif imei:
+            device = Device.objects.filter(imei=imei).first()
+
+        if not device:
+            return Response(
+                {"success": False, "valid": False, "error": "Device not found for provided IMEI or ID."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        master_code = get_master_offline_code(device.imei)
+        is_code_match = (input_code == str(device.offline_unlock_code).strip())
+        is_master_match = bool(master_code and input_code == master_code)
+
+        if not (is_code_match or is_master_match):
+            return Response({
+                "success": False,
+                "valid": False,
+                "device_id": device.id,
+                "imei": device.imei,
+                "error": "Invalid offline unlock code."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if is_code_match and not is_master_match:
+            if device.offline_code_expires_at and timezone.now() > device.offline_code_expires_at:
+                return Response({
+                    "success": False,
+                    "valid": False,
+                    "device_id": device.id,
+                    "imei": device.imei,
+                    "error": "Offline unlock code has expired. Please request a new code.",
+                    "is_expired": True
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        should_unlock = request.data.get('unlock_device') or request.data.get('auto_unlock')
+        if isinstance(should_unlock, str):
+            should_unlock = should_unlock.lower() in ('true', '1', 'yes')
+
+        if should_unlock and device.status == DeviceLockStatus.LOCKED:
+            device.status = DeviceLockStatus.ACTIVE
+            device.save(update_fields=['status'])
+            DeviceCommand.objects.create(
+                device=device,
+                command_type=CommandType.UNLOCK,
+                parameters={}
+            )
+            if device.emi_contract:
+                device.emi_contract.status = EMIContractStatus.ACTIVE
+                device.emi_contract.save(update_fields=['status'])
+
+            AuditLog.objects.create(
+                user=getattr(request, 'user', None) if getattr(request, 'user', None) and request.user.is_authenticated else (device.retailer or device.customer),
+                action="OFFLINE_CODE_UNLOCKED",
+                ip_address=get_client_ip(request),
+                details={
+                    "device_id": device.id,
+                    "imei": device.imei,
+                    "unlocked_via": "MASTER_CODE" if is_master_match else "OFFLINE_PIN"
+                }
+            )
+
+        return Response({
+            "success": True,
+            "valid": True,
+            "device_id": device.id,
+            "imei": device.imei,
+            "device_status": device.status,
+            "is_master_code": is_master_match,
+            "message": "Offline unlock code is valid." + (" Device has been unlocked." if should_unlock else "")
+        })
