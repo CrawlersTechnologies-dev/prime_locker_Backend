@@ -657,3 +657,73 @@ class PayoutRejectSerializer(serializers.Serializer):
     reason = serializers.CharField(required=True)
 
 
+class AdminSendPayoutSerializer(serializers.Serializer):
+    """
+    Serializer for Admin directly sending money / commission payout to a retailer.
+    """
+    retailer_id = serializers.IntegerField(required=True)
+    amount = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal('1.00'), required=True)
+    payout_method = serializers.ChoiceField(choices=['BANK_TRANSFER', 'UPI', 'CASH'], default='BANK_TRANSFER')
+    bank_name = serializers.CharField(required=False, allow_blank=True)
+    account_number = serializers.CharField(required=False, allow_blank=True)
+    ifsc_code = serializers.CharField(required=False, allow_blank=True)
+    upi_id = serializers.CharField(required=False, allow_blank=True)
+    utr_number = serializers.CharField(required=False, allow_blank=True)
+    admin_notes = serializers.CharField(required=False, allow_blank=True)
+    deduct_wallet = serializers.BooleanField(default=True)
+
+
+class RetailerWalletSummarySerializer(serializers.ModelSerializer):
+    retailer_id = serializers.IntegerField(source='retailer.id', read_only=True)
+    retailer_name = serializers.SerializerMethodField(read_only=True)
+    business_name = serializers.CharField(source='retailer.business_name', read_only=True)
+    mobile_number = serializers.CharField(source='retailer.mobile_number', read_only=True)
+    bank_name = serializers.SerializerMethodField(read_only=True)
+    account_number = serializers.SerializerMethodField(read_only=True)
+    ifsc_code = serializers.SerializerMethodField(read_only=True)
+    upi_id = serializers.SerializerMethodField(read_only=True)
+
+    class Meta:
+        model = RetailerWallet
+        fields = [
+            'retailer_id',
+            'retailer_name',
+            'business_name',
+            'mobile_number',
+            'balance',
+            'total_collected',
+            'total_withdrawn',
+            'total_admin_fee_paid',
+            'bank_name',
+            'account_number',
+            'ifsc_code',
+            'upi_id',
+            'updated_at'
+        ]
+
+    def get_retailer_name(self, obj):
+        return obj.retailer.get_full_name() or obj.retailer.username
+
+    def _get_bank(self, obj):
+        if not hasattr(obj, '_cached_bank'):
+            from accounts.models import RetailerBankAccount
+            obj._cached_bank = getattr(obj.retailer, 'bank_account', None) or RetailerBankAccount.objects.filter(retailer=obj.retailer).first()
+        return obj._cached_bank
+
+    def get_bank_name(self, obj):
+        b = self._get_bank(obj)
+        return b.bank_name if b else ''
+
+    def get_account_number(self, obj):
+        b = self._get_bank(obj)
+        return b.account_number if b else ''
+
+    def get_ifsc_code(self, obj):
+        b = self._get_bank(obj)
+        return b.ifsc_code if b else ''
+
+    def get_upi_id(self, obj):
+        b = self._get_bank(obj)
+        return getattr(b, 'upi_id', '') if b else ''
+
+

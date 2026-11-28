@@ -872,6 +872,76 @@ class RetailerViewSet(BaseRoleViewSet):
             status=status.HTTP_200_OK,
         )
 
+    @action(detail=True, methods=['post'], url_path='send-money')
+    def send_money(self, request, pk=None):
+        """
+        POST /api/retailers/{id}/send-money/
+        Admin manually clicks and sends money / commission to a retailer.
+        Payload:
+        {
+            "amount": 5000.00,
+            "payout_method": "BANK_TRANSFER", // or "UPI", "CASH"
+            "utr_number": "UTR12345678",
+            "admin_notes": "Monthly commission payout",
+            "deduct_wallet": true
+        }
+        """
+        from accounts.models import is_company_user
+        if not is_company_user(request.user):
+            return Response(
+                {"detail": "Only Super Admin or Operations Staff can send money to retailers."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        retailer = self.get_object()
+        amount_raw = request.data.get('amount')
+        if not amount_raw:
+            return Response({"detail": "Field 'amount' is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            from decimal import Decimal
+            amount = Decimal(str(amount_raw))
+        except Exception:
+            return Response({"detail": "Invalid amount format."}, status=status.HTTP_400_BAD_REQUEST)
+
+        method = request.data.get('payout_method', 'BANK_TRANSFER')
+        utr = request.data.get('utr_number', '')
+        notes = request.data.get('admin_notes', '') or request.data.get('notes', '')
+        deduct = request.data.get('deduct_wallet', True)
+        if isinstance(deduct, str):
+            deduct = deduct.lower() in ('true', '1', 'yes')
+
+        bank_data = {
+            'bank_name': request.data.get('bank_name', ''),
+            'account_number': request.data.get('account_number', ''),
+            'ifsc_code': request.data.get('ifsc_code', ''),
+            'upi_id': request.data.get('upi_id', '')
+        }
+
+        try:
+            from emi.services.wallet_service import WalletService
+            from emi.serializers import PayoutRequestSerializer
+            from django.core.exceptions import ValidationError
+            payout, wallet = WalletService.admin_direct_payout(
+                retailer=retailer,
+                amount=amount,
+                payout_method=method,
+                bank_data=bank_data,
+                utr_number=utr,
+                notes=notes,
+                admin_user=request.user,
+                deduct_wallet=deduct
+            )
+            return Response({
+                "message": f"Successfully sent ₹{amount:,.2f} to {retailer.get_full_name() or retailer.username}.",
+                "payout": PayoutRequestSerializer(payout).data,
+                "wallet_balance": float(wallet.balance),
+                "total_withdrawn": float(wallet.total_withdrawn)
+            }, status=status.HTTP_200_OK)
+        except ValidationError as e:
+            msg = e.messages[0] if hasattr(e, 'messages') else str(e)
+            return Response({"detail": msg}, status=status.HTTP_400_BAD_REQUEST)
+
 class CustomerViewSet(BaseRoleViewSet):
     target_role = 'CUSTOMER'
     serializer_class = CustomerSerializer
@@ -2146,6 +2216,30 @@ class DashboardView(APIView):
         total_overdue_amount = overdue_qs.aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
         overdue_count = overdue_qs.count()
 
+        # Online vs Offline breakdown & Platform Commissions (2% on Online/AutoPay, 0% on Offline)
+        online_paid_qs = paid_qs.filter(payment_mode='ONLINE_GATEWAY')
+        offline_paid_qs = paid_qs.exclude(payment_mode='ONLINE_GATEWAY')
+
+        total_platform_commission = paid_qs.aggregate(total=Sum('admin_commission'))['total'] or Decimal('0.00')
+        today_platform_commission = paid_qs.filter(collection_date__date=today).aggregate(total=Sum('admin_commission'))['total'] or Decimal('0.00')
+        month_platform_commission = paid_qs.filter(
+            collection_date__year=today.year,
+            collection_date__month=today.month
+        ).aggregate(total=Sum('admin_commission'))['total'] or Decimal('0.00')
+
+        online_autopay_volume = online_paid_qs.aggregate(total=Sum('paid_amount'))['total'] or Decimal('0.00')
+        offline_collections_volume = offline_paid_qs.aggregate(total=Sum('paid_amount'))['total'] or Decimal('0.00')
+
+        commission_kpis = {
+            "total_platform_commission": total_platform_commission,
+            "today_platform_commission": today_platform_commission,
+            "this_month_platform_commission": month_platform_commission,
+            "online_autopay_volume": online_autopay_volume,
+            "offline_collections_volume": offline_collections_volume,
+            "online_commission_rate_pct": 2.0,
+            "offline_commission_rate_pct": 0.0,
+        }
+
         financial_kpis = {
             "total_financed_amount": total_financed,
             "total_collected_amount": total_collected,
@@ -2155,6 +2249,13 @@ class DashboardView(APIView):
             "this_month_collection_amount": month_collected,
             "total_overdue_amount": total_overdue_amount,
             "overdue_installments_count": overdue_count,
+            "total_platform_commission": total_platform_commission,
+            "today_platform_commission": today_platform_commission,
+            "this_month_platform_commission": month_platform_commission,
+            "online_autopay_volume": online_autopay_volume,
+            "offline_collections_volume": offline_collections_volume,
+            "online_commission_rate_pct": 2.0,
+            "offline_commission_rate_pct": 0.0,
             "date_filter": {
                 "start_date": str(start_date) if start_date else None,
                 "end_date": str(end_date) if start_date else None,
@@ -2290,6 +2391,7 @@ class DashboardView(APIView):
             "network_kpis": network_kpis,
             "device_and_emi_kpis": device_and_emi_kpis,
             "financial_kpis": financial_kpis,
+            "commission_kpis": commission_kpis,
             "key_inventory_kpis": key_inventory_kpis,
             "rocketpay_wallet": rocketpay_wallet,
             "recent_payments": recent_payments,

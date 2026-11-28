@@ -49,25 +49,33 @@ class WalletService:
         return admin_rate, retailer_rate
 
     @classmethod
-    def calculate_emi_split(cls, amount):
+    def calculate_emi_split(cls, amount, is_online=True):
         """
-        Splits gross EMI installment amount into Admin Fee (2%) and Retailer Share (98%).
+        Splits gross EMI installment amount:
+          - If is_online=True (Online Gateway / AutoPay Mandate):
+              Admin Fee (2%) and Retailer Share (98%).
+          - If is_online=False (Offline Cash / In-store Payment):
+              Admin Fee (₹0.00 / 0%) and Retailer Share (100% purely to retailer).
         """
         amt = Decimal(str(amount))
-        admin_rate, retailer_rate = cls.get_commission_rates()
-        admin_fee = (amt * admin_rate / Decimal('100.00')).quantize(Decimal('0.01'))
-        retailer_share = (amt - admin_fee).quantize(Decimal('0.01'))
+        if is_online:
+            admin_rate, retailer_rate = cls.get_commission_rates()
+            admin_fee = (amt * admin_rate / Decimal('100.00')).quantize(Decimal('0.01'))
+            retailer_share = (amt - admin_fee).quantize(Decimal('0.01'))
+        else:
+            admin_fee = Decimal('0.00')
+            retailer_share = amt
         return admin_fee, retailer_share
 
     @classmethod
     def process_online_emi_split(cls, installment, gross_amount, payment_id):
         """
-        Scenario A: Online Payment via Cashfree / UPI / Payment Link.
+        Scenario A: Online Payment via Cashfree / UPI AutoPay / Payment Link.
           - 100% gross arrives in Prime-Locker master bank account.
           - 98% net share is credited to Retailer Digital Wallet.
           - 2% admin fee is retained as platform revenue.
         """
-        admin_fee, retailer_share = cls.calculate_emi_split(gross_amount)
+        admin_fee, retailer_share = cls.calculate_emi_split(gross_amount, is_online=True)
         gross_amt = Decimal(str(gross_amount))
 
         with transaction.atomic():
@@ -110,13 +118,15 @@ class WalletService:
         """
         Scenario B: Offline Cash Payment at Retailer's Shop.
           - Customer hands 100% physical cash to Retailer.
-          - 2% Admin Platform Fee is deducted from Retailer's In-App Wallet balance.
+          - 0% Admin Platform Fee (purely for the retailer).
+          - No wallet balance debit from Retailer.
+          - 100% gross is retained by retailer.
         """
-        admin_fee, retailer_share = cls.calculate_emi_split(gross_amount)
+        admin_fee, retailer_share = cls.calculate_emi_split(gross_amount, is_online=False)
         gross_amt = Decimal(str(gross_amount))
 
         with transaction.atomic():
-            # Update installment with financial split audit
+            # Update installment with financial split audit (0% admin fee, 100% retailer share)
             installment.admin_commission = admin_fee
             installment.retailer_share = retailer_share
             installment.save(update_fields=['admin_commission', 'retailer_share'])
@@ -124,30 +134,30 @@ class WalletService:
             retailer = installment.contract.retailer
             wallet = RetailerWallet.get_or_create_wallet(retailer)
 
-            # Deduct 2% admin fee
-            wallet.balance = Decimal(str(wallet.balance)) - admin_fee
+            # Record gross collected without debiting retailer wallet balance
             wallet.total_collected = Decimal(str(wallet.total_collected)) + gross_amt
-            wallet.total_admin_fee_paid = Decimal(str(wallet.total_admin_fee_paid)) + admin_fee
-            wallet.save(update_fields=['balance', 'total_collected', 'total_admin_fee_paid', 'updated_at'])
+            wallet.save(update_fields=['total_collected', 'updated_at'])
 
             customer_name = installment.contract.customer.get_full_name() or installment.contract.customer.username
             ref_id = installment.transaction_ref or f"CASH-{installment.id}"
             desc = (
                 f"Cash EMI Collected at Shop - Customer: {customer_name} ({installment.contract.device_imei}) | "
-                f"Gross EMI: ₹{gross_amt:,.2f} (Retailer holds cash) | Admin Platform Fee (2%): -₹{admin_fee:,.2f}"
+                f"Gross EMI: ₹{gross_amt:,.2f} (100% retained by Retailer, ₹0.00 Platform Fee)"
             )
 
             WalletTransaction.objects.create(
                 wallet=wallet,
                 transaction_type=WalletTransactionType.EMI_OFFLINE_FEE_DEBIT,
-                amount=-admin_fee,
+                amount=Decimal('0.00'),
                 gross_amount=gross_amt,
-                admin_fee=admin_fee,
+                admin_fee=Decimal('0.00'),
                 balance_after=wallet.balance,
                 installment=installment,
                 reference_id=ref_id,
                 description=desc
             )
+
+        return admin_fee, retailer_share
 
         return admin_fee, retailer_share
 
@@ -317,6 +327,126 @@ class WalletService:
         return payout
 
     @classmethod
+    def admin_direct_payout(cls, retailer, amount, payout_method=PayoutMethod.BANK_TRANSFER,
+                            bank_data=None, utr_number="", notes="", admin_user=None,
+                            deduct_wallet=True):
+        """
+        Super Admin or Operations Staff manually clicks and sends money / commission to a retailer.
+        - Can deduct from retailer wallet balance (standard payout settlement) or direct bonus credit.
+        - Creates a PayoutRequest in PROCESSED status immediately.
+        - Updates RetailerWallet (balance and total_withdrawn).
+        - Creates an itemized WalletTransaction ledger record.
+        - Sends in-app system notification & SMS alert to retailer.
+        """
+        amt = Decimal(str(amount)).quantize(Decimal('0.01'))
+        if amt <= Decimal('0.00'):
+            raise ValidationError("Payout amount must be greater than zero.")
+
+        wallet = RetailerWallet.get_or_create_wallet(retailer)
+
+        if deduct_wallet and wallet.balance < amt:
+            raise ValidationError(
+                f"Insufficient wallet balance. Retailer wallet balance is ₹{wallet.balance:,.2f}, cannot send ₹{amt:,.2f}."
+            )
+
+        # Resolve bank/UPI destination snapshot
+        from accounts.models import RetailerBankAccount
+        b_acc = getattr(retailer, 'bank_account', None) or RetailerBankAccount.objects.filter(retailer=retailer).first()
+
+        bank_data = bank_data or {}
+        bank_name = bank_data.get('bank_name') or (b_acc.bank_name if b_acc else '') or 'Bank Account'
+        acc_num = bank_data.get('account_number') or (b_acc.account_number if b_acc else '') or ''
+        ifsc = bank_data.get('ifsc_code') or (b_acc.ifsc_code if b_acc else '') or ''
+        holder = bank_data.get('account_holder_name') or (b_acc.account_holder_name if b_acc else '') or retailer.get_full_name() or retailer.username
+        upi = bank_data.get('upi_id') or (getattr(b_acc, 'upi_id', '') if b_acc else '') or ''
+
+        clean_utr = str(utr_number or '').strip()
+        if not clean_utr:
+            clean_utr = f"UTR-DIR-{retailer.id}-{timezone.now().strftime('%Y%m%d%H%M%S')}"
+
+        with transaction.atomic():
+            payout = PayoutRequest.objects.create(
+                retailer=retailer,
+                amount=amt,
+                payout_method=payout_method,
+                account_holder_name=holder,
+                bank_name=bank_name,
+                account_number=acc_num,
+                ifsc_code=ifsc,
+                upi_id=upi,
+                status=PayoutStatus.PROCESSED,
+                utr_number=clean_utr,
+                admin_notes=notes or "Direct commission payout by Admin",
+                processed_by=admin_user,
+                processed_at=timezone.now()
+            )
+
+            if deduct_wallet:
+                wallet.balance = Decimal(str(wallet.balance)) - amt
+                wallet.total_withdrawn = Decimal(str(wallet.total_withdrawn)) + amt
+                wallet.save(update_fields=['balance', 'total_withdrawn', 'updated_at'])
+            else:
+                wallet.total_withdrawn = Decimal(str(wallet.total_withdrawn)) + amt
+                wallet.save(update_fields=['total_withdrawn', 'updated_at'])
+
+            dest_str = f"UPI {upi}" if payout_method == PayoutMethod.UPI else (
+                "Cash / Handover" if payout_method == PayoutMethod.CASH else f"{bank_name} (A/C: {acc_num[-4:] if len(acc_num) >= 4 else acc_num})"
+            )
+            desc = (
+                f"Direct Commission Payout #{payout.id} - Transferred ₹{amt:,.2f} to {dest_str} "
+                f"| UTR: {clean_utr}"
+            )
+            if not deduct_wallet:
+                desc += " (Direct Bonus Credit - Wallet balance not deducted)"
+
+            WalletTransaction.objects.create(
+                wallet=wallet,
+                transaction_type=WalletTransactionType.ADMIN_DIRECT_PAYOUT,
+                amount=-amt if deduct_wallet else Decimal('0.00'),
+                gross_amount=amt,
+                admin_fee=Decimal('0.00'),
+                balance_after=wallet.balance,
+                reference_id=f"DIR-PAYOUT-{payout.id}",
+                description=desc
+            )
+
+            # Send in-app notification to retailer
+            try:
+                from accounts.views import send_system_notification
+                from accounts.models import NotificationType
+                send_system_notification(
+                    recipient=retailer,
+                    title="Commission Money Sent by Admin",
+                    message=f"₹{amt:,.2f} commission money has been sent to your account via {payout_method} (UTR: {clean_utr}). Current Wallet Balance: ₹{wallet.balance:,.2f}.",
+                    notification_type=NotificationType.SYSTEM_ALERT,
+                    reference_id=payout.id,
+                    sender=admin_user
+                )
+            except Exception:
+                pass
+
+            # Create AuditLog
+            try:
+                AuditLog.objects.create(
+                    user=admin_user,
+                    action="ADMIN_DIRECT_PAYOUT_SENT",
+                    details={
+                        "payout_id": payout.id,
+                        "retailer_id": retailer.id,
+                        "retailer_name": retailer.get_full_name() or retailer.username,
+                        "amount": float(amt),
+                        "payout_method": payout_method,
+                        "utr_number": clean_utr,
+                        "deduct_wallet": deduct_wallet,
+                        "remaining_balance": float(wallet.balance)
+                    }
+                )
+            except Exception:
+                pass
+
+        return payout, wallet
+
+    @classmethod
     def buy_keys_with_wallet(cls, retailer, device_type="MOBILE", quantity=1, os_type="ANDROID"):
         """
         Allows retailer to purchase device license keys directly using their in-app wallet balance.
@@ -460,17 +590,24 @@ class WalletService:
         return {
             "platform_commission_percentage": float(cls.get_commission_rates()[0]),
             "retailer_share_percentage": float(cls.get_commission_rates()[1]),
+            "offline_platform_commission_percentage": 0.0,
+            "offline_retailer_share_percentage": 100.0,
             "revenue": {
                 "all_time_admin_revenue": float(all_time_rev),
                 "today_admin_revenue": float(today_rev),
                 "this_month_admin_revenue": float(month_rev),
                 "this_year_admin_revenue": float(year_rev),
+                "total_platform_commission": float(all_time_rev),
+                "today_platform_commission": float(today_rev),
+                "this_month_platform_commission": float(month_rev),
             },
             "volume": {
                 "all_time_gross_emi_volume": float(all_time_volume),
                 "this_month_gross_emi_volume": float(month_volume),
                 "today_gross_emi_volume": float(today_volume),
                 "total_paid_installments_count": paid_qs.count(),
+                "online_autopay_volume": float(online_gross),
+                "offline_collections_volume": float(offline_gross),
             },
             "channel_breakdown": {
                 "online": {
@@ -478,12 +615,16 @@ class WalletService:
                     "gross_collected": float(online_gross),
                     "admin_revenue_2pct": float(online_admin),
                     "retailer_wallet_credited_98pct": float(online_retailer),
+                    "platform_commission_pct": float(cls.get_commission_rates()[0]),
                 },
                 "offline_cash": {
                     "count": offline_count,
                     "gross_collected": float(offline_gross),
                     "admin_fee_deducted_2pct": float(offline_admin),
+                    "admin_fee_0pct": float(offline_admin),
                     "retailer_cash_retained_98pct": float(offline_gross - offline_admin),
+                    "retailer_cash_retained_100pct": float(offline_gross),
+                    "platform_commission_pct": 0.0,
                 }
             },
             "wallets_and_payouts": {

@@ -793,11 +793,12 @@ class WalletAndRevenueCommissionTests(TestCase):
         self.assertEqual(tx.admin_fee, Decimal('40.00'))
         self.assertEqual(tx.balance_after, Decimal('1960.00'))
 
-    def test_offline_cash_payment_deducts_2_percent(self):
+    def test_offline_cash_payment_purely_for_retailer_zero_fee(self):
         """
-        Scenario B: Customer pays cash at shop.
-        - Retailer holds 100% cash in hand (₹1,000).
-        - 2% Admin fee (₹20) is deducted from Retailer in-app wallet.
+        Scenario B: Customer pays cash at shop (offline payment).
+        - Offline payment is purely for the retailer (100% retailer share).
+        - 0% Platform fee (₹0 Admin commission).
+        - Retailer in-app wallet balance is NOT deducted (remains untouched).
         """
         from emi.models import RetailerWallet
         wallet = RetailerWallet.get_or_create_wallet(self.retailer)
@@ -815,19 +816,19 @@ class WalletAndRevenueCommissionTests(TestCase):
 
         self.inst2.refresh_from_db()
         self.assertEqual(self.inst2.status, InstallmentStatus.PAID)
-        self.assertEqual(self.inst2.admin_commission, Decimal('20.00'))
-        self.assertEqual(self.inst2.retailer_share, Decimal('980.00'))
+        self.assertEqual(self.inst2.admin_commission, Decimal('0.00'))
+        self.assertEqual(self.inst2.retailer_share, Decimal('1000.00'))
 
         wallet.refresh_from_db()
-        # Initial 1960.00 - 20.00 = 1940.00
-        self.assertEqual(wallet.balance, Decimal('1940.00'))
+        # Balance is NOT debited; remains 1960.00
+        self.assertEqual(wallet.balance, Decimal('1960.00'))
 
         from emi.models import WalletTransaction, WalletTransactionType
         tx = WalletTransaction.objects.filter(wallet=wallet, installment=self.inst2).first()
         self.assertIsNotNone(tx)
         self.assertEqual(tx.transaction_type, WalletTransactionType.EMI_OFFLINE_FEE_DEBIT)
-        self.assertEqual(tx.amount, Decimal('-20.00'))
-        self.assertEqual(tx.balance_after, Decimal('1940.00'))
+        self.assertEqual(tx.amount, Decimal('0.00'))
+        self.assertEqual(tx.balance_after, Decimal('1960.00'))
 
     def test_wallet_summary_and_statement(self):
         from emi.models import RetailerWallet
@@ -963,4 +964,137 @@ class WalletAndRevenueCommissionTests(TestCase):
         self.assertEqual(resp.data['retailer_share_percentage'], 98.0)
         self.assertGreaterEqual(resp.data['revenue']['all_time_admin_revenue'], 40.0)
         self.assertGreaterEqual(resp.data['volume']['all_time_gross_emi_volume'], 2000.0)
+
+    def test_admin_direct_payout_with_wallet_deduction(self):
+        """Tests that Super Admin can manually click and send money / commission to a retailer"""
+        from emi.models import RetailerWallet, PayoutRequest, PayoutStatus, WalletTransaction, WalletTransactionType
+        wallet = RetailerWallet.get_or_create_wallet(self.retailer)
+        wallet.balance = Decimal('3500.00')
+        wallet.save()
+
+        self.client.force_authenticate(user=self.admin)
+        url = '/api/wallet/admin-send-payout/'
+        payload = {
+            'retailer_id': self.retailer.id,
+            'amount': 1500.00,
+            'payout_method': 'BANK_TRANSFER',
+            'bank_name': 'HDFC Bank',
+            'account_number': '50100234567890',
+            'ifsc_code': 'HDFC0001234',
+            'utr_number': 'UTR9876543210',
+            'admin_notes': 'November commission payout',
+            'deduct_wallet': True
+        }
+        resp = self.client.post(url, payload, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertIn('Successfully sent ₹1,500.00', resp.data['message'])
+
+        wallet.refresh_from_db()
+        self.assertEqual(wallet.balance, Decimal('2000.00'))
+        self.assertEqual(wallet.total_withdrawn, Decimal('1500.00'))
+
+        payout = PayoutRequest.objects.filter(retailer=self.retailer, utr_number='UTR9876543210').first()
+        self.assertIsNotNone(payout)
+        self.assertEqual(payout.status, PayoutStatus.PROCESSED)
+        self.assertEqual(payout.amount, Decimal('1500.00'))
+        self.assertEqual(payout.processed_by, self.admin)
+
+        tx = WalletTransaction.objects.filter(wallet=wallet, transaction_type=WalletTransactionType.ADMIN_DIRECT_PAYOUT).first()
+        self.assertIsNotNone(tx)
+        self.assertEqual(tx.amount, Decimal('-1500.00'))
+        self.assertEqual(tx.balance_after, Decimal('2000.00'))
+
+    def test_admin_direct_payout_insufficient_balance(self):
+        """Tests that admin direct payout fails if amount exceeds wallet balance and deduct_wallet is True"""
+        from emi.models import RetailerWallet
+        wallet = RetailerWallet.get_or_create_wallet(self.retailer)
+        wallet.balance = Decimal('500.00')
+        wallet.save()
+
+        self.client.force_authenticate(user=self.admin)
+        url = '/api/wallet/admin-send-payout/'
+        payload = {
+            'retailer_id': self.retailer.id,
+            'amount': 2500.00,
+            'deduct_wallet': True
+        }
+        resp = self.client.post(url, payload, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('Insufficient wallet balance', resp.data['detail'])
+
+    def test_admin_direct_payout_bonus_without_deduction(self):
+        """Tests admin direct payout with deduct_wallet=False (bonus/incentive transfer)"""
+        from emi.models import RetailerWallet, PayoutRequest, PayoutStatus
+        wallet = RetailerWallet.get_or_create_wallet(self.retailer)
+        wallet.balance = Decimal('1000.00')
+        wallet.save()
+
+        self.client.force_authenticate(user=self.admin)
+        url = '/api/wallet/admin-send-payout/'
+        payload = {
+            'retailer_id': self.retailer.id,
+            'amount': 500.00,
+            'payout_method': 'UPI',
+            'upi_id': 'retailer@okaxis',
+            'utr_number': 'UPI9988776655',
+            'admin_notes': 'Festival performance bonus',
+            'deduct_wallet': False
+        }
+        resp = self.client.post(url, payload, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+        wallet.refresh_from_db()
+        # Balance should remain 1000.00 because deduct_wallet was False
+        self.assertEqual(wallet.balance, Decimal('1000.00'))
+        self.assertEqual(wallet.total_withdrawn, Decimal('500.00'))
+
+        payout = PayoutRequest.objects.filter(utr_number='UPI9988776655').first()
+        self.assertIsNotNone(payout)
+        self.assertEqual(payout.status, PayoutStatus.PROCESSED)
+
+    def test_admin_retailers_wallet_summary_endpoint(self):
+        """Tests GET /api/wallet/retailers-summary/ returns retailer balances list for admin"""
+        from emi.models import RetailerWallet
+        wallet = RetailerWallet.get_or_create_wallet(self.retailer)
+        wallet.balance = Decimal('4200.00')
+        wallet.save()
+
+        self.client.force_authenticate(user=self.admin)
+        resp = self.client.get('/api/wallet/retailers-summary/')
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertTrue(isinstance(resp.data, list))
+        matching = [item for item in resp.data if item['retailer_id'] == self.retailer.id]
+        self.assertTrue(len(matching) > 0)
+        self.assertEqual(matching[0]['wallet_balance'], 4200.0)
+
+    def test_retailer_send_money_direct_action(self):
+        """Tests POST /api/retailers/{id}/send-money/ shortcut endpoint on RetailerViewSet"""
+        from emi.models import RetailerWallet
+        wallet = RetailerWallet.get_or_create_wallet(self.retailer)
+        wallet.balance = Decimal('2000.00')
+        wallet.save()
+
+        self.client.force_authenticate(user=self.admin)
+        url = f'/api/retailers/{self.retailer.id}/send-money/'
+        payload = {
+            'amount': 800.00,
+            'payout_method': 'CASH',
+            'admin_notes': 'Handed cash commission at office',
+            'deduct_wallet': True
+        }
+        resp = self.client.post(url, payload, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+
+        wallet.refresh_from_db()
+        self.assertEqual(wallet.balance, Decimal('1200.00'))
+        self.assertEqual(wallet.total_withdrawn, Decimal('800.00'))
+
+    def test_non_admin_cannot_send_payout(self):
+        """Tests that regular retailers cannot access admin-send-payout (HTTP 403)"""
+        self.client.force_authenticate(user=self.retailer)
+        resp = self.client.post('/api/wallet/admin-send-payout/', {
+            'retailer_id': self.retailer.id,
+            'amount': 100.00
+        }, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
 

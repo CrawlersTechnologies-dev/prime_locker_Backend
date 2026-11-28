@@ -283,6 +283,7 @@ class WalletTransactionType(models.TextChoices):
     PAYOUT_REVERSAL = 'PAYOUT_REVERSAL', 'Payout Reversal / Refund'
     KEY_PURCHASE = 'KEY_PURCHASE', 'Device Key Purchase via Wallet'
     ADMIN_ADJUSTMENT = 'ADMIN_ADJUSTMENT', 'Admin Wallet Adjustment'
+    ADMIN_DIRECT_PAYOUT = 'ADMIN_DIRECT_PAYOUT', 'Admin Direct Payout / Commission Transfer'
 
 
 class PayoutStatus(models.TextChoices):
@@ -295,6 +296,7 @@ class PayoutStatus(models.TextChoices):
 class PayoutMethod(models.TextChoices):
     BANK_TRANSFER = 'BANK_TRANSFER', 'Bank Transfer (IMPS/NEFT)'
     UPI = 'UPI', 'UPI Transfer'
+    CASH = 'CASH', 'Cash / Direct Handover'
 
 
 class RetailerWallet(models.Model):

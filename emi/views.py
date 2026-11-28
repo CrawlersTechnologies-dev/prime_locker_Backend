@@ -977,8 +977,13 @@ class EMIInstallmentViewSet(viewsets.GenericViewSet):
                 "contract_status": contract.status,
                 "installment_status": installment.status,
                 "gross_amount": float(amount),
+                "admin_fee": float(installment.admin_commission),
                 "admin_fee_2pct": float(installment.admin_commission),
-                "retailer_share_98pct": float(installment.retailer_share)
+                "admin_fee_0pct": float(installment.admin_commission),
+                "retailer_share": float(installment.retailer_share),
+                "retailer_share_98pct": float(installment.retailer_share),
+                "retailer_share_100pct": float(installment.retailer_share),
+                "payment_channel": "OFFLINE_CASH" if installment.payment_mode != "ONLINE_GATEWAY" else "ONLINE_GATEWAY"
             })
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1720,6 +1725,130 @@ class RetailerWalletViewSet(viewsets.ViewSet):
         except ValidationError as e:
             msg = e.messages[0] if hasattr(e, 'messages') else str(e)
             return Response({"detail": msg}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=False, methods=['post'], url_path='admin-send-payout')
+    def admin_send_payout(self, request):
+        """
+        POST /api/wallet/admin-send-payout/
+        Super Admin or Operations Staff manually clicks and sends money / commission to a retailer.
+        Payload:
+        {
+            "retailer_id": 12,
+            "amount": 5000.00,
+            "payout_method": "BANK_TRANSFER", // or "UPI", "CASH"
+            "utr_number": "UTR12345678",
+            "admin_notes": "Monthly commission settlement",
+            "deduct_wallet": true
+        }
+        """
+        if not is_company_user(request.user):
+            return Response(
+                {"detail": "Only Super Admin or Company Operations Staff can send direct payouts to retailers."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        from .serializers import AdminSendPayoutSerializer, PayoutRequestSerializer
+        serializer = AdminSendPayoutSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        ret_id = serializer.validated_data['retailer_id']
+        amount = serializer.validated_data['amount']
+        method = serializer.validated_data.get('payout_method', 'BANK_TRANSFER')
+        utr = serializer.validated_data.get('utr_number', '')
+        notes = serializer.validated_data.get('admin_notes', '')
+        deduct = serializer.validated_data.get('deduct_wallet', True)
+
+        from accounts.models import User
+        retailer = User.objects.filter(id=ret_id, role='RETAILER').first()
+        if not retailer:
+            return Response({"detail": f"Retailer with ID {ret_id} not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        bank_data = {
+            'bank_name': serializer.validated_data.get('bank_name', ''),
+            'account_number': serializer.validated_data.get('account_number', ''),
+            'ifsc_code': serializer.validated_data.get('ifsc_code', ''),
+            'upi_id': serializer.validated_data.get('upi_id', '')
+        }
+
+        try:
+            from .services.wallet_service import WalletService
+            payout, wallet = WalletService.admin_direct_payout(
+                retailer=retailer,
+                amount=amount,
+                payout_method=method,
+                bank_data=bank_data,
+                utr_number=utr,
+                notes=notes,
+                admin_user=request.user,
+                deduct_wallet=deduct
+            )
+            return Response({
+                "message": f"Successfully sent ₹{amount:,.2f} commission to {retailer.get_full_name() or retailer.username}.",
+                "payout": PayoutRequestSerializer(payout).data,
+                "wallet_balance": float(wallet.balance),
+                "total_withdrawn": float(wallet.total_withdrawn)
+            }, status=status.HTTP_200_OK)
+        except ValidationError as e:
+            msg = e.messages[0] if hasattr(e, 'messages') else str(e)
+            return Response({"detail": msg}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=False, methods=['get'], url_path='retailers-summary')
+    def retailers_summary(self, request):
+        """
+        GET /api/wallet/retailers-summary/
+        Admin view: returns summary of all retailers with their wallet balance,
+        total collected, total withdrawn, bank/UPI details.
+        Sorted by highest wallet balance first.
+        """
+        if not is_company_user(request.user):
+            return Response(
+                {"detail": "Only Super Admin or Company Staff can view retailers wallet summary."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        from accounts.models import User
+        retailers_qs = User.objects.filter(role='RETAILER', is_active=True).select_related('wallet')
+
+        search = request.query_params.get('search')
+        if search:
+            retailers_qs = retailers_qs.filter(
+                models.Q(username__icontains=search) |
+                models.Q(first_name__icontains=search) |
+                models.Q(last_name__icontains=search) |
+                models.Q(business_name__icontains=search) |
+                models.Q(mobile_number__icontains=search)
+            )
+
+        min_balance = request.query_params.get('min_balance')
+        if min_balance:
+            try:
+                retailers_qs = retailers_qs.filter(wallet__balance__gte=Decimal(min_balance))
+            except Exception:
+                pass
+
+        retailers_qs = retailers_qs.order_by('-wallet__balance')
+
+        data = []
+        for r in retailers_qs[:200]:
+            w = getattr(r, 'wallet', None) or RetailerWallet.get_or_create_wallet(r)
+            b = getattr(r, 'bank_account', None)
+            data.append({
+                "retailer_id": r.id,
+                "retailer_name": r.get_full_name() or r.username,
+                "username": r.username,
+                "business_name": r.business_name or '',
+                "mobile_number": r.mobile_number or '',
+                "wallet_balance": float(w.balance),
+                "total_collected": float(w.total_collected),
+                "total_withdrawn": float(w.total_withdrawn),
+                "bank_name": b.bank_name if b else '',
+                "account_number": b.account_number if b else '',
+                "ifsc_code": b.ifsc_code if b else '',
+                "upi_id": getattr(b, 'upi_id', '') if b else ''
+            })
+
+        return Response(data, status=status.HTTP_200_OK)
 
 
 class PayoutRequestViewSet(viewsets.ModelViewSet):

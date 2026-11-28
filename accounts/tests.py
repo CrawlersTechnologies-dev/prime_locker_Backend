@@ -145,6 +145,12 @@ class AccountsBackendTests(TestCase):
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
         self.assertIn('rocketpay_wallet', resp.data)
         self.assertIsNotNone(resp.data['rocketpay_wallet'])
+        self.assertIn('commission_kpis', resp.data)
+        self.assertIn('total_platform_commission', resp.data['commission_kpis'])
+        self.assertIn('online_autopay_volume', resp.data['commission_kpis'])
+        self.assertIn('offline_collections_volume', resp.data['commission_kpis'])
+        self.assertEqual(resp.data['commission_kpis']['online_commission_rate_pct'], 2.0)
+        self.assertEqual(resp.data['commission_kpis']['offline_commission_rate_pct'], 0.0)
 
     def test_duplicate_mobile_numbers_login_does_not_crash(self):
         """Tests that two accounts sharing mobile number identifier authenticate correctly without 500 server crash"""
