@@ -680,6 +680,31 @@ class PartnerMDMBackendTests(TestCase):
         self.assertEqual(self.pm_device.sim_operator_2, "Jio True 5G")
         self.assertEqual(self.pm_device.sim_number_2, "+919812345678")
 
+    def test_device_heartbeat_retailer_and_customer_details(self):
+        """Verify device heartbeat/ping returns retailer and customer info for lock screen"""
+        client = APIClient()
+        resp = client.post('/api/devices/ping/', {"imei": self.pm_device.imei}, format='json')
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data.get('retailer_name'), 'Prime Mobile Hub')
+        self.assertEqual(resp.data.get('retailer_phone'), '+919877711111')
+        self.assertEqual(resp.data.get('customer_name'), 'test_customer_pm')
+        self.assertIn('retailer_details', resp.data)
+        self.assertEqual(resp.data['retailer_details']['name'], 'Prime Mobile Hub')
+
+    def test_fcm_command_includes_retailer_and_customer(self):
+        """Verify FCM data payload contains retailer_name, retailer_phone, customer_name"""
+        from devices.services.fcm_service import FCMService
+        self.pm_device.fcm_token = 'sample_fcm_token_123'
+        self.pm_device.save()
+        with patch('firebase_admin.messaging.send') as mock_send:
+            mock_send.return_value = 'msg_123'
+            result = FCMService.send_command(self.pm_device, 'LOCK', params={'lock_message': 'Payment Overdue'})
+            self.assertTrue(result['success'])
+            data = result.get('data', {})
+            self.assertEqual(data.get('retailer_name'), 'Prime Mobile Hub')
+            self.assertEqual(data.get('retailer_phone'), '+919877711111')
+            self.assertEqual(data.get('customer_name'), 'test_customer_pm')
+
     def test_sim_change_detection_and_history_logging(self):
         """Verify that SIM change is detected, logged, and surfaced in sim_details"""
         client = APIClient()

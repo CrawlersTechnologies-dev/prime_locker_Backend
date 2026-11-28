@@ -19,6 +19,20 @@ class FCMService:
         if not getattr(device, 'fcm_token', None):
             return {"success": False, "error": "No FCM token registered for this device."}
 
+        retailer = getattr(device, 'retailer', None)
+        r_name = ""
+        r_phone = ""
+        if retailer:
+            r_name = (retailer.business_name or retailer.get_full_name() or retailer.username).strip()
+            r_phone = str(retailer.store_phone or retailer.mobile_number or "").strip()
+
+        customer = getattr(device, 'customer', None)
+        c_name = ""
+        c_phone = ""
+        if customer:
+            c_name = (customer.get_full_name() or customer.username).strip()
+            c_phone = str(customer.mobile_number or "").strip()
+
         data_payload = {
             "command_type": str(command_type),
             "device_id": str(device.id),
@@ -27,6 +41,14 @@ class FCMService:
             "offline_unlock_code": str(device.offline_unlock_code or ""),
             "code": str(device.offline_unlock_code or ""),
             "unlock_code": str(device.offline_unlock_code or ""),
+            "retailer_name": str(r_name),
+            "retailer_phone": str(r_phone),
+            "retailer_mobile": str(r_phone),
+            "store_name": str(r_name),
+            "store_phone": str(r_phone),
+            "customer_name": str(c_name),
+            "customer_phone": str(c_phone),
+            "customer_mobile": str(c_phone),
         }
         if params:
             for k, v in params.items():
@@ -45,7 +67,7 @@ class FCMService:
                 )
                 response = messaging.send(message)
                 logger.info(f"FCM push sent to device {device.imei} ({command_type}): {response}")
-                return {"success": True, "message_id": response}
+                return {"success": True, "message_id": response, "data": data_payload}
         except Exception as e:
             logger.warning(f"Firebase Admin SDK dispatch error for device {device.imei}: {e}")
 
@@ -68,7 +90,7 @@ class FCMService:
                 resp = requests.post('https://fcm.googleapis.com/fcm/send', headers=headers, json=body, timeout=10)
                 if resp.status_code == 200:
                     logger.info(f"FCM Server Key push sent to device {device.imei}: {resp.text}")
-                    return {"success": True, "fcm_response": resp.json()}
+                    return {"success": True, "fcm_response": resp.json(), "data": data_payload}
                 else:
                     logger.warning(f"FCM Server Key push failed ({resp.status_code}): {resp.text}")
             except Exception as e:
@@ -76,4 +98,4 @@ class FCMService:
 
         # 3. Simulation fallback if neither is configured
         logger.info(f"[FCM SIMULATION] Command '{command_type}' queued for device {device.imei} (FCM: {device.fcm_token[:20]}...)")
-        return {"success": True, "simulated": True}
+        return {"success": True, "simulated": True, "data": data_payload}

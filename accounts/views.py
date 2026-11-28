@@ -1457,7 +1457,10 @@ class CustomerViewSet(BaseRoleViewSet):
                 "qr_service_app": (qr_codes_data.get('qr_service_app') if isinstance(qr_codes_data, dict) else None) or qr_code_data,
                 "qr_running_device": qr_codes_data.get('qr_running_device') if isinstance(qr_codes_data, dict) else None,
                 "offline_unlock_code": device.offline_unlock_code,
-                "activation_key": key_obj.key_string if key_obj else None
+                "activation_key": key_obj.key_string if key_obj else None,
+                "retailer_name": (device.retailer.business_name or device.retailer.get_full_name() or device.retailer.username) if device.retailer else "",
+                "retailer_phone": (device.retailer.store_phone or device.retailer.mobile_number or "") if device.retailer else "",
+                "customer_name": (device.customer.get_full_name() or device.customer.username) if device.customer else ""
             },
             "next_step": {
                 "action": "ATTACH_EMI_PLAN",
@@ -3196,6 +3199,16 @@ class DeviceActivateAuthView(APIView):
         )
 
         cust_code = customer.customer_code or f"PR-{customer.id:04d}"
+        cust_name = f"{customer.first_name} {customer.last_name}".strip() or customer.username
+        retailer = getattr(device, 'retailer', None) if device else None
+        r_name = ""
+        r_phone = ""
+        r_business = ""
+        if retailer:
+            r_name = (retailer.business_name or retailer.get_full_name() or retailer.username).strip()
+            r_phone = str(retailer.store_phone or retailer.mobile_number or "").strip()
+            r_business = str(retailer.business_name or r_name).strip()
+
         return Response({
             "access": str(refresh.access_token),
             "refresh": str(refresh),
@@ -3203,7 +3216,7 @@ class DeviceActivateAuthView(APIView):
                 "id": customer.id,
                 "customer_id": cust_code,
                 "customer_code": cust_code,
-                "name": f"{customer.first_name} {customer.last_name}".strip() or customer.username,
+                "name": cust_name,
                 "first_name": customer.first_name,
                 "last_name": customer.last_name,
                 "username": customer.username,
@@ -3222,7 +3235,36 @@ class DeviceActivateAuthView(APIView):
                 "fcm_token": device.fcm_token,
                 "offline_unlock_code": device.offline_unlock_code,
                 "lock_message": device.lock_message,
+                "retailer_name": r_name,
+                "retailer_phone": r_phone,
+                "retailer_mobile": r_phone,
+                "store_name": r_business or r_name,
+                "store_phone": r_phone,
+                "customer_name": cust_name,
+                "customer_phone": customer.mobile_number or "",
+                "customer_mobile": customer.mobile_number or "",
+                "retailer_details": {
+                    "id": retailer.id if retailer else None,
+                    "name": r_name,
+                    "business_name": r_business,
+                    "mobile_number": r_phone,
+                    "phone": r_phone,
+                    "store_phone": r_phone
+                } if retailer else None,
             } if device else None,
+            "retailer_name": r_name,
+            "retailer_phone": r_phone,
+            "retailer_mobile": r_phone,
+            "store_name": r_business or r_name,
+            "store_phone": r_phone,
+            "customer_name": cust_name,
+            "retailer_details": {
+                "id": retailer.id if retailer else None,
+                "name": r_name,
+                "business_name": r_business,
+                "mobile_number": r_phone,
+                "phone": r_phone
+            } if retailer else None,
             "contract": {
                 "id": contract.id,
                 "status": contract.status,

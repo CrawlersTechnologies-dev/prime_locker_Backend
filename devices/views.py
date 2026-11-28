@@ -2451,10 +2451,54 @@ class DeviceHeartbeatView(APIView):
         from accounts.models import PlatformSettings
         ps = PlatformSettings.get_settings()
 
+        retailer = device.retailer
+        r_name = ""
+        r_phone = ""
+        r_business = ""
+        if retailer:
+            r_name = (retailer.business_name or retailer.get_full_name() or retailer.username).strip()
+            r_phone = str(retailer.store_phone or retailer.mobile_number or "").strip()
+            r_business = str(retailer.business_name or r_name).strip()
+
+        customer = device.customer
+        c_name = ""
+        c_phone = ""
+        if customer:
+            c_name = (customer.get_full_name() or customer.username).strip()
+            c_phone = str(customer.mobile_number or "").strip()
+
+        if not r_name:
+            r_name = ps.company_name or "Prime Locker"
+            r_business = ps.company_name or "Prime Locker"
+        if not r_phone:
+            r_phone = ps.support_phone or ""
+
         return Response({
             "imei": device.imei,
             "status": device.status,
             "lock_message": device.lock_message,
+            "retailer_name": r_name,
+            "retailer_phone": r_phone,
+            "retailer_mobile": r_phone,
+            "store_name": r_business or r_name,
+            "store_phone": r_phone,
+            "retailer_details": {
+                "id": retailer.id if retailer else None,
+                "name": r_name,
+                "business_name": r_business,
+                "mobile_number": r_phone,
+                "phone": r_phone,
+                "store_phone": r_phone
+            },
+            "customer_name": c_name,
+            "customer_phone": c_phone,
+            "customer_mobile": c_phone,
+            "customer_details": {
+                "id": customer.id if customer else None,
+                "name": c_name,
+                "mobile_number": c_phone,
+                "phone": c_phone
+            },
             "support_phone": ps.support_phone,
             "support_phones": ps.support_phones,
             "support_phones_list": ps.get_support_phones_list(),
